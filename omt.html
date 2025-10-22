@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Matterhorn — Base Switch + Base Opacity + S2 Cloudless + Relief + Hillshade + Contours</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+
+  <!-- MapLibre GL JS 5.9.0 -->
+  <link href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css" rel="stylesheet"/>
+  <script src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
+
+  <!-- PMTiles v4 -->
+  <script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
+
+  <!-- Contours (worker) -->
+  <script src="https://unpkg.com/@acalcutt/maplibre-contour-pmtiles@latest/dist/maplibre-contour-pmtiles.min.js"></script>
+
+  <style>
+    html, body { margin:0; height:100%; }
+    #map { position:absolute; inset:0; }
+
+    .ui {
+      position: absolute; top: 10px; left: 10px; z-index: 2;
+      background: rgba(255,255,255,.92); border-radius: 10px; padding: 8px 10px;
+      font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      box-shadow: 0 6px 18px rgba(0,0,0,.12);
+      display: grid; gap: 8px;
+    }
+    .ui label { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+    .ui input[type="range"]{ width: 180px; }
+
+    .hs-panel {
+      position: absolute; top: 10px; right: 10px; z-index: 2;
+      background: rgba(255,255,255,.92); border-radius: 10px; padding: 8px 10px;
+      font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      box-shadow: 0 6px 18px rgba(0,0,0,.12);
+    }
+    .hs-title { font-weight: 600; margin-bottom: 6px; }
+    .btns { display:flex; gap:6px; flex-wrap: wrap; }
+    .btn {
+      padding: 6px 10px; border-radius: 999px; border: 1px solid #ccc;
+      background:#fff; cursor:pointer; font-size:12px;
+    }
+    .btn.active { background:#111; color:#fff; border-color:#111; }
+
+    .base-switch {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index:2;
+      background: rgba(255,255,255,.92); border-radius: 999px; padding: 6px 8px;
+      display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
+      font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      box-shadow: 0 6px 18px rgba(0,0,0,.12);
+      max-width: calc(100% - 20px);
+    }
+    .pill {
+      padding: 6px 10px; border-radius: 999px; border: 1px solid #ccc;
+      background:#fff; cursor:pointer; font-size:12px;
+    }
+    .pill.active { background:#111; color:#fff; border-color:#111; }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<!-- UI: Base + Relief + S2 opacity sliders -->
+<div class="ui">
+  <label>
+    Base (Liberty/VersaTiles) opacity
+    <input id="baseOpacity" type="range" min="0" max="1" step="0.05" value="1.00" />
+    <span id="baseOpacityVal">1.00</span>
+  </label>
+  <label>
+    Relief opacity
+    <input id="reliefOpacity" type="range" min="0" max="1" step="0.05" value="0.48" />
+    <span id="reliefOpacityVal">0.48</span>
+  </label>
+  <label>
+    S2 opacity
+    <input id="s2Opacity" type="range" min="0" max="1" step="0.05" value="1.00" />
+    <span id="s2OpacityVal">1.00</span>
+  </label>
+</div>
+
+<!-- Hillshade method switcher -->
+<div class="hs-panel">
+  <div class="hs-title">Hillshade method</div>
+  <div class="btns">
+    <button class="btn active" data-method="multidirectional">Multidirectional</button>
+    <button class="btn" data-method="igor">Igor</button>
+    <button class="btn" data-method="standard">Standard</button>
+    <button class="btn" data-method="combined">Combined</button>
+    <button class="btn" data-method="basic">Basic</button>
+  </div>
+</div>
+
+<!-- Base style + imagery switch -->
+<div class="base-switch">
+  <button class="pill active" data-base="liberty">Liberty</button>
+  <button class="pill" data-base="versatiles">VersaTiles</button>
+  <span style="width:8px"></span>
+  <button class="pill" id="toggleS2">S2 Cloudless</button>
+</div>
+
+<script>
+  // ---------- CONFIG ----------
+  const LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
+  const VERSATILES_LOCAL_JSON = './osm_liberty.json'; // place alongside this HTML
+  const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
+
+  // Ensure SW is ready (needed for contour DEM proxy)
+  async function waitForSWReady() {
+    if (!('serviceWorker' in navigator)) return;
+    try { await navigator.serviceWorker.register('./sw.js', { scope: './' }); } catch {}
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) { location.reload(); await new Promise(()=>{}); }
+  }
+
+  (async () => {
+    await waitForSWReady();
+
+    // Mapterhorn protocol for DEM
+    const pmProto = new pmtiles.Protocol({ metadata: true, errorOnMissingTile: true });
+    maplibregl.addProtocol('mapterhorn', async (params, abortController) => {
+      const [z, x, y] = params.url.replace('mapterhorn://', '').split('/').map(Number);
+      const name = z <= 12 ? 'planet' : `6-${x >> (z - 6)}-${y >> (z - 6)}`;
+      const url = `pmtiles://https://download.mapterhorn.com/${name}.pmtiles/${z}/${x}/${y}.webp`;
+      const resp = await pmProto.tile({ ...params, url }, abortController);
+      if (resp.data === null) throw new Error(`Tile z=${z} x=${x} y=${y} not found.`);
+      return resp;
+    });
+
+    // Map init with Liberty
+    const map = new maplibregl.Map({
+      container: 'map',
+      hash: true,
+      center: [7.6586, 45.9763],
+      zoom: 11.7,
+      pitch: 60,
+      bearing: -18.6,
+      style: LIBERTY_URL,
+      maxZoom: 18,
+      maxPitch: 85
+    });
+
+    // Silence missing sprite warnings
+    map.on('styleimagemissing', (e) => {
+      if (map.hasImage(e.id)) return;
+      const data = new Uint8Array([0,0,0,0]);
+      map.addImage(e.id, { width:1, height:1, data });
+    });
+
+    // Contour DEM via SW
+    const PROXY_ABS = `${window.location.origin}/mapterhorn-dem/{z}/{x}/{y}`;
+    const demSource = new mlcontour.DemSource({
+      url: PROXY_ABS, encoding: 'terrarium', maxzoom: 12, worker: true
+    });
+    demSource.setupMaplibre(maplibregl);
+
+    // Helper: set opacity across base style layers (not our overlays)
+    function setBaseStyleOpacity(map, alpha) {
+      const style = map.getStyle();
+      if (!style || !style.layers) return;
+      for (const layer of style.layers) {
+        const id = layer.id;
+        const type = layer.type;
+
+        // Skip our custom overlays so they keep independent controls
+        if (['s2cloudless','color-relief','hillshade','contours','contour-text'].includes(id)) continue;
+
+        const setIf = (prop, value) => {
+          try {
+            const cur = map.getPaintProperty(id, prop);
+            if (cur !== undefined) map.setPaintProperty(id, prop, value);
+          } catch (_) {}
+        };
+
+        switch (type) {
+          case 'background': setIf('background-opacity', alpha); break;
+          case 'fill': setIf('fill-opacity', alpha); break;
+          case 'line': setIf('line-opacity', alpha); break;
+          case 'symbol': setIf('text-opacity', alpha); setIf('icon-opacity', alpha); break;
+          case 'circle': setIf('circle-opacity', alpha); break;
+          case 'fill-extrusion': setIf('fill-extrusion-opacity', alpha); break;
+          case 'heatmap': setIf('heatmap-opacity', alpha); break;
+          case 'raster': setIf('raster-opacity', alpha); break;
+          default: break;
+        }
+      }
+    }
+
+    // Overlay re-apply (clean, then add; contours always under topmost label)
+    async function applyOverlays() {
+      const rmL = id => { if (map.getLayer(id)) map.removeLayer(id); };
+      const rmS = id => { if (map.getSource(id)) map.removeSource(id); };
+
+      // Topmost label (symbol) layer id
+      const liveLayers = map.getStyle().layers || [];
+      let topLabelId = null;
+      for (let i = liveLayers.length - 1; i >= 0; i--) {
+        if (liveLayers[i].type === 'symbol') { topLabelId = liveLayers[i].id; break; }
+      }
+
+      // Remove layers first, then sources
+      rmL('contour-text'); rmL('contours');
+      rmL('hillshade'); rmL('color-relief');
+      rmL('s2cloudless');
+      rmS('contours'); rmS('hillshadeSource'); rmS('reliefDem'); rmS('terrainSource');
+      rmS('s2cloudless');
+
+      // Sources
+      map.addSource('terrainSource', {
+        type: 'raster-dem',
+        tiles: ['mapterhorn://{z}/{x}/{y}'],
+        encoding: 'terrarium',
+        tileSize: 512,
+        attribution: '<a href="https://mapterhorn.com/attribution">© Mapterhorn</a>'
+      });
+      map.addSource('hillshadeSource', {
+        type: 'raster-dem',
+        tiles: ['mapterhorn://{z}/{x}/{y}'],
+        encoding: 'terrarium',
+        tileSize: 512,
+        attribution: '<a href="https://mapterhorn.com/attribution">© Mapterhorn</a>'
+      });
+      map.addSource('reliefDem', {
+        type: 'raster-dem',
+        tiles: ['mapterhorn://{z}/{x}/{y}'],
+        encoding: 'terrarium',
+        tileSize: 512
+      });
+
+      // Sentinel-2 Cloudless (EOX) raster overlay
+      map.addSource('s2cloudless', {
+        type: 'raster',
+        tiles: [S2C_URL],
+        tileSize: 256,
+        attribution: '<a href="https://s2maps.eu/">© Sentinel-2 cloudless by EOX IT Services GmbH</a>'
+      });
+
+      map.setTerrain({ source: 'terrainSource', exaggeration: 1 });
+
+      // Imagery below relief/hillshade so those effects read on top
+      map.addLayer({
+        id: 's2cloudless',
+        type: 'raster',
+        source: 's2cloudless',
+        paint: {
+          'raster-opacity': Number(document.getElementById('s2Opacity').value || 1),
+          'raster-resampling': 'linear'
+        }
+      }, topLabelId || undefined);
+
+      // Color relief
+      map.addLayer({
+        id: 'color-relief',
+        type: 'color-relief',
+        source: 'reliefDem',
+        paint: {
+          'color-relief-color': [
+            'interpolate', ['linear'], ['elevation'],
+            0, '#254a38', 400, '#2f6b4a', 800, '#5b8f5f',
+            1200, '#7fa36e', 1600, '#9eb17b',
+            2000, '#b9bf8a', 2300, '#c9c38f',
+            2600, '#b6ab93', 2900, '#9e978e', 3200, '#8a8a8a',
+            3500, '#aeb6c0', 3800, '#cfd6de', 4100, '#f2f3f5'
+          ],
+          'color-relief-opacity': Number(document.getElementById('reliefOpacity').value || 0.48)
+        }
+      }, topLabelId || undefined);
+
+      // Hillshade (anchored to map)
+      map.addLayer({
+        id: 'hillshade',
+        type: 'hillshade',
+        source: 'hillshadeSource',
+        paint: {
+          'hillshade-illumination-anchor': 'map',
+          'hillshade-illumination-direction': [270, 315, 0, 45],
+          'hillshade-illumination-altitude': [30, 30, 30, 30],
+          'hillshade-exaggeration': 0.22,
+          'hillshade-highlight-color': 'rgba(255,255,255,0.85)',
+          'hillshade-shadow-color':   'rgba(0,0,0,0.55)'
+        }
+      }, topLabelId || undefined);
+
+      // Contours
+      map.addSource('contours', {
+        type: 'vector',
+        tiles: [
+          demSource.contourProtocolUrl({
+            multiplier: 3.28084,
+            thresholds: { 11:[200,1000], 12:[100,500], 13:[100,500], 14:[50,200], 15:[20,100] },
+            elevationKey: 'ele', levelKey: 'level', contourLayer: 'contours'
+          })
+        ],
+        maxzoom: 16
+      });
+
+      map.addLayer({
+        id: 'contours',
+        type: 'line',
+        source: 'contours',
+        'source-layer': 'contours',
+        layout: { 'line-join': 'round' },
+        paint: {
+          'line-color': 'rgba(0,0,0,0.55)',
+          'line-width': ['match', ['get', 'level'], 1, 1, 0.5]
+        }
+      });
+      map.addLayer({
+        id: 'contour-text',
+        type: 'symbol',
+        source: 'contours',
+        'source-layer': 'contours',
+        filter: ['>', ['get', 'level'], 0],
+        layout: {
+          'symbol-placement': 'line',
+          'text-anchor': 'center',
+          'text-size': 10,
+          'text-field': ['concat', ['number-format', ['get', 'ele'], {}], "'"],
+          'text-font': ['Noto Sans Bold']
+        },
+        paint: { 'text-halo-color': 'white', 'text-halo-width': 1 }
+      });
+      if (topLabelId) {
+        map.moveLayer('contours', topLabelId);
+        map.moveLayer('contour-text', topLabelId);
+      }
+
+      // Sky/Fog
+      map.setSky({
+        'sky-color': '#bcd0e6',
+        'sky-horizon-blend': 0.35,
+        'horizon-color': '#e6effa',
+        'horizon-fog-blend': 0.35,
+        'fog-color': '#bcd0e6',
+        'fog-ground-blend': 0.15
+      });
+
+      // Reflect S2 toggle state
+      const s2Btn = document.getElementById('toggleS2');
+      if (s2Btn) {
+        const vis = (map.getLayoutProperty('s2cloudless', 'visibility') || 'visible') !== 'none';
+        s2Btn.classList.toggle('active', vis);
+      }
+
+      // Apply current base opacity to all base layers after style is ready
+      applyBaseOpacity(document.getElementById('baseOpacity').value);
+    }
+
+    // After initial Liberty load
+    map.on('style.load', applyOverlays);
+
+    // --- UI: Base style opacity ---
+    const baseSlider = document.getElementById('baseOpacity');
+    const baseVal = document.getElementById('baseOpacityVal');
+    const applyBaseOpacity = (v) => {
+      baseVal.textContent = (+v).toFixed(2);
+      setBaseStyleOpacity(map, Number(v));
+    };
+    baseSlider.addEventListener('input', () => applyBaseOpacity(baseSlider.value));
+    // (will be applied on style load too)
+
+    // --- UI: Relief opacity ---
+    const reliefSlider = document.getElementById('reliefOpacity');
+    const reliefVal = document.getElementById('reliefOpacityVal');
+    const setReliefOpacity = (v) => {
+      reliefVal.textContent = (+v).toFixed(2);
+      if (map.getLayer('color-relief')) {
+        map.setPaintProperty('color-relief', 'color-relief-opacity', Number(v));
+      }
+    };
+    reliefSlider.addEventListener('input', () => setReliefOpacity(reliefSlider.value));
+    setReliefOpacity(reliefSlider.value);
+
+    // --- UI: S2 opacity ---
+    const s2Slider = document.getElementById('s2Opacity');
+    const s2Val = document.getElementById('s2OpacityVal');
+    const setS2Opacity = (v) => {
+      s2Val.textContent = (+v).toFixed(2);
+      if (map.getLayer('s2cloudless')) {
+        map.setPaintProperty('s2cloudless', 'raster-opacity', Number(v));
+      }
+    };
+    s2Slider.addEventListener('input', () => setS2Opacity(s2Slider.value));
+    setS2Opacity(s2Slider.value);
+
+    // Hillshade method switcher
+    const methodButtons = Array.from(document.querySelectorAll('.btn'));
+    function setHillshadeMethod(method) {
+      methodButtons.forEach(b => b.classList.toggle('active', b.dataset.method === method));
+      if (!map.getLayer('hillshade')) return;
+
+      map.setPaintProperty('hillshade', 'hillshade-illumination-anchor', 'map');
+      map.setPaintProperty('hillshade', 'hillshade-illumination-direction', [270, 315, 0, 45]);
+      map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', [30, 30, 30, 30]);
+      map.setPaintProperty('hillshade', 'hillshade-method', method);
+
+      if (method === 'igor') {
+        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.24);
+        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.9)');
+        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.6)');
+      } else if (method === 'standard') {
+        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.22);
+        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.85)');
+        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.55)');
+        map.setPaintProperty('hillshade', 'hillshade-illumination-direction', 315);
+        map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', 30);
+      } else if (method === 'combined') {
+        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.23);
+        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.88)');
+        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.58)');
+      } else if (method === 'basic') {
+        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.20);
+        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.8)');
+        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.5)');
+      } else { // multidirectional
+        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.22);
+        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.85)');
+        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.55)');
+      }
+    }
+    methodButtons.forEach(btn => btn.addEventListener('click', () => setHillshadeMethod(btn.dataset.method)));
+    map.once('style.load', () => setHillshadeMethod('multidirectional'));
+
+    // Base style switcher with VersaTiles style patch (glyphs/sprite)
+    const baseButtons = Array.from(document.querySelectorAll('.pill[data-base]'));
+    async function switchBase(to) {
+      baseButtons.forEach(b => b.classList.toggle('active', b.dataset.base === to));
+
+      if (to === 'versatiles') {
+        // Load local VersaTiles style, patch glyphs & remove sprite to avoid 404/CORS
+        const styleObj = await fetch(VERSATILES_LOCAL_JSON, { cache: 'no-store' }).then(r => r.json());
+        styleObj.glyphs = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
+        if ('sprite' in styleObj) delete styleObj.sprite;
+        map.setStyle(styleObj);
+      } else {
+        map.setStyle(LIBERTY_URL);
+      }
+
+      map.once('style.load', async () => {
+        await applyOverlays();
+        const active = document.querySelector('.btn.active')?.dataset.method || 'multidirectional';
+        setHillshadeMethod(active);
+        // Re-apply UI-driven states
+        applyBaseOpacity(baseSlider.value);
+        setReliefOpacity(reliefSlider.value);
+        setS2Opacity(s2Slider.value);
+      });
+    }
+    baseButtons.forEach(btn => btn.addEventListener('click', () => switchBase(btn.dataset.base)));
+
+    // S2 Cloudless toggle
+    const s2Btn = document.getElementById('toggleS2');
+    if (s2Btn) {
+      s2Btn.addEventListener('click', () => {
+        if (!map.getLayer('s2cloudless')) return;
+        const vis = map.getLayoutProperty('s2cloudless', 'visibility') || 'visible';
+        const next = vis === 'none' ? 'visible' : 'none';
+        map.setLayoutProperty('s2cloudless', 'visibility', next);
+        s2Btn.classList.toggle('active', next === 'visible');
+      });
+    }
+    // Initial base is Liberty; overlays apply on first style.load.
+  })();
+</script>
+</body>
+</html>
