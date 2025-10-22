@@ -61,22 +61,12 @@
 <body>
 <div id="map"></div>
 
-<!-- UI: Base + Relief + S2 opacity sliders -->
+<!-- UI: Base opacity -->
 <div class="ui">
   <label>
     Base (VersaTiles) opacity
     <input id="baseOpacity" type="range" min="0" max="1" step="0.05" value="1.00" />
     <span id="baseOpacityVal">1.00</span>
-  </label>
-  <label>
-    Relief opacity
-    <input id="reliefOpacity" type="range" min="0" max="1" step="0.05" value="0.48" />
-    <span id="reliefOpacityVal">0.48</span>
-  </label>
-  <label>
-    S2 opacity
-    <input id="s2Opacity" type="range" min="0" max="1" step="0.05" value="1.00" />
-    <span id="s2OpacityVal">1.00</span>
   </label>
 </div>
 
@@ -96,6 +86,8 @@
 
 <script>
   // ---------- CONFIG ----------
+  const RELIEF_OPACITY = 0.40;
+  const S2_OPACITY = 0.50;
   const VERSATILES_LOCAL_JSON = './osm_liberty.json'; // place alongside this HTML
   const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
 
@@ -242,7 +234,7 @@
         type: 'raster',
         source: 's2cloudless',
         paint: {
-          'raster-opacity': Number(document.getElementById('s2Opacity').value || 1),
+          'raster-opacity': S2_OPACITY,
           'raster-resampling': 'linear'
         }
       }, topLabelId || undefined);
@@ -261,7 +253,7 @@
             2600, '#b6ab93', 2900, '#9e978e', 3200, '#8a8a8a',
             3500, '#aeb6c0', 3800, '#cfd6de', 4100, '#f2f3f5'
           ],
-          'color-relief-opacity': Number(document.getElementById('reliefOpacity').value || 0.48)
+          'color-relief-opacity': RELIEF_OPACITY
         }
       }, topLabelId || undefined);
 
@@ -360,30 +352,6 @@
     };
     baseSlider.addEventListener('input', () => applyBaseOpacity(baseSlider.value));
     // (will be applied on style load too)
-
-    // --- UI: Relief opacity ---
-    const reliefSlider = document.getElementById('reliefOpacity');
-    const reliefVal = document.getElementById('reliefOpacityVal');
-    const setReliefOpacity = (v) => {
-      reliefVal.textContent = (+v).toFixed(2);
-      if (map.getLayer('color-relief')) {
-        map.setPaintProperty('color-relief', 'color-relief-opacity', Number(v));
-      }
-    };
-    reliefSlider.addEventListener('input', () => setReliefOpacity(reliefSlider.value));
-    setReliefOpacity(reliefSlider.value);
-
-    // --- UI: S2 opacity ---
-    const s2Slider = document.getElementById('s2Opacity');
-    const s2Val = document.getElementById('s2OpacityVal');
-    const setS2Opacity = (v) => {
-      s2Val.textContent = (+v).toFixed(2);
-      if (map.getLayer('s2cloudless')) {
-        map.setPaintProperty('s2cloudless', 'raster-opacity', Number(v));
-      }
-    };
-    s2Slider.addEventListener('input', () => setS2Opacity(s2Slider.value));
-    setS2Opacity(s2Slider.value);
 
     // Hillshade method switcher
     const methodButtons = Array.from(document.querySelectorAll('.btn'));
