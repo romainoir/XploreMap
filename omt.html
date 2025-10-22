@@ -43,7 +43,7 @@
     }
     .btn.active { background:#111; color:#fff; border-color:#111; }
 
-    .base-switch {
+    .imagery-toggle {
       position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index:2;
       background: rgba(255,255,255,.92); border-radius: 999px; padding: 6px 8px;
       display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
@@ -64,7 +64,7 @@
 <!-- UI: Base + Relief + S2 opacity sliders -->
 <div class="ui">
   <label>
-    Base (Liberty/VersaTiles) opacity
+    Base (VersaTiles) opacity
     <input id="baseOpacity" type="range" min="0" max="1" step="0.05" value="1.00" />
     <span id="baseOpacityVal">1.00</span>
   </label>
@@ -84,25 +84,18 @@
 <div class="hs-panel">
   <div class="hs-title">Hillshade method</div>
   <div class="btns">
-    <button class="btn active" data-method="multidirectional">Multidirectional</button>
-    <button class="btn" data-method="igor">Igor</button>
-    <button class="btn" data-method="standard">Standard</button>
+    <button class="btn active" data-method="igor">Igor</button>
     <button class="btn" data-method="combined">Combined</button>
-    <button class="btn" data-method="basic">Basic</button>
   </div>
 </div>
 
-<!-- Base style + imagery switch -->
-<div class="base-switch">
-  <button class="pill active" data-base="liberty">Liberty</button>
-  <button class="pill" data-base="versatiles">VersaTiles</button>
-  <span style="width:8px"></span>
+<!-- Imagery toggle -->
+<div class="imagery-toggle">
   <button class="pill" id="toggleS2">S2 Cloudless</button>
 </div>
 
 <script>
   // ---------- CONFIG ----------
-  const LIBERTY_URL = 'https://tiles.openfreemap.org/styles/liberty';
   const VERSATILES_LOCAL_JSON = './osm_liberty.json'; // place alongside this HTML
   const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
 
@@ -128,7 +121,12 @@
       return resp;
     });
 
-    // Map init with Liberty
+    // Load VersaTiles style upfront so we can patch glyphs/sprite
+    const versaStyle = await fetch(VERSATILES_LOCAL_JSON, { cache: 'no-store' }).then(r => r.json());
+    versaStyle.glyphs = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
+    if ('sprite' in versaStyle) delete versaStyle.sprite;
+
+    // Map init with VersaTiles
     const map = new maplibregl.Map({
       container: 'map',
       hash: true,
@@ -136,7 +134,7 @@
       zoom: 11.7,
       pitch: 60,
       bearing: -18.6,
-      style: LIBERTY_URL,
+      style: versaStyle,
       maxZoom: 18,
       maxPitch: 85
     });
@@ -347,7 +345,7 @@
       applyBaseOpacity(document.getElementById('baseOpacity').value);
     }
 
-    // After initial Liberty load
+    // After the style loads, wire overlays
     map.on('style.load', applyOverlays);
 
     // --- UI: Base style opacity ---
@@ -386,6 +384,7 @@
 
     // Hillshade method switcher
     const methodButtons = Array.from(document.querySelectorAll('.btn'));
+    const DEFAULT_METHOD = 'igor';
     function setHillshadeMethod(method) {
       methodButtons.forEach(b => b.classList.toggle('active', b.dataset.method === method));
       if (!map.getLayer('hillshade')) return;
@@ -395,59 +394,18 @@
       map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', [30, 30, 30, 30]);
       map.setPaintProperty('hillshade', 'hillshade-method', method);
 
-      if (method === 'igor') {
-        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.24);
-        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.9)');
-        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.6)');
-      } else if (method === 'standard') {
-        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.22);
-        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.85)');
-        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.55)');
-        map.setPaintProperty('hillshade', 'hillshade-illumination-direction', 315);
-        map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', 30);
-      } else if (method === 'combined') {
+      if (method === 'combined') {
         map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.23);
         map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.88)');
         map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.58)');
-      } else if (method === 'basic') {
-        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.20);
-        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.8)');
-        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.5)');
-      } else { // multidirectional
-        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.22);
-        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.85)');
-        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.55)');
+      } else { // igor
+        map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.24);
+        map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.9)');
+        map.setPaintProperty('hillshade', 'hillshade-shadow-color',   'rgba(0,0,0,0.6)');
       }
     }
     methodButtons.forEach(btn => btn.addEventListener('click', () => setHillshadeMethod(btn.dataset.method)));
-    map.once('style.load', () => setHillshadeMethod('multidirectional'));
-
-    // Base style switcher with VersaTiles style patch (glyphs/sprite)
-    const baseButtons = Array.from(document.querySelectorAll('.pill[data-base]'));
-    async function switchBase(to) {
-      baseButtons.forEach(b => b.classList.toggle('active', b.dataset.base === to));
-
-      if (to === 'versatiles') {
-        // Load local VersaTiles style, patch glyphs & remove sprite to avoid 404/CORS
-        const styleObj = await fetch(VERSATILES_LOCAL_JSON, { cache: 'no-store' }).then(r => r.json());
-        styleObj.glyphs = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
-        if ('sprite' in styleObj) delete styleObj.sprite;
-        map.setStyle(styleObj);
-      } else {
-        map.setStyle(LIBERTY_URL);
-      }
-
-      map.once('style.load', async () => {
-        await applyOverlays();
-        const active = document.querySelector('.btn.active')?.dataset.method || 'multidirectional';
-        setHillshadeMethod(active);
-        // Re-apply UI-driven states
-        applyBaseOpacity(baseSlider.value);
-        setReliefOpacity(reliefSlider.value);
-        setS2Opacity(s2Slider.value);
-      });
-    }
-    baseButtons.forEach(btn => btn.addEventListener('click', () => switchBase(btn.dataset.base)));
+    map.once('style.load', () => setHillshadeMethod(DEFAULT_METHOD));
 
     // S2 Cloudless toggle
     const s2Btn = document.getElementById('toggleS2');
@@ -460,7 +418,7 @@
         s2Btn.classList.toggle('active', next === 'visible');
       });
     }
-    // Initial base is Liberty; overlays apply on first style.load.
+    // Initial base is VersaTiles; overlays apply on first style.load.
   })();
 </script>
 </body>
