@@ -324,6 +324,9 @@
         map.moveLayer('contour-text', topLabelId);
       }
 
+      const symbolLayers = (map.getStyle().layers || []).filter(l => l.type === 'symbol');
+      symbolLayers.forEach(l => map.moveLayer(l.id));
+
       // Sky/Fog
       map.setSky({
         'sky-color': '#bcd0e6',
