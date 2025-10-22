@@ -19,6 +19,14 @@
     html, body { margin:0; height:100%; }
     #map { position:absolute; inset:0; }
 
+    .vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      background: radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.32) 100%);
+    }
+
     .ui {
       position: absolute; top: 10px; left: 10px; z-index: 2;
       background: rgba(255,255,255,.92); border-radius: 10px; padding: 8px 10px;
@@ -60,6 +68,7 @@
 </head>
 <body>
 <div id="map"></div>
+<div class="vignette" aria-hidden="true"></div>
 
 <!-- UI: Base + Relief + S2 opacity sliders -->
 <div class="ui">
@@ -324,6 +333,12 @@
       if (topLabelId) {
         map.moveLayer('contours', topLabelId);
         map.moveLayer('contour-text', topLabelId);
+      }
+
+      const symbolLayers = (map.getStyle().layers || [])
+        .filter(l => l.type === 'symbol');
+      for (const layer of symbolLayers) {
+        try { map.moveLayer(layer.id); } catch (_) {}
       }
 
       // Sky/Fog
