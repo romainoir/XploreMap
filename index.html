@@ -270,6 +270,81 @@
       if (vignetteEl) vignetteEl.dataset.mode = currentViewMode;
     }
 
+    const PEAK_POINTER_ID = 'peak-pointer';
+
+    function createPeakPointerImage(color = '#3ab7c6') {
+      const width = 48;
+      const height = 96;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+
+      const centerX = width / 2;
+      const topOffset = 8;
+      const stemWidth = width * 0.16;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = stemWidth;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(centerX, topOffset);
+      ctx.lineTo(centerX, height - width * 0.28);
+      ctx.stroke();
+
+      ctx.fillStyle = color;
+      const tipRadius = width * 0.24;
+      ctx.beginPath();
+      ctx.arc(centerX, height - tipRadius, tipRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      return ctx.getImageData(0, 0, width, height);
+    }
+
+    function ensurePeakPointerImage(map) {
+      if (map.hasImage(PEAK_POINTER_ID)) return;
+      const pointerImage = createPeakPointerImage();
+      map.addImage(PEAK_POINTER_ID, pointerImage, { pixelRatio: 2 });
+    }
+
+    function updatePeakLabelLayer(map, layerId) {
+      if (!map.getLayer(layerId)) return;
+      ensurePeakPointerImage(map);
+
+      const textField = [
+        'format',
+        ['coalesce', ['get', 'name:en'], ['get', 'name']],
+        { 'font-scale': 1 },
+        '\n',
+        {},
+        ['concat', ['number-format', ['get', 'ele'], { 'maximumFractionDigits': 0 }], ' m'],
+        { 'font-scale': 0.85 }
+      ];
+
+      map.setLayoutProperty(layerId, 'icon-image', PEAK_POINTER_ID);
+      map.setLayoutProperty(layerId, 'icon-size', 0.42);
+      map.setLayoutProperty(layerId, 'icon-anchor', 'top');
+      map.setLayoutProperty(layerId, 'icon-offset', [0, 0]);
+      map.setLayoutProperty(layerId, 'text-anchor', 'bottom');
+      map.setLayoutProperty(layerId, 'text-offset', [0, -1.4]);
+      map.setLayoutProperty(layerId, 'text-field', textField);
+      map.setLayoutProperty(layerId, 'text-font', ['Noto Sans Bold']);
+      map.setLayoutProperty(layerId, 'text-line-height', 1.15);
+      map.setLayoutProperty(layerId, 'symbol-spacing', 250);
+      map.setLayoutProperty(layerId, 'text-max-width', 6);
+
+      map.setPaintProperty(layerId, 'icon-opacity', 0.9);
+      map.setPaintProperty(layerId, 'text-color', '#133540');
+      map.setPaintProperty(layerId, 'text-halo-color', 'rgba(255,255,255,0.95)');
+      map.setPaintProperty(layerId, 'text-halo-width', 2.2);
+      map.setPaintProperty(layerId, 'text-halo-blur', 0.4);
+    }
+
+    function updatePeakLabels(map) {
+      updatePeakLabelLayer(map, 'Mountain peak labels');
+      updatePeakLabelLayer(map, 'Volcano peak labels');
+    }
+
     function applyViewMode(mode, { animate = true } = {}) {
       if (mode === currentViewMode && animate) {
         // Already in requested mode; still ensure UI reflects state.
@@ -422,8 +497,8 @@
         type: 'vector',
         tiles: [
           demSource.contourProtocolUrl({
-            multiplier: 3.28084,
-            thresholds: { 11:[200,1000], 12:[100,500], 13:[100,500], 14:[50,200], 15:[20,100] },
+            multiplier: 1,
+            thresholds: { 11:[60,300], 12:[30,150], 13:[30,150], 14:[15,60], 15:[6,30] },
             elevationKey: 'ele', levelKey: 'level', contourLayer: 'contours'
           })
         ],
@@ -438,7 +513,8 @@
         layout: { 'line-join': 'round' },
         paint: {
           'line-color': 'rgba(0,0,0,0.55)',
-          'line-width': ['match', ['get', 'level'], 1, 1, 0.5]
+          'line-width': ['match', ['get', 'level'], 1, 1, 0.5],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 13.4, 0, 13.5, 0.45, 15, 0.85, 17, 1]
         }
       });
       map.addLayer({
@@ -451,10 +527,14 @@
           'symbol-placement': 'line',
           'text-anchor': 'center',
           'text-size': 10,
-          'text-field': ['concat', ['number-format', ['get', 'ele'], {}], "'"],
+          'text-field': ['concat', ['number-format', ['get', 'ele'], { 'maximumFractionDigits': 0 }], ' m'],
           'text-font': ['Noto Sans Bold']
         },
-        paint: { 'text-halo-color': 'white', 'text-halo-width': 1 }
+        paint: {
+          'text-halo-color': 'white',
+          'text-halo-width': 1,
+          'text-opacity': ['interpolate', ['linear'], ['zoom'], 13.4, 0, 13.6, 0.5, 14.2, 0.9]
+        }
       });
       if (topLabelId) {
         map.moveLayer('contours', topLabelId);
@@ -476,6 +556,7 @@
 
       // Apply current base opacity to all base layers after style is ready
       setBaseStyleOpacity(map, 1);
+      updatePeakLabels(map);
     }
 
     // After the style loads, wire overlays
