@@ -1,4 +1,5 @@
 import {
+  COLOR_RELIEF_COLOR_RAMP,
   DEFAULT_3D_ORIENTATION,
   RELIEF_OPACITY,
   S2C_URL,
@@ -354,12 +355,10 @@ async function init() {
 
     map.addLayer({
       id: 'color-relief',
-      type: 'hillshade',
+      type: 'color-relief',
       source: 'color-relief',
       paint: {
-        'hillshade-highlight-color': 'rgba(255,255,255,0.82)',
-        'hillshade-accent-color': 'rgba(0,0,0,0.55)',
-        'hillshade-exaggeration': 0.18,
+        'color-relief-color': COLOR_RELIEF_COLOR_RAMP,
         'color-relief-opacity': RELIEF_OPACITY
       }
     }, topLabelId || undefined);
