@@ -1,5 +1,6 @@
 import {
   COLOR_RELIEF_COLOR_RAMP,
+  BASE_STYLE_RELIEF_OPACITY,
   DEFAULT_3D_ORIENTATION,
   RELIEF_OPACITY,
   S2C_URL,
@@ -459,7 +460,7 @@ async function init() {
       s2Btn.classList.toggle('active', vis);
     }
 
-    setBaseStyleOpacity(map, 1);
+    setBaseStyleOpacity(map, BASE_STYLE_RELIEF_OPACITY);
     updatePeakLabels(map);
   }
 
