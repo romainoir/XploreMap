@@ -19,6 +19,18 @@
     html, body { margin:0; height:100%; }
     #map { position:absolute; inset:0; }
 
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
     .maplibre-preload {
       position: absolute;
       inset: 0;
@@ -113,6 +125,10 @@
 
     .overzoom-control {
       display: grid;
+      gap: 8px;
+    }
+    .overzoom-control__group {
+      display: grid;
       gap: 4px;
     }
     .overzoom-control label {
@@ -133,6 +149,9 @@
     .overzoom-slider {
       width: 180px;
       accent-color: #133540;
+    }
+    .overzoom-slider[data-active="false"] {
+      opacity: 0.6;
     }
 
     .hs-panel {
@@ -198,12 +217,22 @@
       <path d="M10.2 11.1 7.5 9.3a1.6 1.6 0 0 0-1.8 0L1 12a1.2 1.2 0 0 0 .2 2c.4.2.9.2 1.2 0l4.4-2.9 3.3 2.2 3.5-2.3c.6-.4 1.4-.4 2 0l7.7 5a1.2 1.2 0 0 0 1.8-.9v-.2c0-.4-.2-.8-.6-1L15.3 8a1.6 1.6 0 0 0-1.8 0l-3.3 2.2Z"/>
     </svg>
   </button>
-  <div class="overzoom-control">
-    <label for="overzoomRange">
-      <span>Overzoom</span>
-      <span id="overzoomValue" class="overzoom-value" aria-live="polite">+2 (2× detail)</span>
-    </label>
-    <input id="overzoomRange" class="overzoom-slider" type="range" min="0" max="3" step="1" value="2" aria-label="Adjust overzoom levels">
+  <div class="overzoom-control" role="group" aria-labelledby="overzoomGroupLabel">
+    <span id="overzoomGroupLabel" class="sr-only">Detail controls</span>
+    <div class="overzoom-control__group">
+      <label for="overzoomRange3d">
+        <span>3D Detail</span>
+        <span id="overzoomValue3d" class="overzoom-value" aria-live="polite">+2 (4× detail)</span>
+      </label>
+      <input id="overzoomRange3d" class="overzoom-slider" type="range" min="0" max="3" step="1" value="2" aria-label="Adjust 3D overzoom levels">
+    </div>
+    <div class="overzoom-control__group">
+      <label for="overzoomRange2d">
+        <span>2D Detail</span>
+        <span id="overzoomValue2d" class="overzoom-value" aria-live="polite">+1 (2× detail)</span>
+      </label>
+      <input id="overzoomRange2d" class="overzoom-slider" type="range" min="0" max="3" step="1" value="1" aria-label="Adjust 2D overzoom levels">
+    </div>
   </div>
 </div>
 
@@ -229,7 +258,8 @@
   const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
   const TILE_FADE_DURATION = 800;
   const S2_FADE_DURATION = 700;
-  const INITIAL_OVERZOOM_LEVELS = 2; // fetch tiles one zoom level higher for crisper rendering
+  const INITIAL_OVERZOOM_LEVELS_3D = 2; // fetch tiles one zoom level higher for crisper rendering in 3D
+  const INITIAL_OVERZOOM_LEVELS_2D = 1; // lighter detail for 2D by default
   const MAX_OVERZOOM_LEVELS = 3;
   const MAX_PIXEL_RATIO = 4;
   const NATIVE_PIXEL_RATIO = window.devicePixelRatio || 1;
@@ -335,7 +365,7 @@
       maxZoom: 18,
       maxPitch: 85,
       fadeDuration: TILE_FADE_DURATION,
-      pixelRatio: computePixelRatio(INITIAL_OVERZOOM_LEVELS)
+      pixelRatio: computePixelRatio(INITIAL_OVERZOOM_LEVELS_3D)
     });
 
     maplibrePreload(map, {
@@ -344,47 +374,85 @@
       background: 'linear-gradient(135deg, rgba(5,15,24,0.92) 0%, rgba(6,24,36,0.92) 50%, rgba(10,34,46,0.92) 100%)'
     });
 
-    let currentOverzoomLevels = INITIAL_OVERZOOM_LEVELS;
-    const overzoomSlider = document.getElementById('overzoomRange');
-    const overzoomValueEl = document.getElementById('overzoomValue');
+    let currentViewMode = VIEW_MODES.THREED;
 
-    function refreshOverzoomDisplay(level) {
-      const computed = computePixelRatio(level);
-      const ideal = NATIVE_PIXEL_RATIO * Math.pow(2, level);
-      const ratio = computed / NATIVE_PIXEL_RATIO;
-      const ratioDisplay = ratio % 1 === 0 ? ratio.toFixed(0) : ratio.toFixed(1);
-      const cappedText = computed < ideal ? ', capped' : '';
-      if (overzoomValueEl) {
-        overzoomValueEl.textContent = `+${level} (${ratioDisplay}× detail${cappedText})`;
+    const overzoomControls = {
+      [VIEW_MODES.THREED]: {
+        slider: document.getElementById('overzoomRange3d'),
+        valueEl: document.getElementById('overzoomValue3d')
+      },
+      [VIEW_MODES.TWOD]: {
+        slider: document.getElementById('overzoomRange2d'),
+        valueEl: document.getElementById('overzoomValue2d')
       }
-      if (overzoomSlider) {
-        overzoomSlider.setAttribute('aria-valuetext', `Overzoom +${level}, ${ratioDisplay}× detail${cappedText}`);
+    };
+
+    const overzoomState = {
+      [VIEW_MODES.THREED]: INITIAL_OVERZOOM_LEVELS_3D,
+      [VIEW_MODES.TWOD]: INITIAL_OVERZOOM_LEVELS_2D
+    };
+
+    function clampOverzoom(level) {
+      return Math.max(0, Math.min(level, MAX_OVERZOOM_LEVELS));
+    }
+
+    function refreshOverzoomDisplays() {
+      for (const mode of Object.keys(overzoomControls)) {
+        const ctrl = overzoomControls[mode];
+        if (!ctrl) continue;
+        const level = clampOverzoom(overzoomState[mode] ?? 0);
+        const computed = computePixelRatio(level);
+        const ideal = NATIVE_PIXEL_RATIO * Math.pow(2, level);
+        const ratio = computed / NATIVE_PIXEL_RATIO;
+        const ratioDisplay = ratio % 1 === 0 ? ratio.toFixed(0) : ratio.toFixed(1);
+        const cappedText = computed < ideal ? ', capped' : '';
+        if (ctrl.valueEl) {
+          ctrl.valueEl.textContent = `+${level} (${ratioDisplay}× detail${cappedText})`;
+        }
+        if (ctrl.slider) {
+          ctrl.slider.setAttribute(
+            'aria-valuetext',
+            `Overzoom +${level}, ${ratioDisplay}× detail${cappedText}${mode === currentViewMode ? ', active' : ''}`
+          );
+          ctrl.slider.dataset.active = mode === currentViewMode ? 'true' : 'false';
+        }
       }
     }
 
-    function applyOverzoom(level) {
-      const clamped = Math.max(0, Math.min(level, MAX_OVERZOOM_LEVELS));
-      currentOverzoomLevels = clamped;
-      if (overzoomSlider && overzoomSlider.value !== String(clamped)) {
-        overzoomSlider.value = String(clamped);
-      }
-      refreshOverzoomDisplay(clamped);
-      updateMapPixelRatio(map, computePixelRatio(clamped));
+    function syncMapPixelRatio() {
+      const activeLevel = clampOverzoom(overzoomState[currentViewMode] ?? INITIAL_OVERZOOM_LEVELS_3D);
+      updateMapPixelRatio(map, computePixelRatio(activeLevel));
     }
 
-    if (overzoomSlider) {
-      overzoomSlider.min = '0';
-      overzoomSlider.max = String(MAX_OVERZOOM_LEVELS);
-      overzoomSlider.step = '1';
-      overzoomSlider.value = String(currentOverzoomLevels);
-      refreshOverzoomDisplay(currentOverzoomLevels);
-      overzoomSlider.addEventListener('input', () => {
-        const nextLevel = Number(overzoomSlider.value);
-        applyOverzoom(Number.isFinite(nextLevel) ? nextLevel : currentOverzoomLevels);
+    function setOverzoomLevel(mode, level) {
+      if (!(mode in overzoomState)) return;
+      const clamped = clampOverzoom(level);
+      overzoomState[mode] = clamped;
+      const ctrl = overzoomControls[mode];
+      if (ctrl && ctrl.slider && ctrl.slider.value !== String(clamped)) {
+        ctrl.slider.value = String(clamped);
+      }
+      refreshOverzoomDisplays();
+      if (mode === currentViewMode) {
+        syncMapPixelRatio();
+      }
+    }
+
+    for (const [mode, ctrl] of Object.entries(overzoomControls)) {
+      if (!ctrl || !ctrl.slider) continue;
+      ctrl.slider.min = '0';
+      ctrl.slider.max = String(MAX_OVERZOOM_LEVELS);
+      ctrl.slider.step = '1';
+      const initial = clampOverzoom(overzoomState[mode]);
+      ctrl.slider.value = String(initial);
+      ctrl.slider.addEventListener('input', () => {
+        const nextLevel = Number(ctrl.slider.value);
+        setOverzoomLevel(mode, Number.isFinite(nextLevel) ? nextLevel : overzoomState[mode]);
       });
-    } else {
-      refreshOverzoomDisplay(currentOverzoomLevels);
     }
+
+    refreshOverzoomDisplays();
+    syncMapPixelRatio();
 
     // Silence missing sprite warnings
     map.on('styleimagemissing', (e) => {
@@ -433,7 +501,6 @@
     }
 
     // Overlay re-apply (clean, then add; contours always under topmost label)
-    let currentViewMode = VIEW_MODES.THREED;
     let last3DOrientation = { ...DEFAULT_3D_ORIENTATION };
     const vignetteEl = document.querySelector('.vignette');
     const viewToggleBtn = document.getElementById('toggle3D');
@@ -554,6 +621,8 @@
 
       currentViewMode = mode;
       updateViewToggle(mode);
+      refreshOverzoomDisplays();
+      syncMapPixelRatio();
       if (vignetteEl) vignetteEl.dataset.mode = mode;
 
       const targetOrientation = is3D ? last3DOrientation : { pitch: 0, bearing: 0 };
