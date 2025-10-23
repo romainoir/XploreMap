@@ -201,6 +201,7 @@
       <path d="M10.2 11.1 7.5 9.3a1.6 1.6 0 0 0-1.8 0L1 12a1.2 1.2 0 0 0 .2 2c.4.2.9.2 1.2 0l4.4-2.9 3.3 2.2 3.5-2.3c.6-.4 1.4-.4 2 0l7.7 5a1.2 1.2 0 0 0 1.8-.9v-.2c0-.4-.2-.8-.6-1L15.3 8a1.6 1.6 0 0 0-1.8 0l-3.3 2.2Z"/>
     </svg>
   </button>
+  <button id="toggleShadows" class="toggle-3d active" type="button" aria-pressed="true" aria-label="Disable shadows" title="Disable shadows">Shadows</button>
   <div class="overzoom-control">
     <label for="overzoomRange">
       <span>Overzoom</span>
@@ -299,6 +300,7 @@
   const VIEW_MODES = { THREED: '3d', TWOD: '2d' };
   const DEFAULT_3D_ORIENTATION = { pitch: 60, bearing: -18.6 };
   const SHADOW_LAYER_ID = 'threejs-shadow-terrain';
+  let shadowsEnabled = true;
   const EARTH_RADIUS_METERS = 6378137;
   const DEG2RAD = Math.PI / 180;
   const RAD2DEG = 180 / Math.PI;
@@ -500,6 +502,12 @@
 
   function ensureThreeShadowLayer(map, mode) {
     if (!map) return;
+    if (!shadowsEnabled) {
+      if (map.getLayer(SHADOW_LAYER_ID)) {
+        try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'none'); } catch (_) {}
+      }
+      return;
+    }
     const wantsVisible = mode === VIEW_MODES.THREED;
     if (!wantsVisible) {
       if (map.getLayer(SHADOW_LAYER_ID)) {
@@ -516,7 +524,12 @@
     if (!shadowLayerInitPromise) {
       shadowLayerInitPromise = setupThreeShadowLayer(map)
         .catch(err => console.error('Failed to initialize terrain shadow layer', err))
-        .finally(() => { shadowLayerInitPromise = null; });
+        .finally(() => {
+          shadowLayerInitPromise = null;
+          if (!shadowsEnabled && map.getLayer(SHADOW_LAYER_ID)) {
+            try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'none'); } catch (_) {}
+          }
+        });
     }
   }
 
@@ -661,6 +674,7 @@
     let last3DOrientation = { ...DEFAULT_3D_ORIENTATION };
     const vignetteEl = document.querySelector('.vignette');
     const viewToggleBtn = document.getElementById('toggle3D');
+    const shadowToggleBtn = document.getElementById('toggleShadows');
 
     function updateViewToggle(mode) {
       if (!viewToggleBtn) return;
@@ -670,6 +684,15 @@
       viewToggleBtn.setAttribute('aria-pressed', String(is3D));
       viewToggleBtn.setAttribute('aria-label', nextLabel);
       viewToggleBtn.setAttribute('title', nextLabel);
+    }
+
+    function updateShadowToggleButton() {
+      if (!shadowToggleBtn) return;
+      const actionLabel = shadowsEnabled ? 'Disable shadows' : 'Enable shadows';
+      shadowToggleBtn.classList.toggle('active', shadowsEnabled);
+      shadowToggleBtn.setAttribute('aria-pressed', String(shadowsEnabled));
+      shadowToggleBtn.setAttribute('aria-label', actionLabel);
+      shadowToggleBtn.setAttribute('title', actionLabel);
     }
 
     function syncTerrainAndSky() {
@@ -808,6 +831,21 @@
         const nextMode = currentViewMode === VIEW_MODES.THREED ? VIEW_MODES.TWOD : VIEW_MODES.THREED;
         applyViewMode(nextMode);
       });
+    }
+
+    if (shadowToggleBtn) {
+      shadowToggleBtn.addEventListener('click', () => {
+        shadowsEnabled = !shadowsEnabled;
+        updateShadowToggleButton();
+        if (!shadowsEnabled) {
+          if (map.getLayer(SHADOW_LAYER_ID)) {
+            try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'none'); } catch (_) {}
+          }
+        } else {
+          ensureThreeShadowLayer(map, currentViewMode);
+        }
+      });
+      updateShadowToggleButton();
     }
 
     if (vignetteEl) {
