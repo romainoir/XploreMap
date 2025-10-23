@@ -198,6 +198,7 @@
   const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
   const TILE_FADE_DURATION = 800;
   const S2_FADE_DURATION = 700;
+  const EXTRA_DETAIL_LEVELS = 1; // fetch tiles one zoom level higher for crisper rendering
   const SKY_SETTINGS = {
     'sky-color': '#bcd0e6',
     'sky-horizon-blend': 0.35,
@@ -247,7 +248,8 @@
       style: versaStyle,
       maxZoom: 18,
       maxPitch: 85,
-      fadeDuration: TILE_FADE_DURATION
+      fadeDuration: TILE_FADE_DURATION,
+      pixelRatio: Math.min(window.devicePixelRatio * Math.pow(2, EXTRA_DETAIL_LEVELS), 4)
     });
 
     maplibrePreload(map, {
