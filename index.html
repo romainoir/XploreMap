@@ -111,6 +111,30 @@
       fill: currentColor;
     }
 
+    .overzoom-control {
+      display: grid;
+      gap: 4px;
+    }
+    .overzoom-control label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #1f2c36;
+      gap: 10px;
+    }
+    .overzoom-value {
+      font-weight: 600;
+      color: #0b1f2c;
+      letter-spacing: 0.06em;
+    }
+    .overzoom-slider {
+      width: 180px;
+      accent-color: #133540;
+    }
+
     .hs-panel {
       position: absolute; top: 10px; right: 10px; z-index: 2;
       background: rgba(255,255,255,.92); border-radius: 10px; padding: 8px 10px;
@@ -174,6 +198,13 @@
       <path d="M10.2 11.1 7.5 9.3a1.6 1.6 0 0 0-1.8 0L1 12a1.2 1.2 0 0 0 .2 2c.4.2.9.2 1.2 0l4.4-2.9 3.3 2.2 3.5-2.3c.6-.4 1.4-.4 2 0l7.7 5a1.2 1.2 0 0 0 1.8-.9v-.2c0-.4-.2-.8-.6-1L15.3 8a1.6 1.6 0 0 0-1.8 0l-3.3 2.2Z"/>
     </svg>
   </button>
+  <div class="overzoom-control">
+    <label for="overzoomRange">
+      <span>Overzoom</span>
+      <span id="overzoomValue" class="overzoom-value" aria-live="polite">+2 (2× detail)</span>
+    </label>
+    <input id="overzoomRange" class="overzoom-slider" type="range" min="0" max="3" step="1" value="2" aria-label="Adjust overzoom levels">
+  </div>
 </div>
 
 <!-- Hillshade method switcher -->
@@ -198,7 +229,13 @@
   const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
   const TILE_FADE_DURATION = 800;
   const S2_FADE_DURATION = 700;
-  const EXTRA_DETAIL_LEVELS = 2; // fetch tiles one zoom level higher for crisper rendering
+  const INITIAL_OVERZOOM_LEVELS = 2; // fetch tiles one zoom level higher for crisper rendering
+  const MAX_OVERZOOM_LEVELS = 3;
+  const MAX_PIXEL_RATIO = 4;
+  const NATIVE_PIXEL_RATIO = window.devicePixelRatio || 1;
+  function computePixelRatio(overzoomLevels) {
+    return Math.min(NATIVE_PIXEL_RATIO * Math.pow(2, overzoomLevels), MAX_PIXEL_RATIO);
+  }
   const SKY_SETTINGS = {
     'sky-color': '#bcd0e6',
     'sky-horizon-blend': 0.35,
@@ -249,7 +286,7 @@
       maxZoom: 18,
       maxPitch: 85,
       fadeDuration: TILE_FADE_DURATION,
-      pixelRatio: Math.min(window.devicePixelRatio * Math.pow(2, EXTRA_DETAIL_LEVELS), 4)
+      pixelRatio: computePixelRatio(INITIAL_OVERZOOM_LEVELS)
     });
 
     maplibrePreload(map, {
@@ -257,6 +294,53 @@
       minDuration: 600,
       background: 'linear-gradient(135deg, rgba(5,15,24,0.92) 0%, rgba(6,24,36,0.92) 50%, rgba(10,34,46,0.92) 100%)'
     });
+
+    let currentOverzoomLevels = INITIAL_OVERZOOM_LEVELS;
+    const overzoomSlider = document.getElementById('overzoomRange');
+    const overzoomValueEl = document.getElementById('overzoomValue');
+
+    function refreshOverzoomDisplay(level) {
+      const computed = computePixelRatio(level);
+      const ideal = NATIVE_PIXEL_RATIO * Math.pow(2, level);
+      const ratio = computed / NATIVE_PIXEL_RATIO;
+      const ratioDisplay = ratio % 1 === 0 ? ratio.toFixed(0) : ratio.toFixed(1);
+      const cappedText = computed < ideal ? ', capped' : '';
+      if (overzoomValueEl) {
+        overzoomValueEl.textContent = `+${level} (${ratioDisplay}× detail${cappedText})`;
+      }
+      if (overzoomSlider) {
+        overzoomSlider.setAttribute('aria-valuetext', `Overzoom +${level}, ${ratioDisplay}× detail${cappedText}`);
+      }
+    }
+
+    function applyOverzoom(level) {
+      const clamped = Math.max(0, Math.min(level, MAX_OVERZOOM_LEVELS));
+      currentOverzoomLevels = clamped;
+      if (overzoomSlider && overzoomSlider.value !== String(clamped)) {
+        overzoomSlider.value = String(clamped);
+      }
+      refreshOverzoomDisplay(clamped);
+      if (map && typeof map.setPixelRatio === 'function') {
+        map.setPixelRatio(computePixelRatio(clamped));
+        if (typeof map.triggerRepaint === 'function') {
+          map.triggerRepaint();
+        }
+      }
+    }
+
+    if (overzoomSlider) {
+      overzoomSlider.min = '0';
+      overzoomSlider.max = String(MAX_OVERZOOM_LEVELS);
+      overzoomSlider.step = '1';
+      overzoomSlider.value = String(currentOverzoomLevels);
+      refreshOverzoomDisplay(currentOverzoomLevels);
+      overzoomSlider.addEventListener('input', () => {
+        const nextLevel = Number(overzoomSlider.value);
+        applyOverzoom(Number.isFinite(nextLevel) ? nextLevel : currentOverzoomLevels);
+      });
+    } else {
+      refreshOverzoomDisplay(currentOverzoomLevels);
+    }
 
     // Silence missing sprite warnings
     map.on('styleimagemissing', (e) => {
