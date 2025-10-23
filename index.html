@@ -475,7 +475,7 @@
         this.scene.add(sun.target);
 
         const terrainMesh = new THREE.Mesh(terrainGeometry.clone(), terrainMaterial.clone());
-        terrainMesh.castShadow = false;
+        terrainMesh.castShadow = true;
         terrainMesh.receiveShadow = true;
         this.scene.add(terrainMesh);
 
@@ -484,8 +484,16 @@
         }
       },
       render(gl, matrix) {
-        this.camera.projectionMatrix = this.matrix.fromArray(matrix).multiply(this.modelMatrix);
+        const shouldRender = shadowsEnabled && currentViewMode === VIEW_MODES.THREED;
+
         this.renderer.resetState();
+
+        if (!shouldRender) {
+          map.triggerRepaint();
+          return;
+        }
+
+        this.camera.projectionMatrix = this.matrix.fromArray(matrix).multiply(this.modelMatrix);
         this.renderer.render(this.scene, this.camera);
         map.triggerRepaint();
       }
