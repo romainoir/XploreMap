@@ -1,4 +1,5 @@
 export const RELIEF_OPACITY = 0.40;
+export const BASE_STYLE_RELIEF_OPACITY = 0.45;
 export const COLOR_RELIEF_COLOR_RAMP = [
   'interpolate', ['linear'], ['elevation'],
   0, '#254a38',
