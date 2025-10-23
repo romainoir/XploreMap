@@ -21,7 +21,7 @@
     }
   },
   "sprite": "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
-  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "Background",
@@ -4704,7 +4704,7 @@
         "symbol-sort-key": ["to-number", ["get", "rank"]],
         "text-anchor": "top",
         "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
-        "text-font": ["Noto Sans Italic", "Noto Sans Bold"],
+        "text-font": ["Noto Sans Italic"],
         "text-max-width": 9,
         "text-offset": [0, 1.2],
         "text-padding": 2,
@@ -5211,7 +5211,7 @@
         "symbol-sort-key": ["to-number", ["get", "rank"]],
         "text-anchor": "top",
         "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
-        "text-font": ["Noto Sans Italic", "Noto Sans Italic"],
+        "text-font": ["Noto Sans Italic"],
         "text-max-width": 6,
         "text-padding": 2,
         "text-size": {"stops": [[14, 13], [20, 16]]},
@@ -5241,7 +5241,7 @@
         "symbol-sort-key": ["to-number", ["get", "rank"]],
         "text-anchor": "top",
         "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
-        "text-font": ["Noto Sans Italic", "Noto Sans Italic"],
+        "text-font": ["Noto Sans Italic"],
         "text-max-width": 9,
         "text-offset": [0, 1.1],
         "text-padding": 2,
@@ -5668,7 +5668,7 @@
         "symbol-spacing": 150,
         "text-allow-overlap": false,
         "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
-        "text-font": ["Noto Sans Italic", "Noto Sans Italic"],
+        "text-font": ["Noto Sans Italic"],
         "text-max-width": {"stops": [[12, 5], [18, 8]]},
         "text-size": {"stops": [[15, 10], [20, 13]]},
         "visibility": "visible"
@@ -5693,7 +5693,7 @@
         "symbol-spacing": 150,
         "text-allow-overlap": false,
         "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
-        "text-font": ["Noto Sans Italic", "Noto Sans Italic"],
+        "text-font": ["Noto Sans Italic"],
         "text-size": 12,
         "visibility": "visible"
       },
@@ -5847,7 +5847,7 @@
       "layout": {
         "symbol-sort-key": ["to-number", ["get", "rank"]],
         "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
-        "text-font": ["Noto Sans Italic", "Noto Sans Bold"],
+        "text-font": ["Noto Sans Italic"],
         "text-letter-spacing": 0,
         "text-padding": 2,
         "text-size": {"stops": [[3, 10], [6, 14]]},
