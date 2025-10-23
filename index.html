@@ -492,36 +492,16 @@
     versaStyle.glyphs = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
     if ('sprite' in versaStyle) delete versaStyle.sprite;
 
-    // The OpenFreeMap TileJSON currently advertises tiles past the highest
-    // available zoom level which causes MapLibre to request z>14 vector tiles.
-    // Those requests 404 and the whole base style disappears when zooming in.
-    // Inline the TileJSON and cap maxzoom so MapLibre overzooms the z=14 tiles
-    // instead of treating them as missing.
-    try {
-      const tileJson = await fetch('https://tiles.openfreemap.org/planet.json').then(r => r.json());
-      const { tiles, minzoom, maxzoom, bounds, attribution, scheme, tileSize = 512 } = tileJson || {};
-      const openFreeMapSource = {
-        type: 'vector',
-        tiles: Array.isArray(tiles) && tiles.length ? tiles : ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'],
-        minzoom: Number.isFinite(minzoom) ? minzoom : 0,
-        maxzoom: Number.isFinite(maxzoom) ? Math.min(maxzoom, 14) : 14,
-        tileSize
-      };
-      if (Array.isArray(bounds)) openFreeMapSource.bounds = bounds;
-      if (typeof attribution === 'string') openFreeMapSource.attribution = attribution;
-      if (typeof scheme === 'string') openFreeMapSource.scheme = scheme;
-      versaStyle.sources.openmaptiles = openFreeMapSource;
-    } catch (err) {
-      console.warn('Failed to load OpenFreeMap TileJSON; falling back to defaults.', err);
-      versaStyle.sources.openmaptiles = {
-        type: 'vector',
-        tiles: ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'],
-        minzoom: 0,
-        maxzoom: 14,
-        tileSize: 512,
-        scheme: 'xyz'
-      };
-    }
+    // Inline the OpenFreeMap source definition so we never fetch the TileJSON
+    // at runtime (which is blocked by CORS on GitHub Pages).
+    versaStyle.sources.openmaptiles = {
+      type: 'vector',
+      tiles: ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'],
+      minzoom: 0,
+      maxzoom: 14,
+      tileSize: 512,
+      scheme: 'xyz'
+    };
 
     // Map init with VersaTiles
     const map = new maplibregl.Map({
