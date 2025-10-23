@@ -563,23 +563,36 @@
     return [[minX, minY], [maxX, maxY]];
   }
 
+  const OVERTURE_LAYER_ID_CANDIDATES = ['building', 'buildings', 'overture_buildings'];
+
+  function pickBestLayerId(layers = []) {
+    if (!Array.isArray(layers)) return null;
+    for (const preferred of OVERTURE_LAYER_ID_CANDIDATES) {
+      const match = layers.find((layer) => typeof layer.id === 'string' && layer.id.toLowerCase() === preferred);
+      if (match) return match.id;
+    }
+    const any = layers.find((layer) => typeof layer.id === 'string' && /build/i.test(layer.id));
+    if (any && any.id) return any.id;
+    if (layers[0] && layers[0].id) return layers[0].id;
+    return null;
+  }
+
   async function getOvertureVectorLayerId() {
     if (!overtureVectorLayerIdPromise) {
       overtureVectorLayerIdPromise = overtureBuildingsTileset
         .getMetadata()
         .then((metadata) => {
           const layers = metadata && Array.isArray(metadata.vector_layers) ? metadata.vector_layers : [];
-          const preferred = layers.find((layer) => typeof layer.id === 'string' && /build/i.test(layer.id));
-          if (preferred && preferred.id) return preferred.id;
-          if (layers[0] && layers[0].id) return layers[0].id;
-          return 'buildings';
+          const fromMetadata = pickBestLayerId(layers);
+          if (fromMetadata) return fromMetadata;
+          return OVERTURE_LAYER_ID_CANDIDATES[0];
         })
         .catch((error) => {
           if (!loggedOvertureMetadataError) {
             console.warn('Unable to read Overture buildings metadata', error);
             loggedOvertureMetadataError = true;
           }
-          return 'buildings';
+          return OVERTURE_LAYER_ID_CANDIDATES[0];
         });
     }
     return overtureVectorLayerIdPromise;
