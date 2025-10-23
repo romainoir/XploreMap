@@ -236,6 +236,55 @@
   function computePixelRatio(overzoomLevels) {
     return Math.min(NATIVE_PIXEL_RATIO * Math.pow(2, overzoomLevels), MAX_PIXEL_RATIO);
   }
+
+  function updateMapPixelRatio(mapInstance, pixelRatio) {
+    if (!mapInstance || !Number.isFinite(pixelRatio)) return;
+
+    if (typeof mapInstance.setPixelRatio === 'function') {
+      mapInstance.setPixelRatio(pixelRatio);
+      if (typeof mapInstance.triggerRepaint === 'function') {
+        mapInstance.triggerRepaint();
+      }
+      return;
+    }
+
+    const canvas = typeof mapInstance.getCanvas === 'function' ? mapInstance.getCanvas() : null;
+    const container = typeof mapInstance.getContainer === 'function' ? mapInstance.getContainer() : null;
+    if (!canvas || !container) return;
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (!width || !height) return;
+
+    const nextWidth = Math.round(width * pixelRatio);
+    const nextHeight = Math.round(height * pixelRatio);
+
+    if (canvas.width !== nextWidth) canvas.width = nextWidth;
+    if (canvas.height !== nextHeight) canvas.height = nextHeight;
+
+    if (canvas.style) {
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+    }
+
+    const painter = mapInstance.painter;
+    const context = painter && painter.context ? painter.context : null;
+    if (context) {
+      if (typeof context.setDevicePixelRatio === 'function') {
+        context.setDevicePixelRatio(pixelRatio);
+      } else if (typeof context.resize === 'function') {
+        context.resize(width, height, pixelRatio);
+      }
+    }
+
+    if (mapInstance.transform && typeof mapInstance.transform.resize === 'function') {
+      mapInstance.transform.resize(width, height);
+    }
+
+    if (typeof mapInstance.triggerRepaint === 'function') {
+      mapInstance.triggerRepaint();
+    }
+  }
   const SKY_SETTINGS = {
     'sky-color': '#bcd0e6',
     'sky-horizon-blend': 0.35,
@@ -320,12 +369,7 @@
         overzoomSlider.value = String(clamped);
       }
       refreshOverzoomDisplay(clamped);
-      if (map && typeof map.setPixelRatio === 'function') {
-        map.setPixelRatio(computePixelRatio(clamped));
-        if (typeof map.triggerRepaint === 'function') {
-          map.triggerRepaint();
-        }
-      }
+      updateMapPixelRatio(map, computePixelRatio(clamped));
     }
 
     if (overzoomSlider) {
