@@ -9,9 +9,6 @@
   <link href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css" rel="stylesheet"/>
   <script src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
 
-  <!-- Three.js for custom sun-shadow experiments -->
-  <script src="https://unpkg.com/three@0.164.1/build/three.min.js"></script>
-
   <!-- PMTiles v4 -->
   <script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
 
@@ -201,7 +198,6 @@
       <path d="M10.2 11.1 7.5 9.3a1.6 1.6 0 0 0-1.8 0L1 12a1.2 1.2 0 0 0 .2 2c.4.2.9.2 1.2 0l4.4-2.9 3.3 2.2 3.5-2.3c.6-.4 1.4-.4 2 0l7.7 5a1.2 1.2 0 0 0 1.8-.9v-.2c0-.4-.2-.8-.6-1L15.3 8a1.6 1.6 0 0 0-1.8 0l-3.3 2.2Z"/>
     </svg>
   </button>
-  <button id="toggleShadows" class="toggle-3d active" type="button" aria-pressed="true" aria-label="Disable shadows" title="Disable shadows">Shadows</button>
   <div class="overzoom-control">
     <label for="overzoomRange">
       <span>Overzoom</span>
@@ -299,247 +295,6 @@
   };
   const VIEW_MODES = { THREED: '3d', TWOD: '2d' };
   const DEFAULT_3D_ORIENTATION = { pitch: 60, bearing: -18.6 };
-  const SHADOW_LAYER_ID = 'threejs-shadow-terrain';
-  let shadowsEnabled = true;
-  const EARTH_RADIUS_METERS = 6378137;
-  const DEG2RAD = Math.PI / 180;
-  const RAD2DEG = 180 / Math.PI;
-
-  function offsetLngLatMeters(baseLngLat, offsetEast, offsetNorth) {
-    if (!Array.isArray(baseLngLat) || baseLngLat.length < 2) return [0, 0];
-    const [lng, lat] = baseLngLat;
-    const latRad = lat * DEG2RAD;
-    const dLat = offsetNorth / EARTH_RADIUS_METERS;
-    const metersPerLon = EARTH_RADIUS_METERS * Math.cos(latRad);
-    const dLng = metersPerLon === 0 ? 0 : offsetEast / metersPerLon;
-    return [lng + dLng * RAD2DEG, lat + dLat * RAD2DEG];
-  }
-
-  function metersOffsetBetween(baseLngLat, targetLngLat) {
-    if (!Array.isArray(baseLngLat) || !Array.isArray(targetLngLat)) return { east: 0, north: 0 };
-    const [lng1, lat1] = baseLngLat;
-    const [lng2, lat2] = targetLngLat;
-    const latRad1 = lat1 * DEG2RAD;
-    const latRad2 = lat2 * DEG2RAD;
-    const dLat = latRad2 - latRad1;
-    const dLng = (lng2 - lng1) * DEG2RAD;
-    const avgLat = (latRad1 + latRad2) / 2;
-    const north = dLat * EARTH_RADIUS_METERS;
-    const east = Math.cos(avgLat) * EARTH_RADIUS_METERS * dLng;
-    return { east, north };
-  }
-
-  function buildTerrainGeometry(map, centerLngLat, sizeMeters, segments) {
-    if (typeof THREE === 'undefined' || !THREE || !map) return null;
-    const gridSegments = Math.max(1, Math.min(segments, 256));
-    const geometry = new THREE.PlaneGeometry(sizeMeters, sizeMeters, gridSegments, gridSegments);
-    const positions = geometry.getAttribute('position');
-    if (!positions) return geometry;
-
-    for (let i = 0; i < positions.count; i++) {
-      const offsetEast = positions.getX(i);
-      const offsetNorth = positions.getY(i);
-      const sampleLngLat = offsetLngLatMeters(centerLngLat, offsetEast, offsetNorth);
-      let elevation = 0;
-      try {
-        const sampled = map.queryTerrainElevation(sampleLngLat, { exaggerated: false });
-        if (Number.isFinite(sampled)) elevation = sampled;
-      } catch (_) {}
-      positions.setZ(i, elevation);
-    }
-
-    positions.needsUpdate = true;
-    geometry.computeVertexNormals();
-    return geometry;
-  }
-
-  function createSummitMarker(map, centerLngLat) {
-    if (typeof THREE === 'undefined' || !THREE) return null;
-    const summitLngLat = [7.657, 45.9769];
-    const { east, north } = metersOffsetBetween(centerLngLat, summitLngLat);
-    let peakElevation = 4400;
-    try {
-      const queried = map.queryTerrainElevation(summitLngLat, { exaggerated: false });
-      if (Number.isFinite(queried)) peakElevation = queried;
-    } catch (_) {}
-
-    const markerMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffe3a1,
-      emissive: 0x402400,
-      emissiveIntensity: 0.25,
-      roughness: 0.45,
-      metalness: 0.05
-    });
-    const marker = new THREE.Mesh(new THREE.SphereGeometry(120, 32, 24), markerMaterial);
-    marker.castShadow = true;
-    marker.receiveShadow = false;
-    marker.position.set(east, north, peakElevation + 80);
-    return marker;
-  }
-
-  async function setupThreeShadowLayer(map) {
-    if (typeof THREE === 'undefined' || !THREE || !map) return;
-    if (map.getLayer(SHADOW_LAYER_ID)) return;
-
-    await new Promise(resolve => {
-      if (map.isStyleLoaded && map.isStyleLoaded()) {
-        resolve();
-      } else {
-        map.once('styledata', resolve);
-      }
-    });
-
-    const center = map.getCenter();
-    const centerLngLat = [center.lng, center.lat];
-    const sampleExtentMeters = 2400;
-    const gridSegments = 96;
-
-    // Allow terrain tiles to settle before sampling elevations.
-    await new Promise(resolve => {
-      if (map.areTilesLoaded && map.areTilesLoaded()) {
-        resolve();
-        return;
-      }
-      const handle = () => {
-        if (!map.areTilesLoaded || map.areTilesLoaded()) {
-          map.off('idle', handle);
-          resolve();
-        }
-      };
-      map.on('idle', handle);
-      setTimeout(() => {
-        map.off('idle', handle);
-        resolve();
-      }, 1200);
-    });
-
-    const terrainGeometry = buildTerrainGeometry(map, centerLngLat, sampleExtentMeters, gridSegments);
-    if (!terrainGeometry) return;
-
-    const terrainMaterial = new THREE.MeshStandardMaterial({
-      color: 0x6f6a5e,
-      roughness: 0.94,
-      metalness: 0.0
-    });
-
-    const centerCoord = maplibregl.MercatorCoordinate.fromLngLat(centerLngLat, 0);
-    const modelTransform = {
-      translateX: centerCoord.x,
-      translateY: centerCoord.y,
-      translateZ: centerCoord.z || 0,
-      scale: centerCoord.meterInMercatorCoordinateUnits()
-    };
-
-    const translationMatrix = new THREE.Matrix4().makeTranslation(modelTransform.translateX, modelTransform.translateY, modelTransform.translateZ);
-    const scaleMatrix = new THREE.Matrix4().makeScale(modelTransform.scale, -modelTransform.scale, modelTransform.scale);
-    const modelMatrix = translationMatrix.clone().multiply(scaleMatrix);
-    const summitMarker = createSummitMarker(map, centerLngLat);
-
-    const customLayer = {
-      id: SHADOW_LAYER_ID,
-      type: 'custom',
-      renderingMode: '3d',
-      onAdd(mapInstance, gl) {
-        this.camera = new THREE.Camera();
-        this.scene = new THREE.Scene();
-        this.renderer = new THREE.WebGLRenderer({
-          canvas: mapInstance.getCanvas(),
-          context: gl
-        });
-        this.renderer.autoClear = false;
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        if ('outputColorSpace' in this.renderer) {
-          this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-        }
-
-        this.matrix = new THREE.Matrix4();
-        this.modelMatrix = modelMatrix;
-
-        const ambient = new THREE.AmbientLight(0xffffff, 0.42);
-        this.scene.add(ambient);
-
-        const sun = new THREE.DirectionalLight(0xfff4cf, 2.1);
-        sun.position.set(-2200, 2800, 1600);
-        sun.castShadow = true;
-        sun.shadow.mapSize.set(2048, 2048);
-        sun.shadow.camera.near = 10;
-        sun.shadow.camera.far = 8000;
-        sun.shadow.camera.left = -2600;
-        sun.shadow.camera.right = 2600;
-        sun.shadow.camera.top = 2600;
-        sun.shadow.camera.bottom = -2600;
-        sun.shadow.bias = -0.00012;
-        sun.target.position.set(600, -220, 1100);
-        this.scene.add(sun);
-        this.scene.add(sun.target);
-
-        const terrainMesh = new THREE.Mesh(terrainGeometry.clone(), terrainMaterial.clone());
-        terrainMesh.castShadow = true;
-        terrainMesh.receiveShadow = true;
-        this.scene.add(terrainMesh);
-
-        if (summitMarker) {
-          this.scene.add(summitMarker.clone());
-        }
-      },
-      render(gl, matrix) {
-        const shouldRender = shadowsEnabled && currentViewMode === VIEW_MODES.THREED;
-
-        this.renderer.resetState();
-
-        if (!shouldRender) {
-          map.triggerRepaint();
-          return;
-        }
-
-        this.camera.projectionMatrix = this.matrix.fromArray(matrix).multiply(this.modelMatrix);
-        this.renderer.render(this.scene, this.camera);
-        map.triggerRepaint();
-      }
-    };
-
-    try {
-      map.addLayer(customLayer, 'hillshade');
-    } catch (err) {
-      console.error('Unable to add terrain shadow layer', err);
-    }
-  }
-
-  let shadowLayerInitPromise = null;
-
-  function ensureThreeShadowLayer(map, mode) {
-    if (!map) return;
-    if (!shadowsEnabled) {
-      if (map.getLayer(SHADOW_LAYER_ID)) {
-        try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'none'); } catch (_) {}
-      }
-      return;
-    }
-    const wantsVisible = mode === VIEW_MODES.THREED;
-    if (!wantsVisible) {
-      if (map.getLayer(SHADOW_LAYER_ID)) {
-        try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'none'); } catch (_) {}
-      }
-      return;
-    }
-
-    if (map.getLayer(SHADOW_LAYER_ID)) {
-      try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'visible'); } catch (_) {}
-      return;
-    }
-
-    if (!shadowLayerInitPromise) {
-      shadowLayerInitPromise = setupThreeShadowLayer(map)
-        .catch(err => console.error('Failed to initialize terrain shadow layer', err))
-        .finally(() => {
-          shadowLayerInitPromise = null;
-          if (!shadowsEnabled && map.getLayer(SHADOW_LAYER_ID)) {
-            try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'none'); } catch (_) {}
-          }
-        });
-    }
-  }
 
   // Ensure SW is ready (needed for contour DEM proxy)
   async function waitForSWReady() {
@@ -682,7 +437,6 @@
     let last3DOrientation = { ...DEFAULT_3D_ORIENTATION };
     const vignetteEl = document.querySelector('.vignette');
     const viewToggleBtn = document.getElementById('toggle3D');
-    const shadowToggleBtn = document.getElementById('toggleShadows');
 
     function updateViewToggle(mode) {
       if (!viewToggleBtn) return;
@@ -692,15 +446,6 @@
       viewToggleBtn.setAttribute('aria-pressed', String(is3D));
       viewToggleBtn.setAttribute('aria-label', nextLabel);
       viewToggleBtn.setAttribute('title', nextLabel);
-    }
-
-    function updateShadowToggleButton() {
-      if (!shadowToggleBtn) return;
-      const actionLabel = shadowsEnabled ? 'Disable shadows' : 'Enable shadows';
-      shadowToggleBtn.classList.toggle('active', shadowsEnabled);
-      shadowToggleBtn.setAttribute('aria-pressed', String(shadowsEnabled));
-      shadowToggleBtn.setAttribute('aria-label', actionLabel);
-      shadowToggleBtn.setAttribute('title', actionLabel);
     }
 
     function syncTerrainAndSky() {
@@ -831,7 +576,6 @@
       }
 
       syncTerrainAndSky();
-      ensureThreeShadowLayer(map, currentViewMode);
     }
 
     if (viewToggleBtn) {
@@ -839,21 +583,6 @@
         const nextMode = currentViewMode === VIEW_MODES.THREED ? VIEW_MODES.TWOD : VIEW_MODES.THREED;
         applyViewMode(nextMode);
       });
-    }
-
-    if (shadowToggleBtn) {
-      shadowToggleBtn.addEventListener('click', () => {
-        shadowsEnabled = !shadowsEnabled;
-        updateShadowToggleButton();
-        if (!shadowsEnabled) {
-          if (map.getLayer(SHADOW_LAYER_ID)) {
-            try { map.setLayoutProperty(SHADOW_LAYER_ID, 'visibility', 'none'); } catch (_) {}
-          }
-        } else {
-          ensureThreeShadowLayer(map, currentViewMode);
-        }
-      });
-      updateShadowToggleButton();
     }
 
     if (vignetteEl) {
@@ -1019,7 +748,6 @@
       // Apply current base opacity to all base layers after style is ready
       setBaseStyleOpacity(map, 1);
       updatePeakLabels(map);
-      ensureThreeShadowLayer(map, currentViewMode);
     }
 
     // After the style loads, wire overlays
