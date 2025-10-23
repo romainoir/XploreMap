@@ -239,7 +239,7 @@
   const OVERTURE_BUILDINGS_PM_URL = 'https://data.source.coop/cholmes/overture/overture-buildings.pmtiles';
   const OVERTURE_BUILDINGS_ATTRIBUTION = '<a href="https://overturemaps.org/">© Overture Maps Foundation</a>';
   const OVERTURE_BUILDING_COLOR_EXPR = [
-    'let', 'overture-building-type',
+    'let', 'overture_building_type',
     ['downcase', ['to-string', ['coalesce',
       ['get', 'subclass'],
       ['get', 'class'],
@@ -248,7 +248,7 @@
       ['get', 'type'],
       ''
     ]]],
-    ['match', ['var', 'overture-building-type'],
+    ['match', ['var', 'overture_building_type'],
       'residential', '#f1d5b8',
       'multi_family', '#f1d5b8',
       'single_family', '#f1d5b8',
