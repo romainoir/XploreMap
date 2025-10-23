@@ -1051,6 +1051,7 @@
         tiles: ['mapterhorn://{z}/{x}/{y}'],
         encoding: 'terrarium',
         tileSize: 512,
+        maxzoom: 17,
         attribution: '<a href="https://mapterhorn.com/attribution">© Mapterhorn</a>'
       });
       map.addSource('hillshadeSource', {
@@ -1072,6 +1073,7 @@
         type: 'raster',
         tiles: [S2C_URL],
         tileSize: 256,
+        maxzoom: 14,
         attribution: '<a href="https://s2maps.eu/">© Sentinel-2 cloudless by EOX IT Services GmbH</a>'
       });
 
@@ -1238,4 +1240,5 @@
 </script>
 </body>
 </html>
+
 
