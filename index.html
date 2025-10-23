@@ -236,6 +236,125 @@
   const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
   const TILE_FADE_DURATION = 800;
   const S2_FADE_DURATION = 700;
+  const OVERTURE_BUILDINGS_PM_URL = 'https://data.source.coop/cholmes/overture/overture-buildings.pmtiles';
+  const OVERTURE_BUILDINGS_ATTRIBUTION = '<a href="https://overturemaps.org/">© Overture Maps Foundation</a>';
+  const OVERTURE_BUILDING_COLOR_EXPR = [
+    'match',
+    ['coalesce', ['get', 'subclass'], ['get', 'class']],
+    'residential', '#f1d5b8',
+    'multi_family', '#f1d5b8',
+    'single_family', '#f1d5b8',
+    'commercial', '#f5c08a',
+    'office', '#f5c08a',
+    'retail', '#f5c08a',
+    'industrial', '#c6bda9',
+    'warehouse', '#c6bda9',
+    'factory', '#c6bda9',
+    'logistics', '#c6bda9',
+    'education', '#cfe3ff',
+    'school', '#cfe3ff',
+    'university', '#cfe3ff',
+    'college', '#cfe3ff',
+    'healthcare', '#f4a9a0',
+    'hospital', '#f4a9a0',
+    'medical', '#f4a9a0',
+    'religious', '#d5c0f2',
+    'church', '#d5c0f2',
+    'temple', '#d5c0f2',
+    'synagogue', '#d5c0f2',
+    'civic', '#e1d1f3',
+    'government', '#e1d1f3',
+    'public', '#e1d1f3',
+    'hospitality', '#f5d0b8',
+    'hotel', '#f5d0b8',
+    'lodging', '#f5d0b8',
+    'recreation', '#d8e8d2',
+    'sports', '#d8e8d2',
+    'entertainment', '#d8e8d2',
+    'transportation', '#d9e3ef',
+    'station', '#d9e3ef',
+    'hangar', '#d9e3ef',
+    'garage', '#d9e3ef',
+    'agriculture', '#e9ddb8',
+    'barn', '#e9ddb8',
+    '#d9d2c2'
+  ];
+  const OVERTURE_BUILDING_HEIGHT_EXPR = [
+    'coalesce',
+    ['get', 'height'],
+    ['*', ['coalesce', ['get', 'num_floors'], ['get', 'levels'], 2], 3.3]
+  ];
+  const OVERTURE_BUILDING_BASE_EXPR = [
+    'coalesce',
+    ['get', 'ground_height'],
+    ['get', 'base_height'],
+    ['get', 'min_height'],
+    0
+  ];
+  const pmtilesProtocol = new pmtiles.Protocol({ metadata: true, errorOnMissingTile: true });
+  if (typeof maplibregl !== 'undefined' && typeof maplibregl.addProtocol === 'function') {
+    maplibregl.addProtocol('pmtiles', (params, abortController) => pmtilesProtocol.tile(params, abortController));
+  }
+  const overtureBuildingsTileset = new pmtiles.PMTiles(OVERTURE_BUILDINGS_PM_URL);
+  pmtilesProtocol.add(overtureBuildingsTileset);
+  let overtureVectorLayerIdPromise = null;
+  let loggedOvertureMetadataError = false;
+  const INITIAL_OVERZOOM_LEVELS = 2; // fetch tiles one zoom level higher for crisper rendering
+  const MAX_OVERZOOM_LEVELS = 3;
+  const MAX_PIXEL_RATIO = 4;
+  const NATIVE_PIXEL_RATIO = window.devicePixelRatio || 1;
+  function computePixelRatio(overzoomLevels) {
+    return Math.min(NATIVE_PIXEL_RATIO * Math.pow(2, overzoomLevels), MAX_PIXEL_RATIO);
+  }
+
+  function updateMapPixelRatio(mapInstance, pixelRatio) {
+    if (!mapInstance || !Number.isFinite(pixelRatio)) return;
+
+    if (typeof mapInstance.setPixelRatio === 'function') {
+      mapInstance.setPixelRatio(pixelRatio);
+      if (typeof mapInstance.triggerRepaint === 'function') {
+        mapInstance.triggerRepaint();
+      }
+      return;
+    }
+
+    const canvas = typeof mapInstance.getCanvas === 'function' ? mapInstance.getCanvas() : null;
+    const container = typeof mapInstance.getContainer === 'function' ? mapInstance.getContainer() : null;
+    if (!canvas || !container) return;
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (!width || !height) return;
+
+    const nextWidth = Math.round(width * pixelRatio);
+    const nextHeight = Math.round(height * pixelRatio);
+
+    if (canvas.width !== nextWidth) canvas.width = nextWidth;
+    if (canvas.height !== nextHeight) canvas.height = nextHeight;
+
+    if (canvas.style) {
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+    }
+
+    const painter = mapInstance.painter;
+    const context = painter && painter.context ? painter.context : null;
+    if (context) {
+      if (typeof context.setDevicePixelRatio === 'function') {
+        context.setDevicePixelRatio(pixelRatio);
+      } else if (typeof context.resize === 'function') {
+        context.resize(width, height, pixelRatio);
+      }
+    }
+
+    if (mapInstance.transform && typeof mapInstance.transform.resize === 'function') {
+      mapInstance.transform.resize(width, height);
+    }
+
+    if (typeof mapInstance.triggerRepaint === 'function') {
+      mapInstance.triggerRepaint();
+    }
+  }
 
   function getTextContent(el, tagName) {
     if (!el) return null;
@@ -379,6 +498,86 @@
     return [[minX, minY], [maxX, maxY]];
   }
 
+  async function getOvertureVectorLayerId() {
+    if (!overtureVectorLayerIdPromise) {
+      overtureVectorLayerIdPromise = overtureBuildingsTileset
+        .getMetadata()
+        .then((metadata) => {
+          const layers = metadata && Array.isArray(metadata.vector_layers) ? metadata.vector_layers : [];
+          const preferred = layers.find((layer) => typeof layer.id === 'string' && /build/i.test(layer.id));
+          if (preferred && preferred.id) return preferred.id;
+          if (layers[0] && layers[0].id) return layers[0].id;
+          return 'buildings';
+        })
+        .catch((error) => {
+          if (!loggedOvertureMetadataError) {
+            console.warn('Unable to read Overture buildings metadata', error);
+            loggedOvertureMetadataError = true;
+          }
+          return 'buildings';
+        });
+    }
+    return overtureVectorLayerIdPromise;
+  }
+
+  async function ensureOvertureBuildings(map, beforeLayerId) {
+    if (!map || typeof map.addSource !== 'function') return;
+
+    const layerId = await getOvertureVectorLayerId();
+    if (!layerId) return;
+
+    const sourceId = 'overture-buildings';
+    const flatLayerId = 'overture-buildings-flat';
+    const extrusionLayerId = 'overture-buildings-3d';
+
+    try {
+      if (map.getLayer(flatLayerId)) map.removeLayer(flatLayerId);
+      if (map.getLayer(extrusionLayerId)) map.removeLayer(extrusionLayerId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+      try { map.setLayoutProperty('building', 'visibility', 'none'); } catch (_) {}
+      try { map.setLayoutProperty('building-3d', 'visibility', 'none'); } catch (_) {}
+
+      map.addSource(sourceId, {
+        type: 'vector',
+        url: `pmtiles://${OVERTURE_BUILDINGS_PM_URL}`,
+        maxzoom: 15,
+        attribution: OVERTURE_BUILDINGS_ATTRIBUTION
+      });
+
+      const before = beforeLayerId || undefined;
+
+      map.addLayer({
+        id: flatLayerId,
+        type: 'fill',
+        source: sourceId,
+        'source-layer': layerId,
+        minzoom: 12,
+        paint: {
+          'fill-color': OVERTURE_BUILDING_COLOR_EXPR,
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 11.5, 0.0, 12.4, 0.7, 13.2, 0.82, 14.2, 0.9],
+          'fill-outline-color': 'rgba(121, 109, 93, 0.35)'
+        }
+      }, before);
+
+      map.addLayer({
+        id: extrusionLayerId,
+        type: 'fill-extrusion',
+        source: sourceId,
+        'source-layer': layerId,
+        minzoom: 14,
+        paint: {
+          'fill-extrusion-color': OVERTURE_BUILDING_COLOR_EXPR,
+          'fill-extrusion-opacity': 0.96,
+          'fill-extrusion-height': OVERTURE_BUILDING_HEIGHT_EXPR,
+          'fill-extrusion-base': OVERTURE_BUILDING_BASE_EXPR
+        }
+      }, before);
+    } catch (error) {
+      console.warn('Unable to add Overture buildings layer', error);
+    }
+  }
+
   function ensureGpxLayers(map, data, beforeLayerId) {
     if (!map) return;
     const emptyCollection = { type: 'FeatureCollection', features: [] };
@@ -478,12 +677,11 @@
     await waitForSWReady();
 
     // Mapterhorn protocol for DEM
-    const pmProto = new pmtiles.Protocol({ metadata: true, errorOnMissingTile: true });
     maplibregl.addProtocol('mapterhorn', async (params, abortController) => {
       const [z, x, y] = params.url.replace('mapterhorn://', '').split('/').map(Number);
       const name = z <= 12 ? 'planet' : `6-${x >> (z - 6)}-${y >> (z - 6)}`;
       const url = `pmtiles://https://download.mapterhorn.com/${name}.pmtiles/${z}/${x}/${y}.webp`;
-      const resp = await pmProto.tile({ ...params, url }, abortController);
+      const resp = await pmtilesProtocol.tile({ ...params, url }, abortController);
       if (resp.data === null) throw new Error(`Tile z=${z} x=${x} y=${y} not found.`);
       return resp;
     });
@@ -773,9 +971,12 @@
       }
 
       // Remove layers first, then sources
+      rmL('overture-buildings-3d');
+      rmL('overture-buildings-flat');
       rmL('contour-text'); rmL('contours');
       rmL('hillshade'); rmL('color-relief');
       rmL('s2cloudless');
+      rmS('overture-buildings');
       rmS('contours'); rmS('hillshadeSource'); rmS('reliefDem'); rmS('terrainSource');
       rmS('s2cloudless');
 
@@ -853,6 +1054,8 @@
           'hillshade-shadow-color':   'rgba(0,0,0,0.55)'
         }
       }, topLabelId || undefined);
+
+      await ensureOvertureBuildings(map, topLabelId);
 
       // Contours
       map.addSource('contours', {
