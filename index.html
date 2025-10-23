@@ -489,8 +489,7 @@
 
     // Load VersaTiles style upfront so we can patch glyphs/sprite
     const versaStyle = await fetch(VERSATILES_LOCAL_JSON, { cache: 'no-store' }).then(r => r.json());
-    // Use OpenMapTiles' public font endpoint to avoid 404s from the default VersaTiles glyph URL.
-    versaStyle.glyphs = 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf';
+    versaStyle.glyphs = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
     if ('sprite' in versaStyle) delete versaStyle.sprite;
 
     // Map init with VersaTiles
@@ -970,6 +969,7 @@
 </script>
 </body>
 </html>
+
 
 
 
