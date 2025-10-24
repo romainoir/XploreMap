@@ -20,6 +20,8 @@ const MODE_COLORS = {
 
 const HOVER_PIXEL_TOLERANCE = 12;
 const COORD_EPSILON = 1e-6;
+const MAX_ELEVATION_POINTS = 180;
+const MAX_DISTANCE_MARKERS = 60;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
 const createWaypointFeature = (coords, index, total) => ({
@@ -44,6 +46,7 @@ export class DirectionsManager {
 
     const [
       directionsToggle,
+      directionsDock,
       directionsControl,
       transportModes,
       swapButton,
@@ -54,6 +57,7 @@ export class DirectionsManager {
 
     this.map = map;
     this.directionsToggle = directionsToggle ?? null;
+    this.directionsDock = directionsDock ?? null;
     this.directionsControl = directionsControl ?? null;
     this.transportModes = transportModes ? Array.from(transportModes) : [];
     this.swapButton = swapButton ?? null;
@@ -64,6 +68,8 @@ export class DirectionsManager {
     this.waypoints = [];
     this.currentMode = 'foot-hiking';
     this.modeColors = { ...MODE_COLORS };
+
+    this.latestMetrics = null;
 
     this.isDragging = false;
     this.draggedWaypointIndex = null;
@@ -285,6 +291,15 @@ export class DirectionsManager {
     if (this.directionsControl) {
       this.directionsControl.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
     }
+    if (this.directionsDock) {
+      this.directionsDock.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    }
+    if (this.routeStats) {
+      this.routeStats.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    }
+    if (this.elevationChart) {
+      this.elevationChart.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    }
   }
 
   onWaypointMouseDown(event) {
@@ -478,6 +493,7 @@ export class DirectionsManager {
     this.routeGeojson = null;
     this.routeSegments = [];
     this.segmentLegLookup = [];
+    this.latestMetrics = null;
 
     this.map.getSource('route-line-source')?.setData(EMPTY_LINE_STRING);
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
@@ -570,20 +586,120 @@ export class DirectionsManager {
     return Math.abs(a[0] - b[0]) <= COORD_EPSILON && Math.abs(a[1] - b[1]) <= COORD_EPSILON;
   }
 
+  formatDistance(distanceKm) {
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+      return '0.0';
+    }
+    if (distanceKm >= 100) {
+      return Math.round(distanceKm).toString();
+    }
+    if (distanceKm >= 10) {
+      return distanceKm.toFixed(1);
+    }
+    return parseFloat(distanceKm.toFixed(2)).toString();
+  }
+
+  calculateRouteMetrics(route) {
+    const metrics = { distanceKm: 0, ascent: 0, descent: 0 };
+    if (!route || !route.geometry?.coordinates) {
+      return metrics;
+    }
+
+    const coords = route.geometry.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) {
+      return metrics;
+    }
+
+    if (turfApi) {
+      try {
+        const line = turfApi.lineString(coords);
+        metrics.distanceKm = Number(turfApi.length(line, { units: 'kilometers' })) || 0;
+      } catch (error) {
+        console.error('Error computing route length', error);
+      }
+    }
+
+    if (!metrics.distanceKm) {
+      const summaryDistance = Number(route.properties?.summary?.distance);
+      if (Number.isFinite(summaryDistance) && summaryDistance > 0) {
+        metrics.distanceKm = summaryDistance / 1000;
+      } else if (Array.isArray(route.properties?.segments)) {
+        const totalMeters = route.properties.segments
+          .map((segment) => Number(segment.distance) || 0)
+          .reduce((total, value) => total + value, 0);
+        metrics.distanceKm = totalMeters / 1000;
+      }
+    }
+
+    let previousElevation = null;
+    coords.forEach((coord) => {
+      const elevation = coord?.[2];
+      if (!Number.isFinite(elevation)) return;
+      if (previousElevation === null) {
+        previousElevation = elevation;
+        return;
+      }
+      const delta = elevation - previousElevation;
+      if (delta > 0) {
+        metrics.ascent += delta;
+      } else if (delta < 0) {
+        metrics.descent += Math.abs(delta);
+      }
+      previousElevation = elevation;
+    });
+
+    if (metrics.ascent === 0 && metrics.descent === 0 && Array.isArray(route.properties?.segments)) {
+      metrics.ascent = route.properties.segments
+        .map((segment) => Number(segment.ascent) || 0)
+        .reduce((total, value) => total + value, 0);
+      metrics.descent = route.properties.segments
+        .map((segment) => Number(segment.descent) || 0)
+        .reduce((total, value) => total + value, 0);
+    }
+
+    return metrics;
+  }
+
+  downsampleElevations(elevations, limit = MAX_ELEVATION_POINTS) {
+    if (!Array.isArray(elevations) || elevations.length <= limit) {
+      return elevations ?? [];
+    }
+
+    const result = [];
+    const bucketSize = elevations.length / limit;
+    for (let bucketIndex = 0; bucketIndex < limit; bucketIndex += 1) {
+      const start = Math.floor(bucketIndex * bucketSize);
+      const end = bucketIndex === limit - 1
+        ? elevations.length
+        : Math.max(start + 1, Math.floor((bucketIndex + 1) * bucketSize));
+
+      let sum = 0;
+      let count = 0;
+      for (let i = start; i < end; i += 1) {
+        sum += elevations[i];
+        count += 1;
+      }
+
+      result.push(count ? sum / count : elevations[start]);
+    }
+
+    return result;
+  }
+
   updateStats(route) {
     if (!this.routeStats) return;
-    if (!route || !route.properties?.segments?.length) {
+    if (!route || !route.geometry?.coordinates || route.geometry.coordinates.length < 2) {
       this.routeStats.innerHTML = '';
       return;
     }
 
-    const segment = route.properties.segments[0];
-    const distance = (segment.distance / 1000).toFixed(1);
-    const ascent = Math.round(segment.ascent);
-    const descent = Math.round(segment.descent);
+    const metrics = this.latestMetrics ?? this.calculateRouteMetrics(route);
+    const distanceLabel = this.formatDistance(metrics.distanceKm);
+    const ascent = Math.max(0, Math.round(metrics.ascent));
+    const descent = Math.max(0, Math.round(metrics.descent));
 
     this.routeStats.innerHTML = `
-      <div class="distance">Distance: <span>${distance}</span> km</div>
+      <div class="distance">Distance: <span>${distanceLabel}</span> km</div>
       <div class="elevation">Ascent: <span>${ascent}</span> m</div>
       <div class="elevation">Descent: <span>${descent}</span> m</div>
     `;
@@ -605,14 +721,15 @@ export class DirectionsManager {
       return;
     }
 
+    const sampledElevations = this.downsampleElevations(elevations);
     const maxElevation = Math.max(...elevations);
     const minElevation = Math.min(...elevations);
     const range = Math.max(1, maxElevation - minElevation);
 
-    const chartHtml = elevations
+    const chartHtml = sampledElevations
       .map((value) => {
-        const height = Math.max(1, ((value - minElevation) / range) * 80);
-        return `<div class="elevation-bar" style="height:${height}%" title="${Math.round(value)}m"></div>`;
+        const height = Math.max(2, ((value - minElevation) / range) * 100);
+        return `<div class="elevation-bar" style="height:${height.toFixed(2)}%" title="${Math.round(value)} m"></div>`;
       })
       .join('');
 
@@ -629,23 +746,62 @@ export class DirectionsManager {
     const source = this.map.getSource('distance-markers-source');
     if (!source) return;
 
-    if (!route || !route.geometry?.coordinates || !route.properties?.segments?.length || !turfApi) {
+    if (!route || !route.geometry?.coordinates || !turfApi) {
       source.setData(EMPTY_COLLECTION);
       return;
     }
 
     try {
-      const line = turfApi.lineString(route.geometry.coordinates);
-      const totalDistance = route.properties.segments[0].distance / 1000;
+      const coordinates = route.geometry.coordinates;
+      if (!Array.isArray(coordinates) || coordinates.length < 2) {
+        source.setData(EMPTY_COLLECTION);
+        return;
+      }
+
+      const metrics = this.latestMetrics ?? this.calculateRouteMetrics(route);
+      const totalDistance = Number(metrics.distanceKm) || 0;
+      if (totalDistance <= 0) {
+        source.setData(EMPTY_COLLECTION);
+        return;
+      }
+
+      const line = turfApi.lineString(coordinates);
+      const markerInterval = totalDistance > MAX_DISTANCE_MARKERS
+        ? Math.ceil(totalDistance / MAX_DISTANCE_MARKERS)
+        : 1;
+
+      const formatMarkerLabel = (value) => {
+        if (value === 0) return '0 km';
+        if (value >= 100) return `${Math.round(value)} km`;
+        if (value >= 10) return `${parseFloat(value.toFixed(1))} km`;
+        if (value >= 1) return `${parseFloat(value.toFixed(1))} km`;
+        return `${parseFloat(value.toFixed(2))} km`;
+      };
+
       const features = [];
-      for (let km = 0; km <= totalDistance; km += 1) {
-        const along = turfApi.along(line, km, { units: 'kilometers' });
+      let lastLabelValue = -Infinity;
+
+      const addMarker = (distanceKm, labelValue = distanceKm) => {
+        const clamped = Math.min(distanceKm, totalDistance);
+        const point = turfApi.along(line, clamped, { units: 'kilometers' });
         features.push({
           type: 'Feature',
-          properties: { distance: `${km.toFixed(0)} km` },
-          geometry: { type: 'Point', coordinates: along.geometry.coordinates }
+          properties: { distance: formatMarkerLabel(labelValue) },
+          geometry: { type: 'Point', coordinates: point.geometry.coordinates }
         });
+        lastLabelValue = labelValue;
+      };
+
+      addMarker(0, 0);
+
+      for (let km = markerInterval; km < totalDistance; km += markerInterval) {
+        addMarker(km, km);
       }
+
+      if (totalDistance - lastLabelValue > 0.01) {
+        addMarker(totalDistance, totalDistance);
+      }
+
       source.setData({ type: 'FeatureCollection', features });
     } catch (error) {
       console.error('Error updating distance markers', error);
@@ -655,6 +811,7 @@ export class DirectionsManager {
 
   applyRoute(route) {
     this.routeGeojson = route;
+    this.latestMetrics = this.calculateRouteMetrics(route);
     this.map.getSource('route-line-source')?.setData(route ?? EMPTY_LINE_STRING);
     this.rebuildSegmentData();
     this.updateDistanceMarkers(route);

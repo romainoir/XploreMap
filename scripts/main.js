@@ -160,6 +160,7 @@ async function init() {
   const gpxImportButton = document.getElementById('gpxImportButton');
   const gpxExportButton = document.getElementById('gpxExportButton');
   const directionsToggle = document.getElementById('directionsToggle');
+  const directionsDock = document.getElementById('directionsDock');
   const directionsControl = document.getElementById('directionsControl');
   const transportModes = directionsControl?.querySelectorAll('[data-mode]') ?? [];
   const swapButton = document.getElementById('swapDirectionsButton');
@@ -204,6 +205,7 @@ async function init() {
     try {
       new DirectionsManager(map, [
         directionsToggle,
+        directionsDock,
         directionsControl,
         transportModes,
         swapButton,

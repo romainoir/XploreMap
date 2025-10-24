@@ -40,20 +40,23 @@
   </div>
   <div class="directions-ui">
     <button id="directionsToggle" class="btn directions-toggle" type="button" aria-controls="directionsControl">Directions</button>
-    <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
-      <div class="transport-modes" role="group" aria-label="Travel mode">
-        <button class="btn active" type="button" data-mode="foot-hiking">Hike</button>
-        <button class="btn" type="button" data-mode="cycling-regular">Cycle</button>
-        <button class="btn" type="button" data-mode="driving-car">Drive</button>
-      </div>
-      <div class="directions-actions">
-        <button id="swapDirectionsButton" class="btn" type="button">Swap A/B</button>
-        <button id="clearDirectionsButton" class="btn" type="button">Clear</button>
-      </div>
-      <div id="routeStats" class="route-stats" aria-live="polite"></div>
-      <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
-      <p class="directions-hint">Click the map to set start and end points. Drag markers to adjust the route or double-click via points to remove them.</p>
+  </div>
+</div>
+
+<div id="directionsDock" class="directions-dock" aria-hidden="true">
+  <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
+    <div class="transport-modes" role="group" aria-label="Travel mode">
+      <button class="btn active" type="button" data-mode="foot-hiking">Hike</button>
+      <button class="btn" type="button" data-mode="cycling-regular">Cycle</button>
+      <button class="btn" type="button" data-mode="driving-car">Drive</button>
     </div>
+    <div class="directions-actions">
+      <button id="swapDirectionsButton" class="btn" type="button">Swap A/B</button>
+      <button id="clearDirectionsButton" class="btn" type="button">Clear</button>
+    </div>
+    <div id="routeStats" class="route-stats" aria-live="polite"></div>
+    <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
+    <p class="directions-hint">Click the map to set start and end points. Drag markers to adjust the route or double-click via points to remove them.</p>
   </div>
 </div>
 
