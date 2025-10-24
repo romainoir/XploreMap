@@ -276,16 +276,10 @@ html, body { margin:0; height:100%; }
   opacity: 0.85;
 }
 
-.summary-item.ascent {
-  color: rgba(12, 121, 89, 0.85);
-}
-
-.summary-item.descent {
-  color: rgba(190, 68, 68, 0.85);
-}
-
+.summary-item.ascent,
+.summary-item.descent,
 .summary-item.distance {
-  color: rgba(17, 34, 48, 0.75);
+  color: inherit;
 }
 
 .elevation-plot {

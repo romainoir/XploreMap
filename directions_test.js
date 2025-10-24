@@ -30,25 +30,107 @@ const turfApi = typeof turf !== 'undefined' ? turf : null;
 const DOUBLE_ARROW_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 3.5a1 1 0 0 1 2 0V7h3.38a1 1 0 0 1 .7 1.7L13.8 11H15a1 1 0 0 1 .7 1.7L12 16.4l-3.7-3.7A1 1 0 0 1 9 11h1.2l-3.3-3.3A1 1 0 0 1 7.6 7H11V3.5Zm0 7.1V9H9.41l1.97 1.97a1 1 0 0 1 0 1.42L9.4 14.37H11v-1.6a1 1 0 0 1 2 0v1.6h1.6l-1.98-1.98a1 1 0 0 1 0-1.41L14.6 9H13v1.6a1 1 0 0 1-2 0Z"/></svg>';
 const ASCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 18a1 1 0 0 1-.7-1.7l6.3-6.3a1 1 0 0 1 1.4 0l3.3 3.3 4.9-6.7H17a1 1 0 0 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V7.41l-5.6 7.6a1 1 0 0 1-1.5.12l-3.3-3.3-5.6 5.6a1 1 0 0 1-.7.27Z"/></svg>';
 const DESCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 6a1 1 0 0 1 .7 1.7l-6.3 6.3a1 1 0 0 1-1.4 0l-3.3-3.3-4.9 6.7H7a1 1 0 0 1 0 2H2a1 1 0 0 1-1-1v-5a1 1 0 0 1 2 0v3.59l5.6-7.6a1 1 0 0 1 1.5-.12l3.3 3.3 5.6-5.6a1 1 0 0 1 .7-.27Z"/></svg>';
-const DISTANCE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4.5A2.5 2.5 0 1 1 6.5 7 2.5 2.5 0 0 1 4 4.5Zm0 0a4.5 4.5 0 0 0-1 8.88V19a1 1 0 0 0 1.45.89l3.6-1.8 3.6 1.8a1 1 0 0 0 .9 0l3.6-1.8 3.6 1.8A1 1 0 0 0 20 19v-4.37A4.5 4.5 0 1 0 17.5 7c0 .74.2 1.45.53 2.06l-1.66.83A4.47 4.47 0 0 0 14.5 7a4.5 4.5 0 0 0-4.5-4.5 4.49 4.49 0 0 0-4.01 2.29A4.49 4.49 0 0 0 4 4.5Zm1 3A2.5 2.5 0 0 1 7.5 5a2.5 2.5 0 0 1 2.5 2.5V18l-2.6-1.3a1 1 0 0 0-.9 0L5 18Z"/></svg>';
 
 const SUMMARY_ICONS = {
   ascent: ASCENT_ICON,
-  descent: DESCENT_ICON,
-  distance: DISTANCE_ICON
+  descent: DESCENT_ICON
 };
 
-const createWaypointFeature = (coords, index, total) => ({
-  type: 'Feature',
-  properties: {
-    index,
-    title: index === 0 ? 'A' : index === total - 1 ? 'B' : ''
-  },
-  geometry: {
-    type: 'Point',
-    coordinates: coords
+const DISTANCE_MARKER_PREFIX = 'distance-marker-';
+const DISTANCE_MARKER_COLOR = '#f38b1c';
+
+function createDistanceMarkerImage(label, {
+  fill = DISTANCE_MARKER_COLOR
+} = {}) {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return null;
   }
-});
+
+  const deviceRatio = 2;
+  const fontSize = 13;
+  const paddingX = 8;
+  const paddingY = 6;
+  const borderRadius = 8;
+  const font = `600 ${fontSize * deviceRatio}px 'Noto Sans', 'Noto Sans Bold', sans-serif`;
+  context.font = font;
+  const metrics = context.measureText(label);
+  const textWidth = metrics.width;
+
+  const baseWidth = Math.ceil(textWidth / deviceRatio + paddingX * 2);
+  const baseHeight = Math.ceil(fontSize + paddingY * 2);
+
+  canvas.width = baseWidth * deviceRatio;
+  canvas.height = baseHeight * deviceRatio;
+
+  context.scale(deviceRatio, deviceRatio);
+  context.font = `600 ${fontSize}px 'Noto Sans', 'Noto Sans Bold', sans-serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+
+  const drawRoundedRect = (x, y, width, height, radius) => {
+    const r = Math.min(radius, width / 2, height / 2);
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.lineTo(x + width - r, y);
+    context.quadraticCurveTo(x + width, y, x + width, y + r);
+    context.lineTo(x + width, y + height - r);
+    context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    context.lineTo(x + r, y + height);
+    context.quadraticCurveTo(x, y + height, x, y + height - r);
+    context.lineTo(x, y + r);
+    context.quadraticCurveTo(x, y, x + r, y);
+    context.closePath();
+  };
+
+  drawRoundedRect(0, 0, baseWidth, baseHeight, borderRadius);
+  context.fillStyle = fill;
+  context.fill();
+
+  return { image: canvas, pixelRatio: deviceRatio };
+}
+
+function ensureDistanceMarkerImage(map, label) {
+  const imageId = `${DISTANCE_MARKER_PREFIX}${label}`;
+  if (map.hasImage(imageId)) {
+    return imageId;
+  }
+
+  const rendered = createDistanceMarkerImage(label);
+  if (!rendered) {
+    return null;
+  }
+
+  map.addImage(imageId, rendered.image, { pixelRatio: rendered.pixelRatio });
+  return imageId;
+}
+
+const createWaypointFeature = (coords, index, total) => {
+  const isStart = index === 0;
+  const isEnd = index === total - 1 && total > 1;
+  const role = isStart ? 'start' : isEnd ? 'end' : 'via';
+
+  let title = '';
+  if (isStart) {
+    title = 'Départ';
+  } else if (isEnd) {
+    title = 'Arrivée';
+  }
+
+  return {
+    type: 'Feature',
+    properties: {
+      index,
+      role,
+      title
+    },
+    geometry: {
+      type: 'Point',
+      coordinates: coords
+    }
+  };
+};
 
 const toLngLat = (coord) => new maplibregl.LngLat(coord[0], coord[1]);
 
@@ -147,7 +229,6 @@ export class DirectionsManager {
 
     removeLayer('route-line');
     removeLayer('route-segment-hover');
-    removeLayer('distance-marker-points');
     removeLayer('distance-markers');
     removeLayer('waypoint-hover-drag');
     removeLayer('route-hover-point');
@@ -211,22 +292,9 @@ export class DirectionsManager {
       paint: {
         'line-color': 'yellow',
         'line-width': 6,
-        'line-opacity': 0.8
+        'line-opacity': 0
       },
       filter: ['==', 'segmentIndex', -1]
-    });
-
-    this.map.addLayer({
-      id: 'distance-marker-points',
-      type: 'circle',
-      source: 'distance-markers-source',
-      paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 12, 4.5, 16, 6.5],
-        'circle-color': '#ffffff',
-        'circle-opacity': 0.95,
-        'circle-stroke-color': this.modeColors[this.currentMode],
-        'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 10, 1.4, 14, 2.2]
-      }
     });
 
     this.map.addLayer({
@@ -235,19 +303,20 @@ export class DirectionsManager {
       source: 'distance-markers-source',
       layout: {
         'symbol-placement': 'point',
-        'text-field': '{distance}',
+        'icon-image': ['concat', DISTANCE_MARKER_PREFIX, ['get', 'label']],
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-anchor': 'center',
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.55, 12, 0.65, 16, 0.85],
+        'text-field': '{label}',
         'text-size': 12,
-        'text-offset': [0, 1.25],
-        'text-anchor': 'top',
+        'text-anchor': 'center',
+        'text-font': ['Noto Sans Bold'],
         'text-allow-overlap': true,
-        'text-ignore-placement': true,
-        'text-font': ['Noto Sans Bold']
+        'text-ignore-placement': true
       },
       paint: {
-        'text-color': this.modeColors[this.currentMode],
-        'text-halo-color': 'rgba(0, 0, 0, 0.6)',
-        'text-halo-width': 1,
-        'text-halo-blur': 0.3
+        'text-color': '#ffffff'
       }
     });
 
@@ -267,10 +336,24 @@ export class DirectionsManager {
       type: 'circle',
       source: 'waypoints',
       paint: {
-        'circle-radius': 8,
-        'circle-color': '#fff',
-        'circle-stroke-width': 3,
-        'circle-stroke-color': '#000'
+        'circle-radius': [
+          'case',
+          ['==', ['get', 'role'], 'start'], 9,
+          ['==', ['get', 'role'], 'end'], 9,
+          0
+        ],
+        'circle-color': [
+          'case',
+          ['==', ['get', 'role'], 'start'], '#2f8f3b',
+          ['==', ['get', 'role'], 'end'], '#d64545',
+          'rgba(0, 0, 0, 0)'
+        ],
+        'circle-stroke-width': [
+          'case',
+          ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 2,
+          0
+        ],
+        'circle-stroke-color': '#ffffff'
       },
       filter: ['==', '$type', 'Point']
     });
@@ -283,10 +366,19 @@ export class DirectionsManager {
         'symbol-placement': 'point',
         'text-field': ['get', 'title'],
         'text-size': 14,
-        'text-offset': [0, 1.5]
+        'text-offset': [0, 1.4],
+        'text-anchor': 'top'
       },
       paint: {
-        'text-color': '#fff'
+        'text-color': [
+          'case',
+          ['==', ['get', 'role'], 'start'], '#2f8f3b',
+          ['==', ['get', 'role'], 'end'], '#d64545',
+          'rgba(17, 34, 48, 0.75)'
+        ],
+        'text-halo-color': 'rgba(255, 255, 255, 0.9)',
+        'text-halo-width': 1.2,
+        'text-halo-blur': 0.5
       }
     });
 
@@ -1284,13 +1376,6 @@ export class DirectionsManager {
     if (this.map.getLayer('route-line')) {
       this.map.setPaintProperty('route-line', 'line-color', this.modeColors[mode]);
     }
-    if (this.map.getLayer('distance-marker-points')) {
-      this.map.setPaintProperty('distance-marker-points', 'circle-stroke-color', this.modeColors[mode]);
-    }
-    if (this.map.getLayer('distance-markers')) {
-      this.map.setPaintProperty('distance-markers', 'text-color', this.modeColors[mode]);
-      this.map.setPaintProperty('distance-markers', 'text-halo-color', 'rgba(0, 0, 0, 0.6)');
-    }
     if (this.map.getLayer('route-hover-point')) {
       this.map.setPaintProperty('route-hover-point', 'circle-stroke-color', this.modeColors[mode]);
     }
@@ -1549,16 +1634,20 @@ export class DirectionsManager {
     ];
 
     const listItems = stats
-      .map(({ key, label, value }) => `
+      .map(({ key, label, value }) => {
+        const icon = SUMMARY_ICONS[key] ?? '';
+        const iconMarkup = icon ? `${icon}` : '';
+        return `
         <li
           class="summary-item ${key}"
           aria-label="${label} ${value}"
           title="${label}"
         >
-          ${SUMMARY_ICONS[key]}
+          ${iconMarkup}
           <span aria-hidden="true">${value}</span>
         </li>
-      `.trim())
+      `.trim();
+      })
       .join('');
 
     this.routeStats.innerHTML = `
@@ -1673,7 +1762,6 @@ export class DirectionsManager {
           <span>${descent} m</span>
         </div>
         <div class="summary-item distance" title="Total distance">
-          ${SUMMARY_ICONS.distance}
           <span>${distanceLabel} km</span>
         </div>
       </div>
@@ -1720,11 +1808,13 @@ export class DirectionsManager {
         : 1;
 
       const formatMarkerLabel = (value) => {
-        if (value === 0) return '0 km';
-        if (value >= 100) return `${Math.round(value)} km`;
-        if (value >= 10) return `${parseFloat(value.toFixed(1))} km`;
-        if (value >= 1) return `${parseFloat(value.toFixed(1))} km`;
-        return `${parseFloat(value.toFixed(2))} km`;
+        if (!Number.isFinite(value)) return '';
+        if (value === 0) return '0';
+        if (value >= 100) return `${Math.round(value)}`;
+        if (value >= 10) return `${parseFloat(value.toFixed(1))}`;
+        if (value >= 1) return `${parseFloat(value.toFixed(1))}`;
+        const precise = parseFloat(value.toFixed(2));
+        return Number.isFinite(precise) ? `${precise}` : '';
       };
 
       const features = [];
@@ -1733,9 +1823,13 @@ export class DirectionsManager {
       const addMarker = (distanceKm, labelValue = distanceKm) => {
         const clamped = Math.min(distanceKm, totalDistance);
         const point = turfApi.along(line, clamped, { units: 'kilometers' });
+        const label = formatMarkerLabel(labelValue);
+        if (!label) return;
+        const imageId = ensureDistanceMarkerImage(this.map, label);
+        if (!imageId) return;
         features.push({
           type: 'Feature',
-          properties: { distance: formatMarkerLabel(labelValue) },
+          properties: { label },
           geometry: { type: 'Point', coordinates: point.geometry.coordinates }
         });
         lastLabelValue = labelValue;
