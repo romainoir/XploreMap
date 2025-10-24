@@ -88,6 +88,7 @@ export class DirectionsManager {
     this.setupRouteLayers();
     this.setupUIHandlers();
     this.setupMapHandlers();
+    this.updatePanelVisibilityState();
   }
 
   setupRouteLayers() {
@@ -240,6 +241,7 @@ export class DirectionsManager {
     this.directionsToggle?.addEventListener('click', () => {
       this.directionsToggle.classList.toggle('active');
       this.directionsControl?.classList.toggle('visible');
+      this.updatePanelVisibilityState();
     });
 
     this.transportModes.forEach((button) => {
@@ -273,6 +275,16 @@ export class DirectionsManager {
 
   isPanelVisible() {
     return Boolean(this.directionsControl?.classList.contains('visible'));
+  }
+
+  updatePanelVisibilityState() {
+    const isVisible = this.isPanelVisible();
+    if (this.directionsToggle) {
+      this.directionsToggle.setAttribute('aria-expanded', isVisible ? 'true' : 'false');
+    }
+    if (this.directionsControl) {
+      this.directionsControl.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    }
   }
 
   onWaypointMouseDown(event) {

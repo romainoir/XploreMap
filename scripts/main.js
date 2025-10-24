@@ -12,6 +12,7 @@ import {
   VERSATILES_LOCAL_JSON
 } from './constants.js';
 import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from './gpx.js';
+import { DirectionsManager } from '../directions_test.js';
 import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
 import { waitForSWReady } from './service-worker.js';
 
@@ -158,6 +159,13 @@ async function init() {
   const gpxFileInput = document.getElementById('gpxFileInput');
   const gpxImportButton = document.getElementById('gpxImportButton');
   const gpxExportButton = document.getElementById('gpxExportButton');
+  const directionsToggle = document.getElementById('directionsToggle');
+  const directionsControl = document.getElementById('directionsControl');
+  const transportModes = directionsControl?.querySelectorAll('[data-mode]') ?? [];
+  const swapButton = document.getElementById('swapDirectionsButton');
+  const clearButton = document.getElementById('clearDirectionsButton');
+  const routeStats = document.getElementById('routeStats');
+  const elevationChart = document.getElementById('elevationChart');
 
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
@@ -191,6 +199,22 @@ async function init() {
   };
 
   applyGpxData(EMPTY_COLLECTION);
+
+  map.on('load', () => {
+    try {
+      new DirectionsManager(map, [
+        directionsToggle,
+        directionsControl,
+        transportModes,
+        swapButton,
+        clearButton,
+        routeStats,
+        elevationChart
+      ]);
+    } catch (error) {
+      console.error('Failed to initialize directions manager', error);
+    }
+  });
 
   if (gpxImportButton && gpxFileInput) {
     gpxImportButton.addEventListener('click', () => {
