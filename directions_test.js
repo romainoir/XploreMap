@@ -71,13 +71,30 @@ function createMarkerCanvas(baseSize = 52) {
   return { canvas, ctx, ratio, size: baseSize };
 }
 
+function finalizeMarkerImage(base) {
+  if (!base) {
+    return null;
+  }
+
+  const { canvas, ctx, ratio } = base;
+  const width = canvas.width;
+  const height = canvas.height;
+
+  if (!width || !height) {
+    return null;
+  }
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  return { image: imageData, pixelRatio: ratio };
+}
+
 function createFlagMarkerImage(fillColor) {
   const base = createMarkerCanvas();
   if (!base) {
     return null;
   }
 
-  const { canvas, ctx, ratio, size } = base;
+  const { ctx, size } = base;
   const poleX = size * 0.32;
   const poleTop = size * 0.16;
   const poleBottom = size * 0.88;
@@ -108,7 +125,7 @@ function createFlagMarkerImage(fillColor) {
   ctx.fill();
   ctx.stroke();
 
-  return { image: canvas, pixelRatio: ratio };
+  return finalizeMarkerImage(base);
 }
 
 function createTentMarkerImage(fillColor) {
@@ -117,7 +134,7 @@ function createTentMarkerImage(fillColor) {
     return null;
   }
 
-  const { canvas, ctx, ratio, size } = base;
+  const { ctx, size } = base;
   const baseY = size * 0.84;
   const topY = size * 0.18;
   const leftX = size * 0.24;
@@ -156,7 +173,7 @@ function createTentMarkerImage(fillColor) {
   ctx.closePath();
   ctx.fill();
 
-  return { image: canvas, pixelRatio: ratio };
+  return finalizeMarkerImage(base);
 }
 
 function ensureSegmentMarkerImages(map) {
