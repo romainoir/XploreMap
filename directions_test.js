@@ -27,9 +27,11 @@ const ELEVATION_TICK_TARGET = 5;
 const DISTANCE_TICK_TARGET = 6;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
+const DOUBLE_ARROW_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 3.5a1 1 0 0 1 2 0V7h3.38a1 1 0 0 1 .7 1.7L13.8 11H15a1 1 0 0 1 .7 1.7L12 16.4l-3.7-3.7A1 1 0 0 1 9 11h1.2l-3.3-3.3A1 1 0 0 1 7.6 7H11V3.5Zm0 7.1V9H9.41l1.97 1.97a1 1 0 0 1 0 1.42L9.4 14.37H11v-1.6a1 1 0 0 1 2 0v1.6h1.6l-1.98-1.98a1 1 0 0 1 0-1.41L14.6 9H13v1.6a1 1 0 0 1-2 0Z"/></svg>';
+
 const SUMMARY_ICONS = {
-  ascent: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4 17.5 9.5l-1.4 1.4L13 7.8V20h-2V7.8l-3.1 3.1-1.4-1.4Z"/></svg>',
-  descent: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20 6.5 14.5l1.4-1.4L11 16.2V4h2v12.2l3.1-3.1 1.4 1.4Z"/></svg>',
+  ascent: DOUBLE_ARROW_ICON,
+  descent: DOUBLE_ARROW_ICON,
   distance: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.4 6.4 2.8 11l4.6 4.6 1.4-1.4-2.2-2.2h10.8l-2.2 2.2 1.4 1.4 4.6-4.6-4.6-4.6-1.4 1.4 2.2 2.2H6.6l2.2-2.2Z"/></svg>'
 };
 
@@ -37,7 +39,7 @@ const createWaypointFeature = (coords, index, total) => ({
   type: 'Feature',
   properties: {
     index,
-    title: index === 0 ? 'A' : index === total - 1 ? 'B' : `Via ${index}`
+    title: index === 0 ? 'A' : index === total - 1 ? 'B' : ''
   },
   geometry: {
     type: 'Point',
@@ -67,6 +69,7 @@ export class DirectionsManager {
     ] = uiElements;
 
     this.map = map;
+    this.mapContainer = map.getContainer?.() ?? null;
     this.directionsToggle = directionsToggle ?? null;
     this.directionsDock = directionsDock ?? null;
     this.directionsControl = directionsControl ?? null;
@@ -97,6 +100,10 @@ export class DirectionsManager {
     this.routeGeojson = null;
     this.routeSegments = [];
     this.segmentLegLookup = [];
+    this.routeProfile = null;
+    this.elevationSamples = [];
+    this.elevationChartContainer = null;
+    this.highlightedElevationBar = null;
 
     this.setHintVisible(false);
 
@@ -109,6 +116,8 @@ export class DirectionsManager {
     };
     this.handleMapClick = (event) => this.onMapClick(event);
     this.handleWaypointDoubleClick = (event) => this.onWaypointDoubleClick(event);
+
+    this.routeHoverTooltip = null;
 
     this.setupRouteLayers();
     this.setupUIHandlers();
@@ -132,6 +141,7 @@ export class DirectionsManager {
     removeLayer('route-segment-hover');
     removeLayer('distance-markers');
     removeLayer('waypoint-hover-drag');
+    removeLayer('route-hover-point');
     removeLayer('waypoints');
     removeLayer('waypoints-hit-area');
     removeLayer('route-markers');
@@ -139,6 +149,7 @@ export class DirectionsManager {
     removeSource('route-line-source');
     removeSource('route-segments-source');
     removeSource('distance-markers-source');
+    removeSource('route-hover-point-source');
     removeSource('waypoints');
 
     this.map.addSource('route-line-source', {
@@ -152,6 +163,11 @@ export class DirectionsManager {
     });
 
     this.map.addSource('distance-markers-source', {
+      type: 'geojson',
+      data: EMPTY_COLLECTION
+    });
+
+    this.map.addSource('route-hover-point-source', {
       type: 'geojson',
       data: EMPTY_COLLECTION
     });
@@ -205,7 +221,9 @@ export class DirectionsManager {
         'text-ignore-placement': true
       },
       paint: {
-        'text-color': this.modeColors[this.currentMode]
+        'text-color': this.modeColors[this.currentMode],
+        'text-halo-color': 'rgba(0, 0, 0, 0.6)',
+        'text-halo-width': 1
       }
     });
 
@@ -259,6 +277,19 @@ export class DirectionsManager {
         'circle-stroke-color': 'rgba(0, 0, 0, 0.7)'
       },
       filter: ['==', 'index', -1]
+    });
+
+    this.map.addLayer({
+      id: 'route-hover-point',
+      type: 'circle',
+      source: 'route-hover-point-source',
+      paint: {
+        'circle-radius': 6,
+        'circle-color': '#fff',
+        'circle-stroke-width': 3,
+        'circle-stroke-color': this.modeColors[this.currentMode],
+        'circle-opacity': 0
+      }
     });
   }
 
@@ -337,6 +368,7 @@ export class DirectionsManager {
     }
     if (!isVisible) {
       this.setHintVisible(false);
+      this.hideRouteHover();
     }
   }
 
@@ -444,7 +476,14 @@ export class DirectionsManager {
     if (closestIndex === -1) {
       this.resetSegmentHover();
     } else {
+      const segment = this.routeSegments[closestIndex];
+      if (!segment) {
+        this.resetSegmentHover();
+        return;
+      }
+      const projection = this.projectPointOnSegment(event.lngLat, segment.start, segment.end);
       this.setHoveredSegment(closestIndex);
+      this.updateRouteHoverDisplay(event.point, segment, projection);
     }
   }
 
@@ -462,6 +501,7 @@ export class DirectionsManager {
 
   resetSegmentHover() {
     this.setHoveredSegment(null);
+    this.hideRouteHover();
   }
 
   addViaWaypoint(lngLat) {
@@ -469,7 +509,7 @@ export class DirectionsManager {
     const segment = this.routeSegments[this.hoveredSegmentIndex];
     if (!segment) return;
 
-    const snapped = this.projectPointOnSegment(lngLat, segment.start, segment.end);
+    const { coordinates: snapped } = this.projectPointOnSegment(lngLat, segment.start, segment.end);
     const insertIndex = this.hoveredLegIndex !== null
       ? Math.min(this.hoveredLegIndex + 1, this.waypoints.length - 1)
       : this.waypoints.length - 1;
@@ -499,7 +539,7 @@ export class DirectionsManager {
     const dy = endPixel.y - startPixel.y;
     const lengthSquared = dx * dx + dy * dy;
     if (lengthSquared === 0) {
-      return [...startCoord];
+      return { coordinates: [...startCoord], t: 0 };
     }
     let t = ((clickPixel.x - startPixel.x) * dx + (clickPixel.y - startPixel.y) * dy) / lengthSquared;
     t = Math.max(0, Math.min(1, t));
@@ -508,7 +548,7 @@ export class DirectionsManager {
       y: startPixel.y + t * dy
     };
     const result = this.map.unproject(projected);
-    return [result.lng, result.lat];
+    return { coordinates: [result.lng, result.lat], t };
   }
 
   pointToSegmentDistance(point, startPixel, endPixel) {
@@ -527,15 +567,275 @@ export class DirectionsManager {
     return Math.hypot(point.x - projection.x, point.y - projection.y);
   }
 
+  computeDistanceKm(startCoord, endCoord) {
+    if (!startCoord || !endCoord) return 0;
+    if (turfApi) {
+      try {
+        return turfApi.distance(turfApi.point(startCoord), turfApi.point(endCoord), { units: 'kilometers' });
+      } catch (error) {
+        console.warn('Failed to measure distance with turf', error);
+      }
+    }
+
+    const toRadians = (value) => (value * Math.PI) / 180;
+    const [lng1, lat1] = startCoord;
+    const [lng2, lat2] = endCoord;
+    const earthRadiusKm = 6371;
+    const dLat = toRadians((lat2 ?? 0) - (lat1 ?? 0));
+    const dLng = toRadians((lng2 ?? 0) - (lng1 ?? 0));
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(toRadians(lat1 ?? 0)) * Math.cos(toRadians(lat2 ?? 0)) * Math.sin(dLng / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+    return earthRadiusKm * c;
+  }
+
+  buildRouteProfile(coordinates = []) {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) {
+      return null;
+    }
+
+    const cumulativeDistances = new Array(coordinates.length).fill(0);
+    let totalDistance = 0;
+
+    for (let index = 1; index < coordinates.length; index += 1) {
+      const segmentDistance = this.computeDistanceKm(coordinates[index - 1], coordinates[index]);
+      totalDistance += Number.isFinite(segmentDistance) ? segmentDistance : 0;
+      cumulativeDistances[index] = totalDistance;
+    }
+
+    const elevations = coordinates.map((coord) => {
+      const elevation = coord?.[2];
+      return Number.isFinite(elevation) ? elevation : null;
+    });
+
+    return {
+      coordinates,
+      cumulativeDistances,
+      totalDistanceKm: totalDistance,
+      elevations
+    };
+  }
+
+  generateElevationSamples(coordinates) {
+    if (!this.routeProfile) return [];
+    const profile = this.routeProfile;
+    const points = (coordinates ?? [])
+      .map((coord, index) => ({
+        elevation: Number.isFinite(coord?.[2]) ? coord[2] : null,
+        distanceKm: profile.cumulativeDistances[index] ?? 0
+      }))
+      .filter((point) => Number.isFinite(point.elevation));
+
+    if (points.length < 2) {
+      return [];
+    }
+
+    if (points.length <= MAX_ELEVATION_POINTS) {
+      const samples = points.map((point, index) => ({
+        elevation: point.elevation,
+        startDistanceKm: index === 0 ? 0 : points[index - 1].distanceKm,
+        endDistanceKm: point.distanceKm
+      }));
+      if (samples.length) {
+        const lastSample = samples[samples.length - 1];
+        if (Number.isFinite(profile.totalDistanceKm) && lastSample.endDistanceKm < profile.totalDistanceKm) {
+          lastSample.endDistanceKm = profile.totalDistanceKm;
+        }
+      }
+      return samples;
+    }
+
+    const samples = [];
+    const bucketSize = points.length / MAX_ELEVATION_POINTS;
+
+    for (let bucketIndex = 0; bucketIndex < MAX_ELEVATION_POINTS; bucketIndex += 1) {
+      const start = Math.floor(bucketIndex * bucketSize);
+      const end = bucketIndex === MAX_ELEVATION_POINTS - 1
+        ? points.length
+        : Math.max(start + 1, Math.floor((bucketIndex + 1) * bucketSize));
+
+      let elevationSum = 0;
+      let count = 0;
+      for (let index = start; index < end; index += 1) {
+        elevationSum += points[index].elevation;
+        count += 1;
+      }
+
+      const firstPoint = points[start];
+      const lastPoint = points[Math.min(end - 1, points.length - 1)];
+      const startDistanceKm = firstPoint?.distanceKm ?? 0;
+      const endDistanceKm = lastPoint?.distanceKm ?? startDistanceKm;
+      samples.push({
+        elevation: count ? elevationSum / count : firstPoint?.elevation ?? 0,
+        startDistanceKm,
+        endDistanceKm
+      });
+    }
+
+    if (samples.length) {
+      const lastSample = samples[samples.length - 1];
+      if (Number.isFinite(profile.totalDistanceKm) && lastSample.endDistanceKm < profile.totalDistanceKm) {
+        lastSample.endDistanceKm = profile.totalDistanceKm;
+      }
+    }
+
+    return samples;
+  }
+
+  ensureRouteHoverTooltip() {
+    if (this.routeHoverTooltip && this.routeHoverTooltip.parentElement) {
+      return this.routeHoverTooltip;
+    }
+    const tooltip = document.createElement('div');
+    tooltip.className = 'directions-route-tooltip';
+    tooltip.setAttribute('role', 'presentation');
+    tooltip.style.display = 'none';
+    (this.mapContainer ?? document.body).appendChild(tooltip);
+    this.routeHoverTooltip = tooltip;
+    return tooltip;
+  }
+
+  formatGrade(value) {
+    if (!Number.isFinite(value)) return '—';
+    const rounded = Math.round(value * 10) / 10;
+    const formatted = Math.abs(rounded) < 0.05 ? 0 : rounded;
+    const sign = formatted > 0 ? '+' : '';
+    return `${sign}${formatted.toFixed(1)}%`;
+  }
+
+  highlightElevationAt(distanceKm) {
+    if (!this.elevationChartContainer) return;
+    const bars = Array.from(this.elevationChartContainer.querySelectorAll('.elevation-bar'));
+    let targetBar = null;
+
+    if (Number.isFinite(distanceKm)) {
+      const tolerance = 1e-3;
+      for (const bar of bars) {
+        const startKm = Number.parseFloat(bar.dataset.startKm);
+        const endKm = Number.parseFloat(bar.dataset.endKm);
+        if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
+          continue;
+        }
+        if (distanceKm >= startKm - tolerance && distanceKm <= endKm + tolerance) {
+          targetBar = bar;
+          break;
+        }
+      }
+
+      if (!targetBar && bars.length) {
+        const lastBar = bars[bars.length - 1];
+        const lastEnd = Number.parseFloat(lastBar.dataset.endKm);
+        if (Number.isFinite(lastEnd) && distanceKm >= lastEnd) {
+          targetBar = lastBar;
+        } else {
+          targetBar = bars[0];
+        }
+      }
+    }
+
+    if (this.highlightedElevationBar && this.highlightedElevationBar !== targetBar) {
+      this.highlightedElevationBar.classList.remove('highlighted');
+    }
+
+    if (targetBar && targetBar !== this.highlightedElevationBar) {
+      targetBar.classList.add('highlighted');
+      this.highlightedElevationBar = targetBar;
+    } else if (!targetBar) {
+      this.highlightedElevationBar = null;
+    }
+  }
+
+  hideRouteHover() {
+    if (this.routeHoverTooltip) {
+      this.routeHoverTooltip.style.display = 'none';
+    }
+    this.map.getSource('route-hover-point-source')?.setData(EMPTY_COLLECTION);
+    if (this.map.getLayer('route-hover-point')) {
+      this.map.setPaintProperty('route-hover-point', 'circle-opacity', 0);
+    }
+    const canvas = this.map.getCanvas?.();
+    if (canvas) {
+      canvas.style.cursor = '';
+    }
+    this.highlightElevationAt(null);
+  }
+
+  updateRouteHoverDisplay(mousePoint, segment, projection) {
+    if (!segment || !projection) return;
+
+    const tooltip = this.ensureRouteHoverTooltip();
+    const distanceAlongSegment = (segment.distanceKm ?? 0) * (projection.t ?? 0);
+    const distanceKm = (segment.startDistanceKm ?? 0) + distanceAlongSegment;
+    const distanceLabel = this.formatDistance(distanceKm);
+    const elevation = Number.isFinite(segment.startElevation) && Number.isFinite(segment.endElevation)
+      ? segment.startElevation + (segment.endElevation - segment.startElevation) * (projection.t ?? 0)
+      : segment.startElevation ?? segment.endElevation ?? null;
+    const gradeValue = (segment.distanceKm ?? 0) > 0 && Number.isFinite(segment.startElevation)
+      && Number.isFinite(segment.endElevation)
+      ? ((segment.endElevation - segment.startElevation) / Math.max(segment.distanceKm * 1000, 1e-6)) * 100
+      : null;
+    const altitudeLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : 'N/A';
+    const gradeLabel = this.formatGrade(gradeValue);
+
+    tooltip.innerHTML = `
+      <div class="tooltip-distance">${distanceLabel} km</div>
+      <div class="tooltip-details">
+        <span class="tooltip-altitude">Alt. ${altitudeLabel}</span>
+        <span class="tooltip-grade">${DOUBLE_ARROW_ICON}<span>${gradeLabel}</span></span>
+      </div>
+    `;
+    tooltip.style.display = 'block';
+
+    const container = this.mapContainer;
+    if (container && mousePoint) {
+      const offsetX = 14;
+      const offsetY = 14;
+      const maxLeft = container.clientWidth - tooltip.offsetWidth - 8;
+      const maxTop = container.clientHeight - tooltip.offsetHeight - 8;
+      const rawLeft = mousePoint.x + offsetX;
+      const rawTop = mousePoint.y + offsetY;
+      const left = Math.min(Math.max(rawLeft, 8), Math.max(8, maxLeft));
+      const top = Math.min(Math.max(rawTop, 8), Math.max(8, maxTop));
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    }
+
+    if (this.map.getLayer('route-hover-point')) {
+      this.map.setPaintProperty('route-hover-point', 'circle-opacity', 1);
+    }
+    this.map.getSource('route-hover-point-source')?.setData({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'Point', coordinates: projection.coordinates }
+        }
+      ]
+    });
+
+    const canvas = this.map.getCanvas?.();
+    if (canvas) {
+      canvas.style.cursor = 'pointer';
+    }
+
+    this.highlightElevationAt(distanceKm);
+  }
+
   clearRoute() {
     this.routeGeojson = null;
     this.routeSegments = [];
     this.segmentLegLookup = [];
     this.latestMetrics = null;
+    this.routeProfile = null;
+    this.elevationSamples = [];
+    this.elevationChartContainer = null;
+    this.highlightedElevationBar = null;
 
     this.map.getSource('route-line-source')?.setData(EMPTY_LINE_STRING);
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
     this.map.getSource('route-segments-source')?.setData(EMPTY_COLLECTION);
+    this.hideRouteHover();
     this.resetSegmentHover();
   }
 
@@ -560,6 +860,10 @@ export class DirectionsManager {
     }
     if (this.map.getLayer('distance-markers')) {
       this.map.setPaintProperty('distance-markers', 'text-color', this.modeColors[mode]);
+      this.map.setPaintProperty('distance-markers', 'text-halo-color', 'rgba(0, 0, 0, 0.6)');
+    }
+    if (this.map.getLayer('route-hover-point')) {
+      this.map.setPaintProperty('route-hover-point', 'circle-stroke-color', this.modeColors[mode]);
     }
     if (this.waypoints.length >= 2) {
       this.getRoute();
@@ -576,11 +880,25 @@ export class DirectionsManager {
       return;
     }
 
-    this.routeSegments = coords.slice(0, -1).map((coord, index) => ({
-      start: coord,
-      end: coords[index + 1],
-      index
-    }));
+    const profile = this.routeProfile;
+    const cumulative = profile?.cumulativeDistances ?? [];
+    const elevations = profile?.elevations ?? [];
+
+    this.routeSegments = coords.slice(0, -1).map((coord, index) => {
+      const startDistanceKm = cumulative[index] ?? 0;
+      const endDistanceKm = cumulative[index + 1] ?? startDistanceKm;
+      const distanceKm = Math.max(0, endDistanceKm - startDistanceKm);
+      return {
+        start: coord,
+        end: coords[index + 1],
+        index,
+        startDistanceKm,
+        endDistanceKm,
+        distanceKm,
+        startElevation: elevations[index],
+        endElevation: elevations[index + 1]
+      };
+    });
 
     this.segmentLegLookup = this.computeSegmentLegLookup(coords);
 
@@ -782,32 +1100,6 @@ export class DirectionsManager {
     return metrics;
   }
 
-  downsampleElevations(elevations, limit = MAX_ELEVATION_POINTS) {
-    if (!Array.isArray(elevations) || elevations.length <= limit) {
-      return elevations ?? [];
-    }
-
-    const result = [];
-    const bucketSize = elevations.length / limit;
-    for (let bucketIndex = 0; bucketIndex < limit; bucketIndex += 1) {
-      const start = Math.floor(bucketIndex * bucketSize);
-      const end = bucketIndex === limit - 1
-        ? elevations.length
-        : Math.max(start + 1, Math.floor((bucketIndex + 1) * bucketSize));
-
-      let sum = 0;
-      let count = 0;
-      for (let i = start; i < end; i += 1) {
-        sum += elevations[i];
-        count += 1;
-      }
-
-      result.push(count ? sum / count : elevations[start]);
-    }
-
-    return result;
-  }
-
   updateStats(route) {
     if (!this.routeStats) return;
     if (!route || !route.geometry?.coordinates || route.geometry.coordinates.length < 2) {
@@ -834,12 +1126,13 @@ export class DirectionsManager {
       return;
     }
 
-    const elevations = coordinates
-      .map((coord) => coord[2])
-      .filter((value) => Number.isFinite(value));
+    const samples = this.generateElevationSamples(coordinates);
 
-    if (!elevations.length) {
+    if (!samples.length) {
       this.elevationChart.innerHTML = '';
+      this.elevationSamples = [];
+      this.elevationChartContainer = null;
+      this.highlightedElevationBar = null;
       return;
     }
 
@@ -849,17 +1142,28 @@ export class DirectionsManager {
     const ascent = Math.max(0, Math.round(metrics.ascent ?? 0));
     const descent = Math.max(0, Math.round(metrics.descent ?? 0));
 
-    const sampledElevations = this.downsampleElevations(elevations);
+    this.elevationSamples = samples;
+
+    const elevations = samples.map((sample) => sample.elevation);
     const maxElevation = Math.max(...elevations);
     const minElevation = Math.min(...elevations);
     const yAxis = this.computeAxisTicks(minElevation, maxElevation, ELEVATION_TICK_TARGET);
     const range = Math.max(1, yAxis.max - yAxis.min);
 
-    const chartHtml = sampledElevations
-      .map((value) => {
-        const clamped = Math.min(yAxis.max, Math.max(yAxis.min, value));
+    const chartHtml = samples
+      .map((sample) => {
+        const clamped = Math.min(yAxis.max, Math.max(yAxis.min, sample.elevation));
         const height = Math.max(2, ((clamped - yAxis.min) / range) * 100);
-        return `<div class="elevation-bar" style="height:${height.toFixed(2)}%" title="${Math.round(value)} m"></div>`;
+        const title = Number.isFinite(sample.elevation) ? `${Math.round(sample.elevation)} m` : '';
+        return `
+          <div
+            class="elevation-bar"
+            data-start-km="${sample.startDistanceKm.toFixed(3)}"
+            data-end-km="${sample.endDistanceKm.toFixed(3)}"
+            style="height:${height.toFixed(2)}%"
+            title="${title}"
+          ></div>
+        `;
       })
       .join('');
 
@@ -921,6 +1225,9 @@ export class DirectionsManager {
         </div>
       </div>
     `;
+
+    this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
+    this.highlightedElevationBar = null;
   }
 
   updateDistanceMarkers(route) {
@@ -991,13 +1298,16 @@ export class DirectionsManager {
   }
 
   applyRoute(route) {
+    this.hideRouteHover();
     this.routeGeojson = route;
+    const coordinates = route?.geometry?.coordinates ?? [];
+    this.routeProfile = this.buildRouteProfile(coordinates);
     this.latestMetrics = this.calculateRouteMetrics(route);
     this.map.getSource('route-line-source')?.setData(route ?? EMPTY_LINE_STRING);
     this.rebuildSegmentData();
     this.updateDistanceMarkers(route);
     this.updateStats(route);
-    this.updateElevationProfile(route?.geometry?.coordinates ?? []);
+    this.updateElevationProfile(coordinates);
   }
 
   async getRoute() {

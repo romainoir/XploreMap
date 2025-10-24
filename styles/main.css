@@ -255,6 +255,15 @@ html, body { margin:0; height:100%; }
   height: 14px;
   fill: currentColor;
   opacity: 0.8;
+  transform-origin: center;
+}
+
+.summary-item.ascent svg {
+  transform: rotate(-90deg);
+}
+
+.summary-item.descent svg {
+  transform: rotate(90deg);
 }
 
 .summary-item.ascent {
@@ -314,6 +323,11 @@ html, body { margin:0; height:100%; }
   border-radius: 3px 3px 0 0;
 }
 
+.elevation-bar.highlighted {
+  background: linear-gradient(180deg, rgba(255, 124, 216, 0.9) 0%, rgba(208, 64, 182, 0.9) 100%);
+  box-shadow: 0 0 0 2px rgba(255, 124, 216, 0.35);
+}
+
 .elevation-x-axis {
   display: flex;
   justify-content: space-between;
@@ -335,6 +349,56 @@ html, body { margin:0; height:100%; }
 
 .directions-hint.visible {
   display: block;
+}
+
+.directions-route-tooltip {
+  position: absolute;
+  background: rgba(17, 34, 48, 0.92);
+  color: #f6fbff;
+  font: 12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  padding: 8px 10px;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  display: none;
+  z-index: 6;
+  min-width: 120px;
+}
+
+.directions-route-tooltip .tooltip-distance {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.directions-route-tooltip .tooltip-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.directions-route-tooltip .tooltip-altitude {
+  font-variant-numeric: tabular-nums;
+}
+
+.directions-route-tooltip .tooltip-grade {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.directions-route-tooltip .tooltip-grade svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.85;
+}
+
+.directions-route-tooltip .tooltip-grade span {
+  font-variant-numeric: tabular-nums;
 }
 
 @media (min-width: 768px) {
