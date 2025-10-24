@@ -38,7 +38,8 @@ const SUMMARY_ICONS = {
   descent: DESCENT_ICON
 };
 
-const BIVOUAC_ELEVATION_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3c.36 0 .7.19.88.5l8 13.5a1 1 0 0 1-.86 1.5H4a1 1 0 0 1-.86-1.5l8-13.5A1 1 0 0 1 12 3Zm0 3.2L6.27 17h11.46ZM7 17h10a1 1 0 0 1 .8 1.6l-1.6 2a1 1 0 0 1-.8.4H8.6a1 1 0 0 1-.8-.4l-1.6-2A1 1 0 0 1 7 17Z"/></svg>';
+const BIVOUAC_ELEVATION_ICON =
+  '<img src="bivouac.png" alt="Bivouac" class="bivouac-elevation-icon" loading="lazy" decoding="async" />';
 
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
 const DEFAULT_DISTANCE_MARKER_COLOR = '#f38b1c';
@@ -58,6 +59,11 @@ const SEGMENT_MARKER_ICONS = {
   bivouac: BIVOUAC_MARKER_ICON_ID,
   end: END_MARKER_ICON_ID
 };
+
+const BIVOUAC_MARKER_IMAGE_URL = 'bivouac.png';
+
+let bivouacMarkerImage = null;
+let bivouacMarkerImagePromise = null;
 
 function createMarkerCanvas(baseSize = 52) {
   const ratio = 2;
@@ -130,52 +136,42 @@ function createFlagMarkerImage(fillColor) {
   return finalizeMarkerImage(base);
 }
 
-function createTentMarkerImage(fillColor) {
-  const base = createMarkerCanvas();
-  if (!base) {
-    return null;
+function loadImageAsset(url) {
+  if (!url) {
+    return Promise.reject(new Error('Missing image URL'));
   }
 
-  const { ctx, size } = base;
-  const baseY = size * 0.84;
-  const topY = size * 0.18;
-  const leftX = size * 0.24;
-  const rightX = size * 0.76;
-  const centerX = size * 0.5;
+  if (typeof Image === 'undefined') {
+    return Promise.reject(new Error('Image constructor is not available in this environment'));
+  }
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-  ctx.beginPath();
-  ctx.ellipse(centerX, baseY + size * 0.03, size * 0.28, size * 0.1, 0, 0, Math.PI * 2);
-  ctx.fill();
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Unable to load image: ${url}`));
+    image.src = url;
+  });
+}
 
-  const shade = adjustHexColor(fillColor, -0.2);
-  const gradient = ctx.createLinearGradient(leftX, topY, rightX, baseY);
-  gradient.addColorStop(0, fillColor);
-  gradient.addColorStop(1, shade);
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.moveTo(centerX, topY);
-  ctx.lineTo(rightX, baseY);
-  ctx.lineTo(leftX, baseY);
-  ctx.closePath();
-  ctx.fill();
+function getBivouacMarkerImage() {
+  if (bivouacMarkerImage) {
+    return Promise.resolve(bivouacMarkerImage);
+  }
 
-  ctx.strokeStyle = adjustHexColor(fillColor, -0.35);
-  ctx.lineWidth = size * 0.03;
-  ctx.beginPath();
-  ctx.moveTo(centerX, topY);
-  ctx.lineTo(centerX, baseY);
-  ctx.stroke();
+  if (!bivouacMarkerImagePromise) {
+    bivouacMarkerImagePromise = loadImageAsset(BIVOUAC_MARKER_IMAGE_URL)
+      .then((image) => {
+        bivouacMarkerImage = image;
+        return image;
+      })
+      .catch((error) => {
+        bivouacMarkerImagePromise = null;
+        throw error;
+      });
+  }
 
-  ctx.fillStyle = adjustHexColor(fillColor, -0.35);
-  ctx.beginPath();
-  ctx.moveTo(centerX, topY + size * 0.05);
-  ctx.lineTo(centerX + size * 0.04, baseY);
-  ctx.lineTo(centerX - size * 0.04, baseY);
-  ctx.closePath();
-  ctx.fill();
-
-  return finalizeMarkerImage(base);
+  return bivouacMarkerImagePromise;
 }
 
 function ensureSegmentMarkerImages(map) {
@@ -198,10 +194,18 @@ function ensureSegmentMarkerImages(map) {
   }
 
   if (!map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
-    const bivouacIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
-    if (bivouacIcon) {
-      map.addImage(BIVOUAC_MARKER_ICON_ID, bivouacIcon.image, { pixelRatio: bivouacIcon.pixelRatio });
-    }
+    getBivouacMarkerImage()
+      .then((image) => {
+        if (!image || !map || typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') {
+          return;
+        }
+        if (!map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+          map.addImage(BIVOUAC_MARKER_ICON_ID, image);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load bivouac marker image', error);
+      });
   }
 }
 
@@ -3479,7 +3483,6 @@ export class DirectionsManager {
           radiuses: Array(this.waypoints.length).fill(-1),
           elevation: true,
           extra_info: ['waytype', 'steepness'],
-          geometry_precision: 6,
           geometry_simplify: false,
           preference: this.currentMode === 'foot-hiking' ? 'recommended' : 'fastest',
           units: 'km',
