@@ -167,6 +167,7 @@ async function init() {
   const clearButton = document.getElementById('clearDirectionsButton');
   const undoButton = document.getElementById('undoDirectionsButton');
   const redoButton = document.getElementById('redoDirectionsButton');
+  const playButton = document.getElementById('playRouteButton');
   const routeStats = document.getElementById('routeStats');
   const elevationChart = document.getElementById('elevationChart');
   const directionsInfoButton = document.getElementById('directionsInfoButton');
@@ -256,6 +257,7 @@ async function init() {
         clearButton,
         undoButton,
         redoButton,
+        playButton,
         routeStats,
         elevationChart,
         infoButton: directionsInfoButton,
