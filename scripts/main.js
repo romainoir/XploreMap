@@ -167,6 +167,8 @@ async function init() {
   const clearButton = document.getElementById('clearDirectionsButton');
   const routeStats = document.getElementById('routeStats');
   const elevationChart = document.getElementById('elevationChart');
+  const directionsInfoButton = document.getElementById('directionsInfoButton');
+  const directionsHint = document.getElementById('directionsHint');
 
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
@@ -211,7 +213,9 @@ async function init() {
         swapButton,
         clearButton,
         routeStats,
-        elevationChart
+        elevationChart,
+        directionsInfoButton,
+        directionsHint
       ]);
     } catch (error) {
       console.error('Failed to initialize directions manager', error);

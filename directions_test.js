@@ -20,9 +20,18 @@ const MODE_COLORS = {
 
 const HOVER_PIXEL_TOLERANCE = 12;
 const COORD_EPSILON = 1e-6;
+const WAYPOINT_MATCH_TOLERANCE_METERS = 30;
 const MAX_ELEVATION_POINTS = 180;
 const MAX_DISTANCE_MARKERS = 60;
+const ELEVATION_TICK_TARGET = 5;
+const DISTANCE_TICK_TARGET = 6;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
+
+const SUMMARY_ICONS = {
+  ascent: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4 17.5 9.5l-1.4 1.4L13 7.8V20h-2V7.8l-3.1 3.1-1.4-1.4Z"/></svg>',
+  descent: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20 6.5 14.5l1.4-1.4L11 16.2V4h2v12.2l3.1-3.1 1.4 1.4Z"/></svg>',
+  distance: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.4 6.4 2.8 11l4.6 4.6 1.4-1.4-2.2-2.2h10.8l-2.2 2.2 1.4 1.4 4.6-4.6-4.6-4.6-1.4 1.4 2.2 2.2H6.6l2.2-2.2Z"/></svg>'
+};
 
 const createWaypointFeature = (coords, index, total) => ({
   type: 'Feature',
@@ -52,7 +61,9 @@ export class DirectionsManager {
       swapButton,
       clearButton,
       routeStats,
-      elevationChart
+      elevationChart,
+      directionsInfoButton,
+      directionsHint
     ] = uiElements;
 
     this.map = map;
@@ -64,6 +75,12 @@ export class DirectionsManager {
     this.clearButton = clearButton ?? null;
     this.routeStats = routeStats ?? null;
     this.elevationChart = elevationChart ?? null;
+    this.infoButton = directionsInfoButton ?? null;
+    this.directionsHint = directionsHint ?? null;
+
+    if (this.routeStats) {
+      this.routeStats.classList.add('sr-only');
+    }
 
     this.waypoints = [];
     this.currentMode = 'foot-hiking';
@@ -80,6 +97,8 @@ export class DirectionsManager {
     this.routeGeojson = null;
     this.routeSegments = [];
     this.segmentLegLookup = [];
+
+    this.setHintVisible(false);
 
     this.handleWaypointMouseDown = (event) => this.onWaypointMouseDown(event);
     this.handleMapMouseMove = (event) => this.onMapMouseMove(event);
@@ -258,6 +277,11 @@ export class DirectionsManager {
       });
     });
 
+    this.infoButton?.addEventListener('click', () => {
+      const isExpanded = this.infoButton.getAttribute('aria-expanded') === 'true';
+      this.setHintVisible(!isExpanded);
+    });
+
     this.swapButton?.addEventListener('click', () => {
       if (this.waypoints.length < 2) return;
       this.waypoints.reverse();
@@ -277,6 +301,17 @@ export class DirectionsManager {
     this.map.on('mouseleave', this.handleMapMouseLeave);
     this.map.on('click', this.handleMapClick);
     this.map.on('dblclick', 'waypoints-hit-area', this.handleWaypointDoubleClick);
+  }
+
+  setHintVisible(isVisible) {
+    const visible = Boolean(isVisible);
+    if (this.directionsHint) {
+      this.directionsHint.classList.toggle('visible', visible);
+      this.directionsHint.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    }
+    if (this.infoButton) {
+      this.infoButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
+    }
   }
 
   isPanelVisible() {
@@ -299,6 +334,9 @@ export class DirectionsManager {
     }
     if (this.elevationChart) {
       this.elevationChart.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    }
+    if (!isVisible) {
+      this.setHintVisible(false);
     }
   }
 
@@ -583,7 +621,17 @@ export class DirectionsManager {
 
   coordinatesMatch(a, b) {
     if (!a || !b) return false;
-    return Math.abs(a[0] - b[0]) <= COORD_EPSILON && Math.abs(a[1] - b[1]) <= COORD_EPSILON;
+    if (Math.abs(a[0] - b[0]) <= COORD_EPSILON && Math.abs(a[1] - b[1]) <= COORD_EPSILON) {
+      return true;
+    }
+    if (!turfApi) return false;
+    try {
+      const distance = turfApi.distance(turfApi.point(a), turfApi.point(b), { units: 'meters' });
+      return Number.isFinite(distance) && distance <= WAYPOINT_MATCH_TOLERANCE_METERS;
+    } catch (error) {
+      console.warn('Failed to compare waypoint coordinates', error);
+      return false;
+    }
   }
 
   formatDistance(distanceKm) {
@@ -597,6 +645,80 @@ export class DirectionsManager {
       return distanceKm.toFixed(1);
     }
     return parseFloat(distanceKm.toFixed(2)).toString();
+  }
+
+  niceNumber(value, round) {
+    const absValue = Math.abs(value);
+    if (!Number.isFinite(absValue) || absValue === 0) {
+      return 1;
+    }
+    const exponent = Math.floor(Math.log10(absValue));
+    const fraction = absValue / 10 ** exponent;
+    let niceFraction;
+
+    if (round) {
+      if (fraction < 1.5) {
+        niceFraction = 1;
+      } else if (fraction < 3) {
+        niceFraction = 2;
+      } else if (fraction < 7) {
+        niceFraction = 5;
+      } else {
+        niceFraction = 10;
+      }
+    } else if (fraction <= 1) {
+      niceFraction = 1;
+    } else if (fraction <= 2) {
+      niceFraction = 2;
+    } else if (fraction <= 5) {
+      niceFraction = 5;
+    } else {
+      niceFraction = 10;
+    }
+
+    return niceFraction * 10 ** exponent;
+  }
+
+  computeAxisTicks(minValue, maxValue, maxTicks = 6) {
+    let min = Number.isFinite(minValue) ? minValue : 0;
+    let max = Number.isFinite(maxValue) ? maxValue : min;
+
+    if (max < min) {
+      [min, max] = [max, min];
+    }
+
+    if (max === min) {
+      const adjustment = Math.max(1, Math.abs(max) * 0.05 || 1);
+      min -= adjustment;
+      max += adjustment;
+    }
+
+    const span = Math.max(max - min, Number.EPSILON);
+    const niceRange = this.niceNumber(span, false);
+    const step = Math.max(
+      this.niceNumber(niceRange / Math.max(1, maxTicks - 1), true),
+      Number.EPSILON
+    );
+    const niceMin = Math.floor(min / step) * step;
+    const niceMax = Math.ceil(max / step) * step;
+    const ticks = [];
+    const epsilon = step * 0.001;
+    for (let value = niceMin; value <= niceMax + epsilon; value += step) {
+      ticks.push(Number(value.toFixed(6)));
+    }
+    return { ticks, min: niceMin, max: niceMax, step };
+  }
+
+  formatElevationLabel(value) {
+    if (!Number.isFinite(value)) return '0 m';
+    return `${Math.round(value)} m`;
+  }
+
+  formatDistanceTick(value) {
+    if (!Number.isFinite(value) || Math.abs(value) < 1e-6) {
+      return '0 km';
+    }
+    return `${this.formatDistance(value)} km`;
   }
 
   calculateRouteMetrics(route) {
@@ -699,15 +821,15 @@ export class DirectionsManager {
     const descent = Math.max(0, Math.round(metrics.descent));
 
     this.routeStats.innerHTML = `
-      <div class="distance">Distance: <span>${distanceLabel}</span> km</div>
-      <div class="elevation">Ascent: <span>${ascent}</span> m</div>
-      <div class="elevation">Descent: <span>${descent}</span> m</div>
+      <span class="sr-only">
+        Distance: ${distanceLabel} km. Ascent: ${ascent} m. Descent: ${descent} m.
+      </span>
     `;
   }
 
   updateElevationProfile(coordinates) {
     if (!this.elevationChart) return;
-    if (!Array.isArray(coordinates) || !coordinates.length) {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) {
       this.elevationChart.innerHTML = '';
       return;
     }
@@ -721,23 +843,82 @@ export class DirectionsManager {
       return;
     }
 
+    const metrics = this.latestMetrics ?? this.calculateRouteMetrics({ geometry: { coordinates } });
+    const totalDistance = Number(metrics.distanceKm) || 0;
+    const distanceLabel = this.formatDistance(totalDistance);
+    const ascent = Math.max(0, Math.round(metrics.ascent ?? 0));
+    const descent = Math.max(0, Math.round(metrics.descent ?? 0));
+
     const sampledElevations = this.downsampleElevations(elevations);
     const maxElevation = Math.max(...elevations);
     const minElevation = Math.min(...elevations);
-    const range = Math.max(1, maxElevation - minElevation);
+    const yAxis = this.computeAxisTicks(minElevation, maxElevation, ELEVATION_TICK_TARGET);
+    const range = Math.max(1, yAxis.max - yAxis.min);
 
     const chartHtml = sampledElevations
       .map((value) => {
-        const height = Math.max(2, ((value - minElevation) / range) * 100);
+        const clamped = Math.min(yAxis.max, Math.max(yAxis.min, value));
+        const height = Math.max(2, ((clamped - yAxis.min) / range) * 100);
         return `<div class="elevation-bar" style="height:${height.toFixed(2)}%" title="${Math.round(value)} m"></div>`;
       })
       .join('');
 
+    const yAxisLabels = [...yAxis.ticks]
+      .sort((a, b) => b - a)
+      .map((value) => `<span>${this.formatElevationLabel(value)}</span>`)
+      .join('');
+
+    const distanceAxis = this.computeAxisTicks(0, totalDistance, DISTANCE_TICK_TARGET);
+    const rawTicks = [...distanceAxis.ticks];
+    if (totalDistance > 0) {
+      const lastTick = rawTicks[rawTicks.length - 1];
+      if (!rawTicks.length || Math.abs(lastTick - totalDistance) > distanceAxis.step * 0.25) {
+        rawTicks.push(totalDistance);
+      }
+    }
+    const tickSet = new Set();
+    rawTicks.forEach((value) => {
+      const normalized = Number(value.toFixed(3));
+      if (Number.isFinite(normalized) && normalized >= 0) {
+        tickSet.add(normalized);
+      }
+    });
+    if (totalDistance > 0) {
+      tickSet.add(Number(totalDistance.toFixed(3)));
+    }
+    tickSet.add(0);
+    const tolerance = distanceAxis.step || 1;
+    const upperBound = totalDistance > 0
+      ? Number(totalDistance.toFixed(3))
+      : Math.max(...tickSet);
+    const xTicks = Array.from(tickSet)
+      .filter((value) => value <= upperBound + tolerance * 0.25)
+      .sort((a, b) => a - b);
+    const xAxisLabels = xTicks
+      .map((value) => `<span>${this.formatDistanceTick(value)}</span>`)
+      .join('');
+
     this.elevationChart.innerHTML = `
-      <div class='elevation-chart-container'>${chartHtml}</div>
-      <div class='elevation-labels'>
-        <span>${Math.round(maxElevation)}m</span>
-        <span>${Math.round(minElevation)}m</span>
+      <div class="elevation-summary" role="presentation">
+        <div class="summary-item ascent" title="Total ascent">
+          ${SUMMARY_ICONS.ascent}
+          <span>${ascent} m</span>
+        </div>
+        <div class="summary-item descent" title="Total descent">
+          ${SUMMARY_ICONS.descent}
+          <span>${descent} m</span>
+        </div>
+        <div class="summary-item distance" title="Total distance">
+          ${SUMMARY_ICONS.distance}
+          <span>${distanceLabel} km</span>
+        </div>
+      </div>
+      <div class="elevation-plot">
+        <div class="elevation-y-axis">${yAxisLabels}</div>
+        <div class="elevation-plot-area">
+          <div class="elevation-chart-container" role="presentation">${chartHtml}</div>
+          <div class="elevation-x-axis">${xAxisLabels}</div>
+        </div>
       </div>
     `;
   }

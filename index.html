@@ -39,7 +39,14 @@
     <button id="gpxExportButton" class="btn" type="button">Export GPX</button>
   </div>
   <div class="directions-ui">
-    <button id="directionsToggle" class="btn directions-toggle" type="button" aria-controls="directionsControl">Directions</button>
+    <div class="directions-toggle-group">
+      <button id="directionsToggle" class="btn directions-toggle" type="button" aria-controls="directionsControl">Directions</button>
+      <button id="directionsInfoButton" class="icon-button" type="button" aria-label="Directions information" aria-expanded="false" aria-controls="directionsHint" title="How to use directions">
+        <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+          <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z"/>
+        </svg>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -56,7 +63,7 @@
     </div>
     <div id="routeStats" class="route-stats" aria-live="polite"></div>
     <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
-    <p class="directions-hint">Click the map to set start and end points. Drag markers to adjust the route or double-click via points to remove them.</p>
+    <p id="directionsHint" class="directions-hint" aria-hidden="true">Click the map to set start and end points. Drag markers to adjust the route or double-click via points to remove them.</p>
   </div>
 </div>
 
