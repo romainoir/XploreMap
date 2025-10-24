@@ -41,10 +41,13 @@
   <div class="directions-ui">
     <div class="directions-toggle-group">
       <button id="directionsToggle" class="btn directions-toggle" type="button" aria-controls="directionsControl">Directions</button>
-      <button id="directionsInfoButton" class="icon-button" type="button" aria-label="Directions information" aria-expanded="false" aria-controls="directionsHint" title="How to use directions">
+      <button id="directionsInfoButton" class="icon-button has-tooltip" type="button" aria-label="Directions information" aria-describedby="directionsHint" title="How to use directions">
         <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
           <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z"/>
         </svg>
+        <span id="directionsHint" class="directions-hint" role="tooltip" aria-hidden="true">
+          Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
+        </span>
       </button>
     </div>
   </div>
@@ -63,7 +66,6 @@
     </div>
     <div id="routeStats" class="route-stats" aria-live="polite"></div>
     <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
-    <p id="directionsHint" class="directions-hint" aria-hidden="true">Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.</p>
   </div>
 </div>
 
