@@ -41,7 +41,7 @@ const SUMMARY_ICONS = {
 const BIVOUAC_ELEVATION_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3c.36 0 .7.19.88.5l8 13.5a1 1 0 0 1-.86 1.5H4a1 1 0 0 1-.86-1.5l8-13.5A1 1 0 0 1 12 3Zm0 3.2L6.27 17h11.46ZM7 17h10a1 1 0 0 1 .8 1.6l-1.6 2a1 1 0 0 1-.8.4H8.6a1 1 0 0 1-.8-.4l-1.6-2A1 1 0 0 1 7 17Z"/></svg>';
 
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
-const DISTANCE_MARKER_COLOR = '#f38b1c';
+const DEFAULT_DISTANCE_MARKER_COLOR = '#f38b1c';
 
 const SEGMENT_MARKER_SOURCE_ID = 'segment-markers';
 const SEGMENT_MARKER_LAYER_ID = 'segment-markers';
@@ -232,7 +232,7 @@ function adjustHexColor(hex, ratio = 0) {
 }
 
 function createDistanceMarkerImage(label, {
-  fill = DISTANCE_MARKER_COLOR
+  fill = DEFAULT_DISTANCE_MARKER_COLOR
 } = {}) {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
@@ -311,13 +311,24 @@ function createDistanceMarkerImage(label, {
   };
 }
 
-function ensureDistanceMarkerImage(map, label) {
-  const imageId = `${DISTANCE_MARKER_PREFIX}${label}`;
+function buildDistanceMarkerId(label, fill) {
+  const normalizedLabel = String(label)
+    .toLowerCase()
+    .replace(/[^0-9a-z]+/gi, '-');
+  const normalizedColor = typeof fill === 'string' && fill
+    ? fill.toLowerCase().replace(/[^0-9a-f]+/g, '')
+    : 'default';
+  return `${DISTANCE_MARKER_PREFIX}${normalizedLabel}-${normalizedColor}`;
+}
+
+function ensureDistanceMarkerImage(map, label, { fill } = {}) {
+  const color = typeof fill === 'string' && fill ? fill : DEFAULT_DISTANCE_MARKER_COLOR;
+  const imageId = buildDistanceMarkerId(label, color);
   if (map.hasImage(imageId)) {
     return imageId;
   }
 
-  const rendered = createDistanceMarkerImage(label);
+  const rendered = createDistanceMarkerImage(label, { fill: color });
   if (!rendered) {
     return null;
   }
@@ -436,6 +447,7 @@ export class DirectionsManager {
     this.routeCutDistances = [];
     this.cutSegments = [];
     this.routeSegmentsListener = null;
+    this.elevationResizeObserver = null;
 
     this.setupRouteLayers();
     this.setupUIHandlers();
@@ -538,11 +550,11 @@ export class DirectionsManager {
       source: 'distance-markers-source',
       layout: {
         'symbol-placement': 'point',
-        'icon-image': ['concat', DISTANCE_MARKER_PREFIX, ['get', 'label']],
+        'icon-image': ['get', 'imageId'],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'icon-anchor': 'center',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 12, 0.85, 16, 1.05],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.35, 12, 0.425, 16, 0.525],
         'text-field': '',
         'text-font': ['Noto Sans Bold'],
         'text-allow-overlap': true,
@@ -601,8 +613,8 @@ export class DirectionsManager {
       paint: {
         'circle-radius': [
           'case',
-          ['==', ['get', 'role'], 'start'], 9,
-          ['==', ['get', 'role'], 'end'], 9,
+          ['==', ['get', 'role'], 'start'], 0,
+          ['==', ['get', 'role'], 'end'], 0,
           4.5
         ],
         'circle-color': [
@@ -613,13 +625,13 @@ export class DirectionsManager {
         ],
         'circle-opacity': [
           'case',
-          ['==', ['get', 'role'], 'start'], 1,
-          ['==', ['get', 'role'], 'end'], 1,
+          ['==', ['get', 'role'], 'start'], 0,
+          ['==', ['get', 'role'], 'end'], 0,
           1
         ],
         'circle-stroke-width': [
           'case',
-          ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 2,
+          ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 0,
           0
         ],
         'circle-stroke-color': [
@@ -629,7 +641,7 @@ export class DirectionsManager {
         ],
         'circle-stroke-opacity': [
           'case',
-          ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 1,
+          ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 0,
           0.85
         ]
       },
@@ -643,8 +655,8 @@ export class DirectionsManager {
       paint: {
         'circle-radius': [
           'case',
-          ['==', ['get', 'role'], 'start'], 12,
-          ['==', ['get', 'role'], 'end'], 12,
+          ['==', ['get', 'role'], 'start'], 0,
+          ['==', ['get', 'role'], 'end'], 0,
           7
         ],
         'circle-color': [
@@ -655,8 +667,8 @@ export class DirectionsManager {
         ],
         'circle-stroke-width': [
           'case',
-          ['==', ['get', 'role'], 'start'], 2.5,
-          ['==', ['get', 'role'], 'end'], 2.5,
+          ['==', ['get', 'role'], 'start'], 0,
+          ['==', ['get', 'role'], 'end'], 0,
           2
         ],
         'circle-stroke-color': [
@@ -701,10 +713,14 @@ export class DirectionsManager {
       });
     });
 
-    this.infoButton?.addEventListener('click', () => {
-      const isExpanded = this.infoButton.getAttribute('aria-expanded') === 'true';
-      this.setHintVisible(!isExpanded);
-    });
+    if (this.infoButton) {
+      const showHint = () => this.setHintVisible(true);
+      const hideHint = () => this.setHintVisible(false);
+      this.infoButton.addEventListener('mouseenter', showHint);
+      this.infoButton.addEventListener('mouseleave', hideHint);
+      this.infoButton.addEventListener('focus', showHint);
+      this.infoButton.addEventListener('blur', hideHint);
+    }
 
     this.swapButton?.addEventListener('click', () => {
       if (this.waypoints.length < 2) return;
@@ -754,6 +770,7 @@ export class DirectionsManager {
     this.routeCutDistances = [];
     this.cutSegments = [];
     this.updateSegmentMarkers();
+    this.updateDistanceMarkers(this.routeGeojson);
   }
 
   getSegmentColor(index) {
@@ -780,6 +797,7 @@ export class DirectionsManager {
     }));
     this.assignSegmentNames();
     this.updateSegmentMarkers();
+    this.updateDistanceMarkers(this.routeGeojson);
   }
 
   computeCutBoundaries() {
@@ -1385,6 +1403,7 @@ export class DirectionsManager {
     this.updateRouteCutSegments();
     this.updateRouteLineSource();
     this.updateElevationProfile(coordinates);
+    this.updateDistanceMarkers(this.routeGeojson);
     this.updateWaypoints();
     this.notifyRouteSegmentsUpdated();
   }
@@ -1405,6 +1424,17 @@ export class DirectionsManager {
       }
       return distanceKm >= start - epsilon && distanceKm < end - epsilon * 0.5;
     }) ?? null;
+  }
+
+  getColorForDistance(distanceKm) {
+    if (!Number.isFinite(distanceKm)) {
+      return this.modeColors[this.currentMode];
+    }
+    const segment = this.getCutSegmentForDistance(distanceKm);
+    if (segment?.color) {
+      return segment.color;
+    }
+    return this.modeColors[this.currentMode];
   }
 
   projectOntoRoute(lngLat, tolerance = ROUTE_CLICK_PIXEL_TOLERANCE) {
@@ -1589,11 +1619,10 @@ export class DirectionsManager {
   setHintVisible(isVisible) {
     const visible = Boolean(isVisible);
     if (this.directionsHint) {
-      this.directionsHint.classList.toggle('visible', visible);
       this.directionsHint.setAttribute('aria-hidden', visible ? 'false' : 'true');
     }
     if (this.infoButton) {
-      this.infoButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
+      this.infoButton.classList.toggle('show-tooltip', visible);
     }
   }
 
@@ -2975,6 +3004,10 @@ export class DirectionsManager {
     if (!this.elevationChart) return;
     this.detachElevationChartEvents();
     this.lastElevationHoverDistance = null;
+    if (this.elevationResizeObserver) {
+      this.elevationResizeObserver.disconnect();
+      this.elevationResizeObserver = null;
+    }
     if (!Array.isArray(coordinates) || coordinates.length < 2) {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
@@ -3096,7 +3129,6 @@ export class DirectionsManager {
           if (!Number.isFinite(distanceKm) || distanceKm < 0 || distanceKm > totalDistance) {
             return null;
           }
-          const percentX = Math.max(0, Math.min(100, (distanceKm / totalDistance) * 100));
           const elevation = this.getElevationAtDistance(distanceKm);
           let percentY = null;
           if (Number.isFinite(elevation)) {
@@ -3104,17 +3136,15 @@ export class DirectionsManager {
             percentY = ((clampedElevation - yAxis.min) / range) * 100;
             percentY = Math.max(0, Math.min(100, percentY));
           }
-          const styleParts = [`left:${percentX.toFixed(2)}%`];
-          if (Number.isFinite(percentY)) {
-            styleParts.push(`bottom:${percentY.toFixed(2)}%`);
-          } else {
-            styleParts.push('bottom:0');
-          }
           const title = marker?.name ?? marker?.title ?? 'Bivouac';
+          const verticalStyle = Number.isFinite(percentY)
+            ? `bottom:${percentY.toFixed(2)}%`
+            : 'bottom:0';
           return `
             <div
               class="elevation-marker bivouac"
-              style="${styleParts.join(';')}"
+              data-distance-km="${distanceKm.toFixed(4)}"
+              style="${verticalStyle}"
               title="${title}"
             >
               ${BIVOUAC_ELEVATION_ICON}
@@ -3155,25 +3185,100 @@ export class DirectionsManager {
     this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
     this.highlightedElevationBar = null;
     this.attachElevationChartEvents();
+    this.updateElevationMarkerPositions();
+    if (this.elevationChartContainer && typeof ResizeObserver !== 'undefined') {
+      this.elevationResizeObserver = new ResizeObserver(() => {
+        this.updateElevationMarkerPositions();
+      });
+      this.elevationResizeObserver.observe(this.elevationChartContainer);
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => this.updateElevationMarkerPositions());
+    }
+  }
+
+  updateElevationMarkerPositions() {
+    if (!this.elevationChartContainer) {
+      return;
+    }
+    const markers = Array.from(
+      this.elevationChartContainer.querySelectorAll('.elevation-marker[data-distance-km]')
+    );
+    if (!markers.length) {
+      return;
+    }
+    const bars = Array.from(this.elevationChartContainer.querySelectorAll('.elevation-bar'));
+    if (!bars.length) {
+      return;
+    }
+    const containerRect = this.elevationChartContainer.getBoundingClientRect();
+    const containerWidth = containerRect.width;
+    if (!containerWidth) {
+      return;
+    }
+    const containerLeft = containerRect.left;
+    const barMetrics = bars
+      .map((bar) => {
+        const startKm = Number(bar.dataset.startKm);
+        const endKm = Number(bar.dataset.endKm);
+        if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
+          return null;
+        }
+        const rect = bar.getBoundingClientRect();
+        return { startKm, endKm, rect };
+      })
+      .filter(Boolean);
+    if (!barMetrics.length) {
+      return;
+    }
+    const totalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
+    const epsilon = Math.max(1e-5, totalDistance * 1e-4);
+    markers.forEach((marker) => {
+      const distanceKm = Number(marker.dataset.distanceKm);
+      if (!Number.isFinite(distanceKm)) {
+        return;
+      }
+      let target = null;
+      for (const metric of barMetrics) {
+        if (distanceKm >= metric.startKm - epsilon && distanceKm <= metric.endKm + epsilon) {
+          target = metric;
+          break;
+        }
+      }
+      if (!target) {
+        target = barMetrics[barMetrics.length - 1];
+      }
+      if (!target) {
+        return;
+      }
+      const span = Math.max(target.endKm - target.startKm, 1e-6);
+      const ratio = Math.max(0, Math.min(1, (distanceKm - target.startKm) / span));
+      const x = target.rect.left + ratio * target.rect.width;
+      const offset = x - containerLeft;
+      const percent = Math.max(0, Math.min(100, (offset / containerWidth) * 100));
+      marker.style.left = `${percent.toFixed(4)}%`;
+    });
   }
 
   updateDistanceMarkers(route) {
     const source = this.map.getSource('distance-markers-source');
     if (!source) return;
 
-    if (!route || !route.geometry?.coordinates || !turfApi) {
+    const targetRoute = route ?? this.routeGeojson;
+
+    if (!targetRoute || !targetRoute.geometry?.coordinates || !turfApi) {
       source.setData(EMPTY_COLLECTION);
       return;
     }
 
     try {
-      const coordinates = route.geometry.coordinates;
+      const coordinates = targetRoute.geometry.coordinates;
       if (!Array.isArray(coordinates) || coordinates.length < 2) {
         source.setData(EMPTY_COLLECTION);
         return;
       }
 
-      const metrics = this.latestMetrics ?? this.calculateRouteMetrics(route);
+      const metrics = this.latestMetrics ?? this.calculateRouteMetrics(targetRoute);
       const totalDistance = Number(metrics.distanceKm) || 0;
       if (totalDistance <= 0) {
         source.setData(EMPTY_COLLECTION);
@@ -3196,31 +3301,24 @@ export class DirectionsManager {
       };
 
       const features = [];
-      let lastLabelValue = -Infinity;
 
       const addMarker = (distanceKm, labelValue = distanceKm) => {
         const clamped = Math.min(distanceKm, totalDistance);
         const point = turfApi.along(line, clamped, { units: 'kilometers' });
         const label = formatMarkerLabel(labelValue);
         if (!label) return;
-        const imageId = ensureDistanceMarkerImage(this.map, label);
+        const color = this.getColorForDistance(clamped);
+        const imageId = ensureDistanceMarkerImage(this.map, label, { fill: color });
         if (!imageId) return;
         features.push({
           type: 'Feature',
-          properties: { label },
+          properties: { label, imageId, color },
           geometry: { type: 'Point', coordinates: point.geometry.coordinates }
         });
-        lastLabelValue = labelValue;
       };
-
-      addMarker(0, 0);
 
       for (let km = markerInterval; km < totalDistance; km += markerInterval) {
         addMarker(km, km);
-      }
-
-      if (totalDistance - lastLabelValue > 0.01) {
-        addMarker(totalDistance, totalDistance);
       }
 
       source.setData({ type: 'FeatureCollection', features });

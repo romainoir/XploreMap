@@ -190,8 +190,7 @@ html, body { margin:0; height:100%; }
     grid-template-areas:
       "modes"
       "actions"
-      "chart"
-      "hint";
+      "chart";
   }
 
 .directions-dock[aria-hidden="false"] {
@@ -375,20 +374,51 @@ html, body { margin:0; height:100%; }
   color: rgba(17, 34, 48, 0.65);
 }
 
-.directions-hint {
-  display: none;
-  margin: 0;
-  padding: 10px 12px;
-  font-size: 11px;
-  color: rgba(17, 34, 48, 0.7);
-  background: rgba(17, 34, 48, 0.06);
-  border-radius: 10px;
-  border-left: 3px solid rgba(17, 98, 128, 0.35);
-  grid-area: hint;
+.icon-button.has-tooltip {
+  position: relative;
 }
 
-.directions-hint.visible {
+.icon-button.has-tooltip .directions-hint {
+  position: absolute;
+  inset-inline-start: 50%;
+  bottom: calc(100% + 10px);
+  transform: translate(-50%, 6px);
+  opacity: 0;
+  pointer-events: none;
   display: block;
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #f6fbff;
+  background: rgba(17, 34, 48, 0.92);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  min-width: 220px;
+  max-width: min(320px, 80vw);
+  width: max-content;
+  text-align: start;
+  z-index: 10;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.icon-button.has-tooltip .directions-hint::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border-width: 8px;
+  border-style: solid;
+  border-color: rgba(17, 34, 48, 0.92) transparent transparent transparent;
+}
+
+.icon-button.has-tooltip.show-tooltip .directions-hint,
+.icon-button.has-tooltip:hover .directions-hint,
+.icon-button.has-tooltip:focus-visible .directions-hint {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
 }
 
 .directions-route-tooltip {
@@ -430,8 +460,7 @@ html, body { margin:0; height:100%; }
     grid-template-columns: 320px minmax(0, 1fr);
     grid-template-areas:
       "modes chart"
-      "actions chart"
-      "hint chart";
+      "actions chart";
     align-items: start;
   }
 
@@ -441,10 +470,6 @@ html, body { margin:0; height:100%; }
 
   .elevation-chart-container {
     min-height: 150px;
-  }
-
-  .directions-hint {
-    align-self: end;
   }
 }
 
@@ -461,6 +486,26 @@ html, body { margin:0; height:100%; }
   .route-stats-list {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .icon-button.has-tooltip .directions-hint {
+    inset-inline-start: auto;
+    inset-inline-end: 0;
+    transform: translateY(6px);
+    min-width: min(220px, 80vw);
+    max-width: min(280px, 90vw);
+  }
+
+  .icon-button.has-tooltip.show-tooltip .directions-hint,
+  .icon-button.has-tooltip:hover .directions-hint,
+  .icon-button.has-tooltip:focus-visible .directions-hint {
+    transform: translateY(0);
+  }
+
+  .icon-button.has-tooltip .directions-hint::after {
+    inset-inline-start: auto;
+    inset-inline-end: 18px;
+    transform: none;
   }
 }
 
