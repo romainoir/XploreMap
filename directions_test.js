@@ -85,7 +85,8 @@ export class DirectionsManager {
     this.directionsHint = directionsHint ?? null;
 
     if (this.routeStats) {
-      this.routeStats.classList.add('sr-only');
+      this.routeStats.setAttribute('aria-live', 'polite');
+      this.routeStats.setAttribute('role', 'group');
     }
 
     this.waypoints = [];
@@ -1532,6 +1533,7 @@ export class DirectionsManager {
     if (!this.routeStats) return;
     if (!route || !route.geometry?.coordinates || route.geometry.coordinates.length < 2) {
       this.routeStats.innerHTML = '';
+      this.routeStats.classList.remove('has-stats');
       return;
     }
 
@@ -1540,11 +1542,34 @@ export class DirectionsManager {
     const ascent = Math.max(0, Math.round(metrics.ascent));
     const descent = Math.max(0, Math.round(metrics.descent));
 
+    const stats = [
+      { key: 'ascent', label: 'Total ascent', value: `${ascent} m` },
+      { key: 'descent', label: 'Total descent', value: `${descent} m` },
+      { key: 'distance', label: 'Total distance', value: `${distanceLabel} km` }
+    ];
+
+    const listItems = stats
+      .map(({ key, label, value }) => `
+        <li
+          class="summary-item ${key}"
+          aria-label="${label} ${value}"
+          title="${label}"
+        >
+          ${SUMMARY_ICONS[key]}
+          <span aria-hidden="true">${value}</span>
+        </li>
+      `.trim())
+      .join('');
+
     this.routeStats.innerHTML = `
       <span class="sr-only">
         Distance: ${distanceLabel} km. Ascent: ${ascent} m. Descent: ${descent} m.
       </span>
+      <ul class="route-stats-list">
+        ${listItems}
+      </ul>
     `;
+    this.routeStats.classList.add('has-stats');
   }
 
   updateElevationProfile(coordinates) {
