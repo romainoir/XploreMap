@@ -27,7 +27,6 @@ const ELEVATION_TICK_TARGET = 5;
 const DISTANCE_TICK_TARGET = 6;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
-const DOUBLE_ARROW_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 3.5a1 1 0 0 1 2 0V7h3.38a1 1 0 0 1 .7 1.7L13.8 11H15a1 1 0 0 1 .7 1.7L12 16.4l-3.7-3.7A1 1 0 0 1 9 11h1.2l-3.3-3.3A1 1 0 0 1 7.6 7H11V3.5Zm0 7.1V9H9.41l1.97 1.97a1 1 0 0 1 0 1.42L9.4 14.37H11v-1.6a1 1 0 0 1 2 0v1.6h1.6l-1.98-1.98a1 1 0 0 1 0-1.41L14.6 9H13v1.6a1 1 0 0 1-2 0Z"/></svg>';
 const ASCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 18a1 1 0 0 1-.7-1.7l6.3-6.3a1 1 0 0 1 1.4 0l3.3 3.3 4.9-6.7H17a1 1 0 0 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V7.41l-5.6 7.6a1 1 0 0 1-1.5.12l-3.3-3.3-5.6 5.6a1 1 0 0 1-.7.27Z"/></svg>';
 const DESCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 6a1 1 0 0 1 .7 1.7l-6.3 6.3a1 1 0 0 1-1.4 0l-3.3-3.3-4.9 6.7H7a1 1 0 0 1 0 2H2a1 1 0 0 1-1-1v-5a1 1 0 0 1 2 0v3.59l5.6-7.6a1 1 0 0 1 1.5-.12l3.3 3.3 5.6-5.6a1 1 0 0 1 .7-.27Z"/></svg>';
 
@@ -87,6 +86,9 @@ function createDistanceMarkerImage(label, {
   drawRoundedRect(0, 0, baseWidth, baseHeight, borderRadius);
   context.fillStyle = fill;
   context.fill();
+
+  context.fillStyle = '#ffffff';
+  context.fillText(label, baseWidth / 2, baseHeight / 2);
 
   return { image: canvas, pixelRatio: deviceRatio };
 }
@@ -1293,21 +1295,25 @@ export class DirectionsManager {
       <div class="tooltip-distance">${distanceLabel} km</div>
       <div class="tooltip-details">
         <span class="tooltip-altitude">Alt. ${altitudeLabel}</span>
-        <span class="tooltip-grade">${DOUBLE_ARROW_ICON}<span>${gradeLabel}</span></span>
+        <span class="tooltip-grade">${gradeLabel}</span>
       </div>
     `;
     tooltip.style.display = 'block';
 
     const container = this.mapContainer;
     if (container && screenPoint) {
-      const offsetX = 14;
-      const offsetY = 14;
-      const maxLeft = container.clientWidth - tooltip.offsetWidth - 8;
-      const maxTop = container.clientHeight - tooltip.offsetHeight - 8;
-      const rawLeft = screenPoint.x + offsetX;
-      const rawTop = screenPoint.y + offsetY;
-      const left = Math.min(Math.max(rawLeft, 8), Math.max(8, maxLeft));
-      const top = Math.min(Math.max(rawTop, 8), Math.max(8, maxTop));
+      const margin = 12;
+      const tooltipWidth = tooltip.offsetWidth;
+      const tooltipHeight = tooltip.offsetHeight;
+      const maxLeft = container.clientWidth - tooltipWidth - margin;
+      const maxTop = container.clientHeight - tooltipHeight - margin;
+      const centeredLeft = screenPoint.x - tooltipWidth / 2;
+      let rawTop = screenPoint.y - tooltipHeight - margin;
+      if (rawTop < margin) {
+        rawTop = Math.min(screenPoint.y + margin, maxTop);
+      }
+      const left = Math.min(Math.max(centeredLeft, margin), Math.max(margin, maxLeft));
+      const top = Math.min(Math.max(rawTop, margin), Math.max(margin, maxTop));
       tooltip.style.left = `${left}px`;
       tooltip.style.top = `${top}px`;
     }
