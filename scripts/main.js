@@ -173,6 +173,7 @@ async function init() {
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
   let currentGpxData = EMPTY_COLLECTION;
+  let directionsExportData = EMPTY_COLLECTION;
 
   const ensureFeatureCollection = (geojson) => {
     if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
@@ -182,6 +183,18 @@ async function init() {
       type: 'FeatureCollection',
       features: geojson.features.filter(feature => Boolean(feature))
     };
+  };
+
+  const buildCombinedExportData = () => {
+    const collections = [currentGpxData, directionsExportData];
+    const features = [];
+    collections.forEach((collection) => {
+      if (!collection || collection.type !== 'FeatureCollection') return;
+      (collection.features || []).forEach((feature) => {
+        if (feature) features.push(feature);
+      });
+    });
+    return { type: 'FeatureCollection', features };
   };
 
   const applyGpxData = (geojson, { fitBounds = false } = {}) => {
@@ -205,7 +218,7 @@ async function init() {
 
   map.on('load', () => {
     try {
-      new DirectionsManager(map, [
+      const directionsManager = new DirectionsManager(map, [
         directionsToggle,
         directionsDock,
         directionsControl,
@@ -217,6 +230,9 @@ async function init() {
         directionsInfoButton,
         directionsHint
       ]);
+      directionsManager.setRouteSegmentsListener((featureCollection) => {
+        directionsExportData = ensureFeatureCollection(featureCollection);
+      });
     } catch (error) {
       console.error('Failed to initialize directions manager', error);
     }
@@ -249,7 +265,7 @@ async function init() {
 
   if (gpxExportButton) {
     gpxExportButton.addEventListener('click', () => {
-      const dataset = currentGpxData;
+      const dataset = buildCombinedExportData();
       if (!dataset.features || dataset.features.length === 0) {
         window.alert('There is no GPX data to export yet.');
         return;

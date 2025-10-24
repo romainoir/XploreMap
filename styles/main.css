@@ -175,9 +175,10 @@ html, body { margin:0; height:100%; }
   display: none;
 }
 
-  .directions-control {
+.directions-control {
     display: none;
     width: min(100%, 960px);
+    max-width: 100%;
     background: rgba(245, 248, 252, 0.94);
     border-radius: 16px 16px 0 0;
     padding: 18px;
@@ -244,6 +245,7 @@ html, body { margin:0; height:100%; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+  width: 100%;
 }
 
 .elevation-summary {
@@ -287,6 +289,7 @@ html, body { margin:0; height:100%; }
   grid-template-columns: auto 1fr;
   gap: 12px;
   align-items: stretch;
+  min-width: 0;
 }
 
 .elevation-y-axis {
@@ -309,31 +312,34 @@ html, body { margin:0; height:100%; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .elevation-chart-container {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(2px, 1fr);
-  align-items: end;
+  display: flex;
+  align-items: flex-end;
   min-height: 110px;
-  gap: 2px;
+  gap: 1px;
   overflow: hidden;
   touch-action: none;
   cursor: crosshair;
+  width: 100%;
 }
 
 .elevation-bar {
-  width: 100%;
-  background: linear-gradient(180deg, rgba(58, 183, 198, 0.85) 0%, rgba(17, 98, 128, 0.85) 100%);
+  flex: 1 1 0;
+  min-width: 0;
+  background: linear-gradient(180deg,
+    var(--bar-color, rgba(58, 183, 198, 0.85)) 0%,
+    var(--bar-color-dark, rgba(17, 98, 128, 0.85)) 100%);
   border-radius: 3px 3px 0 0;
   cursor: crosshair;
-  transition: box-shadow 120ms ease, background 120ms ease;
+  transition: box-shadow 120ms ease, filter 120ms ease;
 }
 
 .elevation-bar.highlighted {
-  background: linear-gradient(180deg, rgba(255, 124, 216, 0.9) 0%, rgba(208, 64, 182, 0.9) 100%);
-  box-shadow: 0 0 0 2px rgba(255, 124, 216, 0.35);
+  box-shadow: 0 0 0 2px var(--bar-accent, rgba(255, 255, 255, 0.35));
+  filter: brightness(1.05);
 }
 
 .elevation-x-axis {
