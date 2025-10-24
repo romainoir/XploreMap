@@ -219,6 +219,25 @@ html, body { margin:0; height:100%; }
   grid-area: actions;
 }
 
+.route-stats {
+  color: rgba(17, 34, 48, 0.75);
+  font-size: 13px;
+}
+
+.route-stats-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.route-stats .summary-item span {
+  font-weight: 600;
+}
+
 
 .elevation-chart {
   grid-area: chart;
@@ -429,8 +448,9 @@ html, body { margin:0; height:100%; }
     padding: 16px;
   }
 
-  .route-stats {
-    grid-template-columns: 1fr;
+  .route-stats-list {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
