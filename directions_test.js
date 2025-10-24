@@ -28,11 +28,14 @@ const DISTANCE_TICK_TARGET = 6;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
 const DOUBLE_ARROW_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 3.5a1 1 0 0 1 2 0V7h3.38a1 1 0 0 1 .7 1.7L13.8 11H15a1 1 0 0 1 .7 1.7L12 16.4l-3.7-3.7A1 1 0 0 1 9 11h1.2l-3.3-3.3A1 1 0 0 1 7.6 7H11V3.5Zm0 7.1V9H9.41l1.97 1.97a1 1 0 0 1 0 1.42L9.4 14.37H11v-1.6a1 1 0 0 1 2 0v1.6h1.6l-1.98-1.98a1 1 0 0 1 0-1.41L14.6 9H13v1.6a1 1 0 0 1-2 0Z"/></svg>';
+const ASCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 18a1 1 0 0 1-.7-1.7l6.3-6.3a1 1 0 0 1 1.4 0l3.3 3.3 4.9-6.7H17a1 1 0 0 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V7.41l-5.6 7.6a1 1 0 0 1-1.5.12l-3.3-3.3-5.6 5.6a1 1 0 0 1-.7.27Z"/></svg>';
+const DESCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 6a1 1 0 0 1 .7 1.7l-6.3 6.3a1 1 0 0 1-1.4 0l-3.3-3.3-4.9 6.7H7a1 1 0 0 1 0 2H2a1 1 0 0 1-1-1v-5a1 1 0 0 1 2 0v3.59l5.6-7.6a1 1 0 0 1 1.5-.12l3.3 3.3 5.6-5.6a1 1 0 0 1 .7-.27Z"/></svg>';
+const DISTANCE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4.5A2.5 2.5 0 1 1 6.5 7 2.5 2.5 0 0 1 4 4.5Zm0 0a4.5 4.5 0 0 0-1 8.88V19a1 1 0 0 0 1.45.89l3.6-1.8 3.6 1.8a1 1 0 0 0 .9 0l3.6-1.8 3.6 1.8A1 1 0 0 0 20 19v-4.37A4.5 4.5 0 1 0 17.5 7c0 .74.2 1.45.53 2.06l-1.66.83A4.47 4.47 0 0 0 14.5 7a4.5 4.5 0 0 0-4.5-4.5 4.49 4.49 0 0 0-4.01 2.29A4.49 4.49 0 0 0 4 4.5Zm1 3A2.5 2.5 0 0 1 7.5 5a2.5 2.5 0 0 1 2.5 2.5V18l-2.6-1.3a1 1 0 0 0-.9 0L5 18Z"/></svg>';
 
 const SUMMARY_ICONS = {
-  ascent: DOUBLE_ARROW_ICON,
-  descent: DOUBLE_ARROW_ICON,
-  distance: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.4 6.4 2.8 11l4.6 4.6 1.4-1.4-2.2-2.2h10.8l-2.2 2.2 1.4 1.4 4.6-4.6-4.6-4.6-1.4 1.4 2.2 2.2H6.6l2.2-2.2Z"/></svg>'
+  ascent: ASCENT_ICON,
+  descent: DESCENT_ICON,
+  distance: DISTANCE_ICON
 };
 
 const createWaypointFeature = (coords, index, total) => ({
@@ -104,6 +107,8 @@ export class DirectionsManager {
     this.elevationSamples = [];
     this.elevationChartContainer = null;
     this.highlightedElevationBar = null;
+    this.activeHoverSource = null;
+    this.lastElevationHoverDistance = null;
 
     this.setHintVisible(false);
 
@@ -111,11 +116,13 @@ export class DirectionsManager {
     this.handleMapMouseMove = (event) => this.onMapMouseMove(event);
     this.handleMapMouseUp = () => this.onMapMouseUp();
     this.handleMapMouseLeave = () => {
-      this.resetSegmentHover();
+      this.resetSegmentHover('map');
       this.setHoveredWaypointIndex(null);
     };
     this.handleMapClick = (event) => this.onMapClick(event);
     this.handleWaypointDoubleClick = (event) => this.onWaypointDoubleClick(event);
+    this.handleElevationPointerMove = (event) => this.onElevationPointerMove(event);
+    this.handleElevationPointerLeave = () => this.onElevationPointerLeave();
 
     this.routeHoverTooltip = null;
 
@@ -139,6 +146,7 @@ export class DirectionsManager {
 
     removeLayer('route-line');
     removeLayer('route-segment-hover');
+    removeLayer('distance-marker-points');
     removeLayer('distance-markers');
     removeLayer('waypoint-hover-drag');
     removeLayer('route-hover-point');
@@ -208,22 +216,37 @@ export class DirectionsManager {
     });
 
     this.map.addLayer({
+      id: 'distance-marker-points',
+      type: 'circle',
+      source: 'distance-markers-source',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 12, 4.5, 16, 6.5],
+        'circle-color': '#ffffff',
+        'circle-opacity': 0.95,
+        'circle-stroke-color': this.modeColors[this.currentMode],
+        'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 10, 1.4, 14, 2.2]
+      }
+    });
+
+    this.map.addLayer({
       id: 'distance-markers',
       type: 'symbol',
       source: 'distance-markers-source',
       layout: {
-        'symbol-placement': 'line',
+        'symbol-placement': 'point',
         'text-field': '{distance}',
         'text-size': 12,
-        'text-offset': [0, 1.5],
-        'symbol-spacing': 100,
+        'text-offset': [0, 1.25],
+        'text-anchor': 'top',
         'text-allow-overlap': true,
-        'text-ignore-placement': true
+        'text-ignore-placement': true,
+        'text-font': ['Noto Sans Bold']
       },
       paint: {
         'text-color': this.modeColors[this.currentMode],
         'text-halo-color': 'rgba(0, 0, 0, 0.6)',
-        'text-halo-width': 1
+        'text-halo-width': 1,
+        'text-halo-blur': 0.3
       }
     });
 
@@ -455,7 +478,7 @@ export class DirectionsManager {
 
   handleRouteSegmentHover(event) {
     if (!this.routeSegments.length) {
-      this.resetSegmentHover();
+      this.resetSegmentHover('map');
       return;
     }
 
@@ -474,16 +497,15 @@ export class DirectionsManager {
     });
 
     if (closestIndex === -1) {
-      this.resetSegmentHover();
+      this.resetSegmentHover('map');
     } else {
       const segment = this.routeSegments[closestIndex];
       if (!segment) {
-        this.resetSegmentHover();
+        this.resetSegmentHover('map');
         return;
       }
       const projection = this.projectPointOnSegment(event.lngLat, segment.start, segment.end);
-      this.setHoveredSegment(closestIndex);
-      this.updateRouteHoverDisplay(event.point, segment, projection);
+      this.showRouteHoverOnSegment(closestIndex, projection, { mousePoint: event.point, source: 'map' });
     }
   }
 
@@ -499,9 +521,17 @@ export class DirectionsManager {
     }
   }
 
-  resetSegmentHover() {
+  clearHover(source = null) {
+    if (source && this.activeHoverSource && source !== this.activeHoverSource) {
+      return;
+    }
+    this.activeHoverSource = null;
     this.setHoveredSegment(null);
     this.hideRouteHover();
+  }
+
+  resetSegmentHover(source = null) {
+    this.clearHover(source);
   }
 
   addViaWaypoint(lngLat) {
@@ -567,6 +597,166 @@ export class DirectionsManager {
     return Math.hypot(point.x - projection.x, point.y - projection.y);
   }
 
+  findProfileIntervalIndex(distanceKm) {
+    const profile = this.routeProfile;
+    const distances = profile?.cumulativeDistances;
+    if (!profile || !Array.isArray(distances) || distances.length < 2) {
+      return null;
+    }
+    if (!Number.isFinite(distanceKm)) {
+      return null;
+    }
+
+    const lastIndex = distances.length - 1;
+    if (distanceKm <= (distances[0] ?? 0)) {
+      return 0;
+    }
+    if (distanceKm >= (distances[lastIndex] ?? 0)) {
+      return Math.max(0, lastIndex - 1);
+    }
+
+    let low = 0;
+    let high = lastIndex;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const value = distances[mid];
+      if (!Number.isFinite(value)) {
+        break;
+      }
+      if (value <= distanceKm) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    const index = Math.max(0, Math.min(low - 1, lastIndex - 1));
+    return index;
+  }
+
+  getElevationAtDistance(distanceKm) {
+    if (!this.routeProfile || !Number.isFinite(distanceKm)) {
+      return null;
+    }
+
+    const distances = this.routeProfile.cumulativeDistances ?? [];
+    const elevations = this.routeProfile.elevations ?? [];
+    if (!Array.isArray(distances) || !Array.isArray(elevations) || distances.length !== elevations.length) {
+      return null;
+    }
+
+    const lastIndex = distances.length - 1;
+    if (lastIndex < 0) {
+      return null;
+    }
+
+    const findPrev = (startIndex) => {
+      for (let index = Math.min(startIndex, lastIndex); index >= 0; index -= 1) {
+        const distance = distances[index];
+        const elevation = elevations[index];
+        if (!Number.isFinite(distance) || distance > distanceKm) {
+          continue;
+        }
+        if (Number.isFinite(elevation)) {
+          return { distance, elevation };
+        }
+      }
+      return null;
+    };
+
+    const findNext = (startIndex) => {
+      for (let index = Math.max(startIndex, 0); index <= lastIndex; index += 1) {
+        const distance = distances[index];
+        const elevation = elevations[index];
+        if (!Number.isFinite(distance) || distance < distanceKm) {
+          continue;
+        }
+        if (Number.isFinite(elevation)) {
+          return { distance, elevation };
+        }
+      }
+      return null;
+    };
+
+    if (distanceKm <= (distances[0] ?? 0)) {
+      const next = findNext(0);
+      return next?.elevation ?? null;
+    }
+
+    if (distanceKm >= (distances[lastIndex] ?? 0)) {
+      const prev = findPrev(lastIndex);
+      return prev?.elevation ?? null;
+    }
+
+    const intervalIndex = this.findProfileIntervalIndex(distanceKm);
+    if (intervalIndex === null) {
+      return null;
+    }
+
+    const previous = findPrev(Math.min(intervalIndex + 1, lastIndex));
+    const next = findNext(Math.max(intervalIndex, 0));
+
+    if (previous && next && Number.isFinite(previous.distance) && Number.isFinite(next.distance)
+      && next.distance > previous.distance) {
+      const span = next.distance - previous.distance;
+      const ratio = span > 0 ? (distanceKm - previous.distance) / span : 0;
+      const clampedRatio = Math.max(0, Math.min(1, ratio));
+      return previous.elevation + (next.elevation - previous.elevation) * clampedRatio;
+    }
+
+    if (previous) {
+      return previous.elevation;
+    }
+    if (next) {
+      return next.elevation;
+    }
+
+    return null;
+  }
+
+  computeGradeAtDistance(distanceKm, windowMeters = 30) {
+    if (!this.routeProfile || !Number.isFinite(distanceKm)) {
+      return null;
+    }
+
+    const totalDistance = Number(this.routeProfile.totalDistanceKm);
+    if (!Number.isFinite(totalDistance) || totalDistance <= 0) {
+      return null;
+    }
+
+    const minimumWindowKm = Math.max(windowMeters / 1000, Math.min(totalDistance, 0.01));
+    const dynamicWindowKm = Math.max(minimumWindowKm, totalDistance * 0.015);
+    const windowKm = Math.min(dynamicWindowKm, totalDistance);
+
+    let startDistance = Math.max(0, distanceKm - windowKm / 2);
+    let endDistance = Math.min(totalDistance, distanceKm + windowKm / 2);
+
+    if (endDistance - startDistance < minimumWindowKm) {
+      const padding = (minimumWindowKm - (endDistance - startDistance)) / 2;
+      startDistance = Math.max(0, startDistance - padding);
+      endDistance = Math.min(totalDistance, endDistance + padding);
+    }
+
+    const span = endDistance - startDistance;
+    if (!Number.isFinite(span) || span <= 0.002) {
+      return null;
+    }
+
+    const startElevation = this.getElevationAtDistance(startDistance);
+    const endElevation = this.getElevationAtDistance(endDistance);
+    if (!Number.isFinite(startElevation) || !Number.isFinite(endElevation)) {
+      return null;
+    }
+
+    const horizontalMeters = Math.max(span * 1000, 1);
+    const grade = ((endElevation - startElevation) / horizontalMeters) * 100;
+    if (!Number.isFinite(grade)) {
+      return null;
+    }
+
+    const clamped = Math.max(Math.min(grade, 100), -100);
+    return clamped;
+  }
+
   computeDistanceKm(startCoord, endCoord) {
     if (!startCoord || !endCoord) return 0;
     if (turfApi) {
@@ -587,6 +777,150 @@ export class DirectionsManager {
       + Math.cos(toRadians(lat1 ?? 0)) * Math.cos(toRadians(lat2 ?? 0)) * Math.sin(dLng / 2) ** 2;
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
     return earthRadiusKm * c;
+  }
+
+  findSegmentIndexByDistance(distanceKm) {
+    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
+      return null;
+    }
+    if (!Number.isFinite(distanceKm)) {
+      return null;
+    }
+
+    const lastIndex = this.routeSegments.length - 1;
+    if (distanceKm <= (this.routeSegments[0]?.startDistanceKm ?? 0)) {
+      return 0;
+    }
+    if (distanceKm >= (this.routeSegments[lastIndex]?.endDistanceKm ?? 0)) {
+      return lastIndex;
+    }
+
+    let low = 0;
+    let high = lastIndex;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const segment = this.routeSegments[mid];
+      if (!segment) {
+        break;
+      }
+      const start = segment.startDistanceKm ?? 0;
+      const end = segment.endDistanceKm ?? start;
+      if (distanceKm < start) {
+        high = mid - 1;
+      } else if (distanceKm > end) {
+        low = mid + 1;
+      } else {
+        return mid;
+      }
+    }
+
+    const candidate = Math.max(0, Math.min(low, lastIndex));
+    return candidate;
+  }
+
+  interpolateSegmentCoordinate(segment, t, distanceKm) {
+    if (!segment) {
+      return null;
+    }
+    const start = segment.start ?? [];
+    const end = segment.end ?? [];
+    const startLng = Number(start[0]);
+    const startLat = Number(start[1]);
+    const endLng = Number(end[0]);
+    const endLat = Number(end[1]);
+    if (!Number.isFinite(startLng) || !Number.isFinite(startLat) || !Number.isFinite(endLng) || !Number.isFinite(endLat)) {
+      return null;
+    }
+
+    const clampedT = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+    const lng = startLng + (endLng - startLng) * clampedT;
+    const lat = startLat + (endLat - startLat) * clampedT;
+
+    const coord = [lng, lat];
+    const interpolatedElevation = this.getElevationAtDistance(distanceKm);
+    if (Number.isFinite(interpolatedElevation)) {
+      coord.push(interpolatedElevation);
+      return coord;
+    }
+
+    const startElevation = Number(start[2]);
+    const endElevation = Number(end[2]);
+    if (Number.isFinite(startElevation) && Number.isFinite(endElevation)) {
+      coord.push(startElevation + (endElevation - startElevation) * clampedT);
+    } else if (Number.isFinite(startElevation)) {
+      coord.push(startElevation);
+    } else if (Number.isFinite(endElevation)) {
+      coord.push(endElevation);
+    }
+
+    return coord;
+  }
+
+  showRouteHoverOnSegment(segmentIndex, projection, { mousePoint = null, source = null } = {}) {
+    const segment = this.routeSegments?.[segmentIndex];
+    if (!segment) {
+      return;
+    }
+
+    const clampedT = Math.max(0, Math.min(1, Number.isFinite(projection?.t) ? projection.t : 0));
+    const distanceKm = Number.isFinite(projection?.distanceKm)
+      ? projection.distanceKm
+      : (segment.startDistanceKm ?? 0) + (segment.distanceKm ?? 0) * clampedT;
+
+    const coordinates = this.interpolateSegmentCoordinate(segment, clampedT, distanceKm) ?? projection?.coordinates ?? null;
+    let screenPoint = mousePoint;
+    if ((!screenPoint || !Number.isFinite(screenPoint.x) || !Number.isFinite(screenPoint.y)) && coordinates) {
+      try {
+        const projected = this.map.project(toLngLat(coordinates));
+        if (projected && Number.isFinite(projected.x) && Number.isFinite(projected.y)) {
+          screenPoint = { x: projected.x, y: projected.y };
+        }
+      } catch (error) {
+        console.warn('Failed to project hover coordinate', error);
+      }
+    }
+
+    const projectionData = {
+      ...projection,
+      coordinates,
+      t: clampedT,
+      distanceKm,
+      source
+    };
+
+    this.activeHoverSource = source ?? null;
+    this.setHoveredSegment(segmentIndex);
+    this.updateRouteHoverDisplay(screenPoint, segment, projectionData);
+  }
+
+  showRouteHoverAtDistance(distanceKm, { source = null } = {}) {
+    if (!Number.isFinite(distanceKm)) {
+      this.resetSegmentHover(source ?? undefined);
+      return;
+    }
+
+    const segmentIndex = this.findSegmentIndexByDistance(distanceKm);
+    if (!Number.isInteger(segmentIndex)) {
+      this.resetSegmentHover(source ?? undefined);
+      return;
+    }
+
+    const segment = this.routeSegments?.[segmentIndex];
+    if (!segment) {
+      this.resetSegmentHover(source ?? undefined);
+      return;
+    }
+
+    const startDistance = segment.startDistanceKm ?? 0;
+    const segmentDistance = segment.distanceKm ?? 0;
+    let relativeDistance = distanceKm - startDistance;
+    if (!Number.isFinite(relativeDistance)) {
+      relativeDistance = 0;
+    }
+    relativeDistance = Math.max(0, Math.min(segmentDistance, relativeDistance));
+    const t = segmentDistance > 0 ? relativeDistance / segmentDistance : 0;
+
+    this.showRouteHoverOnSegment(segmentIndex, { t, distanceKm }, { source });
   }
 
   buildRouteProfile(coordinates = []) {
@@ -707,29 +1041,32 @@ export class DirectionsManager {
     if (!this.elevationChartContainer) return;
     const bars = Array.from(this.elevationChartContainer.querySelectorAll('.elevation-bar'));
     let targetBar = null;
+    let fallbackBar = null;
+    let fallbackDelta = Infinity;
 
     if (Number.isFinite(distanceKm)) {
-      const tolerance = 1e-3;
       for (const bar of bars) {
-        const startKm = Number.parseFloat(bar.dataset.startKm);
-        const endKm = Number.parseFloat(bar.dataset.endKm);
+        const startKm = Number(bar.dataset.startKm);
+        const endKm = Number(bar.dataset.endKm);
         if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
           continue;
         }
+        const segmentSpan = Math.max(endKm - startKm, 0);
+        const tolerance = Math.max(0.0005, segmentSpan * 0.6);
         if (distanceKm >= startKm - tolerance && distanceKm <= endKm + tolerance) {
           targetBar = bar;
           break;
         }
+        const center = startKm + segmentSpan / 2;
+        const delta = Math.abs(center - distanceKm);
+        if (delta < fallbackDelta) {
+          fallbackDelta = delta;
+          fallbackBar = bar;
+        }
       }
 
-      if (!targetBar && bars.length) {
-        const lastBar = bars[bars.length - 1];
-        const lastEnd = Number.parseFloat(lastBar.dataset.endKm);
-        if (Number.isFinite(lastEnd) && distanceKm >= lastEnd) {
-          targetBar = lastBar;
-        } else {
-          targetBar = bars[0];
-        }
+      if (!targetBar && fallbackBar) {
+        targetBar = fallbackBar;
       }
     }
 
@@ -737,12 +1074,78 @@ export class DirectionsManager {
       this.highlightedElevationBar.classList.remove('highlighted');
     }
 
-    if (targetBar && targetBar !== this.highlightedElevationBar) {
-      targetBar.classList.add('highlighted');
+    if (targetBar) {
+      if (targetBar !== this.highlightedElevationBar) {
+        targetBar.classList.add('highlighted');
+      }
       this.highlightedElevationBar = targetBar;
-    } else if (!targetBar) {
+    } else {
       this.highlightedElevationBar = null;
     }
+  }
+
+  detachElevationChartEvents() {
+    if (!this.elevationChartContainer) {
+      return;
+    }
+    this.elevationChartContainer.removeEventListener('pointermove', this.handleElevationPointerMove);
+    this.elevationChartContainer.removeEventListener('pointerleave', this.handleElevationPointerLeave);
+  }
+
+  attachElevationChartEvents() {
+    if (!this.elevationChartContainer) {
+      return;
+    }
+    this.elevationChartContainer.addEventListener('pointermove', this.handleElevationPointerMove);
+    this.elevationChartContainer.addEventListener('pointerleave', this.handleElevationPointerLeave);
+  }
+
+  onElevationPointerMove(event) {
+    if (!this.elevationChartContainer) {
+      return;
+    }
+
+    const bars = Array.from(this.elevationChartContainer.querySelectorAll('.elevation-bar'));
+    if (!bars.length) {
+      return;
+    }
+
+    let target = event.target?.closest?.('.elevation-bar') ?? null;
+    if (!target || !this.elevationChartContainer.contains(target)) {
+      const rect = this.elevationChartContainer.getBoundingClientRect();
+      const relativeX = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+      const ratio = Math.max(0, Math.min(0.9999, relativeX));
+      const index = Math.max(0, Math.min(bars.length - 1, Math.floor(ratio * bars.length)));
+      target = bars[index];
+    }
+
+    if (!target) {
+      return;
+    }
+
+    const startKm = Number(target.dataset.startKm);
+    const endKm = Number(target.dataset.endKm);
+    if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
+      return;
+    }
+
+    const midpoint = Number(target.dataset.midKm);
+    const distanceKm = Number.isFinite(midpoint)
+      ? midpoint
+      : Math.max(0, startKm + Math.max(0, endKm - startKm) / 2);
+
+    if (this.activeHoverSource === 'chart' && this.lastElevationHoverDistance !== null
+      && Math.abs(this.lastElevationHoverDistance - distanceKm) < 1e-4) {
+      return;
+    }
+
+    this.lastElevationHoverDistance = distanceKm;
+    this.showRouteHoverAtDistance(distanceKm, { source: 'chart' });
+  }
+
+  onElevationPointerLeave() {
+    this.lastElevationHoverDistance = null;
+    this.resetSegmentHover('chart');
   }
 
   hideRouteHover() {
@@ -764,18 +1167,34 @@ export class DirectionsManager {
     if (!segment || !projection) return;
 
     const tooltip = this.ensureRouteHoverTooltip();
-    const distanceAlongSegment = (segment.distanceKm ?? 0) * (projection.t ?? 0);
-    const distanceKm = (segment.startDistanceKm ?? 0) + distanceAlongSegment;
+    const clampedT = Math.max(0, Math.min(1, Number.isFinite(projection.t) ? projection.t : 0));
+    const distanceKm = Number.isFinite(projection.distanceKm)
+      ? projection.distanceKm
+      : (segment.startDistanceKm ?? 0) + (segment.distanceKm ?? 0) * clampedT;
     const distanceLabel = this.formatDistance(distanceKm);
-    const elevation = Number.isFinite(segment.startElevation) && Number.isFinite(segment.endElevation)
-      ? segment.startElevation + (segment.endElevation - segment.startElevation) * (projection.t ?? 0)
-      : segment.startElevation ?? segment.endElevation ?? null;
-    const gradeValue = (segment.distanceKm ?? 0) > 0 && Number.isFinite(segment.startElevation)
-      && Number.isFinite(segment.endElevation)
-      ? ((segment.endElevation - segment.startElevation) / Math.max(segment.distanceKm * 1000, 1e-6)) * 100
-      : null;
+    const elevation = this.getElevationAtDistance(distanceKm);
+    let gradeValue = this.computeGradeAtDistance(distanceKm);
+    if (!Number.isFinite(gradeValue)) {
+      if ((segment.distanceKm ?? 0) > 0 && Number.isFinite(segment.startElevation) && Number.isFinite(segment.endElevation)) {
+        gradeValue = ((segment.endElevation - segment.startElevation) / Math.max(segment.distanceKm * 1000, 1)) * 100;
+      } else {
+        gradeValue = null;
+      }
+    }
     const altitudeLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : 'N/A';
     const gradeLabel = this.formatGrade(gradeValue);
+
+    let screenPoint = mousePoint;
+    if ((!screenPoint || !Number.isFinite(screenPoint.x) || !Number.isFinite(screenPoint.y)) && projection.coordinates) {
+      try {
+        const projected = this.map.project(toLngLat(projection.coordinates));
+        if (projected && Number.isFinite(projected.x) && Number.isFinite(projected.y)) {
+          screenPoint = { x: projected.x, y: projected.y };
+        }
+      } catch (error) {
+        console.warn('Failed to project tooltip coordinate', error);
+      }
+    }
 
     tooltip.innerHTML = `
       <div class="tooltip-distance">${distanceLabel} km</div>
@@ -787,13 +1206,13 @@ export class DirectionsManager {
     tooltip.style.display = 'block';
 
     const container = this.mapContainer;
-    if (container && mousePoint) {
+    if (container && screenPoint) {
       const offsetX = 14;
       const offsetY = 14;
       const maxLeft = container.clientWidth - tooltip.offsetWidth - 8;
       const maxTop = container.clientHeight - tooltip.offsetHeight - 8;
-      const rawLeft = mousePoint.x + offsetX;
-      const rawTop = mousePoint.y + offsetY;
+      const rawLeft = screenPoint.x + offsetX;
+      const rawTop = screenPoint.y + offsetY;
       const left = Math.min(Math.max(rawLeft, 8), Math.max(8, maxLeft));
       const top = Math.min(Math.max(rawTop, 8), Math.max(8, maxTop));
       tooltip.style.left = `${left}px`;
@@ -803,20 +1222,25 @@ export class DirectionsManager {
     if (this.map.getLayer('route-hover-point')) {
       this.map.setPaintProperty('route-hover-point', 'circle-opacity', 1);
     }
-    this.map.getSource('route-hover-point-source')?.setData({
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'Point', coordinates: projection.coordinates }
-        }
-      ]
-    });
+    if (projection.coordinates) {
+      this.map.getSource('route-hover-point-source')?.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Point', coordinates: projection.coordinates }
+          }
+        ]
+      });
+    } else {
+      this.map.getSource('route-hover-point-source')?.setData(EMPTY_COLLECTION);
+    }
 
     const canvas = this.map.getCanvas?.();
     if (canvas) {
-      canvas.style.cursor = 'pointer';
+      const shouldPointer = projection.source === 'map';
+      canvas.style.cursor = shouldPointer ? 'pointer' : '';
     }
 
     this.highlightElevationAt(distanceKm);
@@ -829,14 +1253,15 @@ export class DirectionsManager {
     this.latestMetrics = null;
     this.routeProfile = null;
     this.elevationSamples = [];
+    this.detachElevationChartEvents();
     this.elevationChartContainer = null;
     this.highlightedElevationBar = null;
+    this.lastElevationHoverDistance = null;
 
     this.map.getSource('route-line-source')?.setData(EMPTY_LINE_STRING);
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
     this.map.getSource('route-segments-source')?.setData(EMPTY_COLLECTION);
-    this.hideRouteHover();
-    this.resetSegmentHover();
+    this.clearHover();
   }
 
   clearDirections() {
@@ -857,6 +1282,9 @@ export class DirectionsManager {
     });
     if (this.map.getLayer('route-line')) {
       this.map.setPaintProperty('route-line', 'line-color', this.modeColors[mode]);
+    }
+    if (this.map.getLayer('distance-marker-points')) {
+      this.map.setPaintProperty('distance-marker-points', 'circle-stroke-color', this.modeColors[mode]);
     }
     if (this.map.getLayer('distance-markers')) {
       this.map.setPaintProperty('distance-markers', 'text-color', this.modeColors[mode]);
@@ -1121,8 +1549,13 @@ export class DirectionsManager {
 
   updateElevationProfile(coordinates) {
     if (!this.elevationChart) return;
+    this.detachElevationChartEvents();
+    this.lastElevationHoverDistance = null;
     if (!Array.isArray(coordinates) || coordinates.length < 2) {
       this.elevationChart.innerHTML = '';
+      this.elevationSamples = [];
+      this.elevationChartContainer = null;
+      this.highlightedElevationBar = null;
       return;
     }
 
@@ -1133,6 +1566,7 @@ export class DirectionsManager {
       this.elevationSamples = [];
       this.elevationChartContainer = null;
       this.highlightedElevationBar = null;
+      this.lastElevationHoverDistance = null;
       return;
     }
 
@@ -1158,8 +1592,9 @@ export class DirectionsManager {
         return `
           <div
             class="elevation-bar"
-            data-start-km="${sample.startDistanceKm.toFixed(3)}"
-            data-end-km="${sample.endDistanceKm.toFixed(3)}"
+            data-start-km="${sample.startDistanceKm.toFixed(4)}"
+            data-end-km="${sample.endDistanceKm.toFixed(4)}"
+            data-mid-km="${((sample.startDistanceKm + sample.endDistanceKm) / 2).toFixed(4)}"
             style="height:${height.toFixed(2)}%"
             title="${title}"
           ></div>
@@ -1228,6 +1663,7 @@ export class DirectionsManager {
 
     this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
     this.highlightedElevationBar = null;
+    this.attachElevationChartEvents();
   }
 
   updateDistanceMarkers(route) {
