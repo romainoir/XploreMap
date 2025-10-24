@@ -11,7 +11,7 @@ import {
   VIEW_MODES,
   VERSATILES_LOCAL_JSON
 } from './constants.js';
-import { ensureGpxLayers, parseGpxToGeoJson, zoomToGeojson } from './gpx.js';
+import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from './gpx.js';
 import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
 import { waitForSWReady } from './service-worker.js';
 
@@ -155,24 +155,155 @@ async function init() {
     background: 'linear-gradient(135deg, rgba(5,15,24,0.92) 0%, rgba(6,24,36,0.92) 50%, rgba(10,34,46,0.92) 100%)'
   });
 
-  let currentGpxData = null;
   const gpxFileInput = document.getElementById('gpxFileInput');
   const gpxImportButton = document.getElementById('gpxImportButton');
+  const gpxTraceButton = document.getElementById('gpxTraceButton');
+  const gpxExportButton = document.getElementById('gpxExportButton');
 
-  function applyGpxData(geojson) {
-    currentGpxData = geojson;
+  let importedGpxData = null;
+  let currentGpxData = { type: 'FeatureCollection', features: [] };
+
+  const MapboxDrawCtor = typeof window !== 'undefined' ? window.MapboxDraw : null;
+  const draw = typeof MapboxDrawCtor === 'function'
+    ? new MapboxDrawCtor({ displayControlsDefault: false, defaultMode: 'simple_select' })
+    : null;
+
+  if (draw) {
+    map.addControl(draw, 'top-left');
+  } else if (gpxTraceButton) {
+    gpxTraceButton.disabled = true;
+    gpxTraceButton.title = 'GPX tracing is unavailable in this browser.';
+  }
+
+  const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
+
+  const sanitizeCoordinate = (coord) => {
+    if (!Array.isArray(coord) || coord.length < 2) return null;
+    const [lon, lat, ele] = coord;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    const normalized = [lon, lat];
+    if (Number.isFinite(ele)) normalized.push(ele);
+    return normalized;
+  };
+
+  const sanitizeLineString = (coords) => {
+    if (!Array.isArray(coords)) return null;
+    const cleaned = coords.map(sanitizeCoordinate).filter(Boolean);
+    return cleaned.length >= 2 ? cleaned : null;
+  };
+
+  const sanitizeMultiLineString = (segments) => {
+    if (!Array.isArray(segments)) return null;
+    const cleanedSegments = segments
+      .map(segment => sanitizeLineString(Array.isArray(segment) ? segment : []))
+      .filter(Boolean);
+    return cleanedSegments.length ? cleanedSegments : null;
+  };
+
+  const cloneProperties = (props, fallbackSource = 'trace') => {
+    const base = props && typeof props === 'object' ? { ...props } : {};
+    if (!('source' in base)) base.source = fallbackSource;
+    return base;
+  };
+
+  const sanitizeDrawFeature = (feature) => {
+    if (!feature || !feature.geometry) return null;
+    const { geometry } = feature;
+    switch (geometry.type) {
+      case 'LineString': {
+        const coords = sanitizeLineString(geometry.coordinates);
+        if (!coords) return null;
+        return {
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: coords },
+          properties: cloneProperties(feature.properties)
+        };
+      }
+      case 'Point': {
+        const coord = sanitizeCoordinate(geometry.coordinates);
+        if (!coord) return null;
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: coord },
+          properties: cloneProperties(feature.properties)
+        };
+      }
+      case 'MultiLineString': {
+        const segments = sanitizeMultiLineString(geometry.coordinates);
+        if (!segments) return null;
+        return {
+          type: 'Feature',
+          geometry: { type: 'MultiLineString', coordinates: segments },
+          properties: cloneProperties(feature.properties)
+        };
+      }
+      default:
+        return null;
+    }
+  };
+
+  const getDrawnFeatureCollection = () => {
+    if (!draw) return EMPTY_COLLECTION;
+    try {
+      const raw = draw.getAll();
+      const features = Array.isArray(raw && raw.features)
+        ? raw.features.map(sanitizeDrawFeature).filter(Boolean)
+        : [];
+      return { type: 'FeatureCollection', features };
+    } catch (error) {
+      console.error('Failed to read drawn GPX data', error);
+      return EMPTY_COLLECTION;
+    }
+  };
+
+  const buildCombinedGeojson = () => {
+    const imported = importedGpxData && Array.isArray(importedGpxData.features)
+      ? importedGpxData.features
+      : [];
+    const drawn = getDrawnFeatureCollection().features;
+    return {
+      type: 'FeatureCollection',
+      features: [...imported, ...drawn]
+    };
+  };
+
+  const applyGpxData = (geojson, { fitBounds = false } = {}) => {
+    const dataset = geojson && geojson.type === 'FeatureCollection' && Array.isArray(geojson.features)
+      ? geojson
+      : { type: 'FeatureCollection', features: [] };
+    currentGpxData = dataset;
+
     const applyLayers = () => {
       ensureGpxLayers(map, currentGpxData);
-      if (geojson && geojson.features && geojson.features.length) {
-        zoomToGeojson(map, geojson);
+      if (fitBounds && currentGpxData.features && currentGpxData.features.length) {
+        zoomToGeojson(map, currentGpxData);
       }
     };
+
     if (typeof map.isStyleLoaded === 'function' && !map.isStyleLoaded()) {
       map.once('style.load', applyLayers);
     } else {
       applyLayers();
     }
-  }
+  };
+
+  const recomputeGpxData = ({ fitBounds = false } = {}) => {
+    const combined = buildCombinedGeojson();
+    applyGpxData(combined, { fitBounds });
+  };
+
+  let isTraceModeActive = false;
+
+  const setTraceButtonState = (active) => {
+    if (!draw || !gpxTraceButton) return;
+    gpxTraceButton.classList.toggle('active', active);
+    gpxTraceButton.setAttribute('aria-pressed', String(active));
+    gpxTraceButton.textContent = active ? 'Finish Trace' : 'Trace GPX';
+    const title = active ? 'Finish tracing the current GPX line' : 'Trace GPX';
+    gpxTraceButton.setAttribute('title', title);
+  };
+
+  recomputeGpxData();
 
   if (gpxImportButton && gpxFileInput) {
     gpxImportButton.addEventListener('click', () => {
@@ -188,13 +319,67 @@ async function init() {
         if (!geojson || !geojson.features || geojson.features.length === 0) {
           window.alert('No GPX features were found in the selected file.');
         } else {
-          applyGpxData(geojson);
+          importedGpxData = geojson;
+          recomputeGpxData({ fitBounds: true });
         }
       } catch (error) {
         console.error('Failed to import GPX file', error);
         window.alert('Unable to load the selected GPX file. Please ensure it is valid.');
       } finally {
         gpxFileInput.value = '';
+      }
+    });
+  }
+
+  if (draw && gpxTraceButton) {
+    gpxTraceButton.disabled = false;
+    setTraceButtonState(false);
+    gpxTraceButton.addEventListener('click', () => {
+      if (!draw) return;
+      if (isTraceModeActive) {
+        draw.changeMode('simple_select');
+      } else {
+        draw.changeMode('draw_line_string');
+      }
+    });
+  }
+
+  if (draw) {
+    const updateFromDraw = () => {
+      recomputeGpxData();
+    };
+    map.on('draw.create', updateFromDraw);
+    map.on('draw.update', updateFromDraw);
+    map.on('draw.delete', updateFromDraw);
+    map.on('draw.modechange', (event) => {
+      const active = event && event.mode === 'draw_line_string';
+      isTraceModeActive = Boolean(active);
+      setTraceButtonState(isTraceModeActive);
+    });
+  }
+
+  if (gpxExportButton) {
+    gpxExportButton.addEventListener('click', () => {
+      const dataset = buildCombinedGeojson();
+      if (!dataset.features || dataset.features.length === 0) {
+        window.alert('There is no GPX data to export yet.');
+        return;
+      }
+      try {
+        const gpxContent = geojsonToGpx(dataset);
+        const blob = new Blob([gpxContent], { type: 'application/gpx+xml' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.href = url;
+        link.download = `xploremap-${timestamp}.gpx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      } catch (error) {
+        console.error('Failed to export GPX data', error);
+        window.alert('Unable to export GPX data.');
       }
     });
   }

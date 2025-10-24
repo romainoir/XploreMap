@@ -215,3 +215,166 @@ export function zoomToGeojson(map, geojson) {
     duration: 1200
   });
 }
+
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function normalizeCoordinate(coord) {
+  if (!Array.isArray(coord) || coord.length < 2) return null;
+  const [lon, lat, ele] = coord;
+  if (!isFiniteNumber(lon) || !isFiniteNumber(lat)) return null;
+  const normalized = { lon, lat };
+  if (isFiniteNumber(ele)) normalized.ele = ele;
+  return normalized;
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function serializeTrack(name, segments) {
+  if (!segments.length) return '';
+  const parts = ['  <trk>'];
+  if (name) parts.push(`    <name>${escapeXml(name)}</name>`);
+  segments.forEach((segment) => {
+    if (!Array.isArray(segment) || segment.length < 2) return;
+    parts.push('    <trkseg>');
+    segment.forEach((pt) => {
+      const { lat, lon, ele } = pt;
+      parts.push(`      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}">`);
+      if (isFiniteNumber(ele)) {
+        parts.push(`        <ele>${ele.toFixed(1)}</ele>`);
+      }
+      parts.push('      </trkpt>');
+    });
+    parts.push('    </trkseg>');
+  });
+  parts.push('  </trk>');
+  return parts.join('\n');
+}
+
+function serializeRoute(name, points) {
+  if (!points.length) return '';
+  const parts = ['  <rte>'];
+  if (name) parts.push(`    <name>${escapeXml(name)}</name>`);
+  points.forEach((pt) => {
+    const { lat, lon, ele } = pt;
+    parts.push(`    <rtept lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}">`);
+    if (isFiniteNumber(ele)) {
+      parts.push(`      <ele>${ele.toFixed(1)}</ele>`);
+    }
+    parts.push('    </rtept>');
+  });
+  parts.push('  </rte>');
+  return parts.join('\n');
+}
+
+function serializeWaypoint(name, point) {
+  if (!point) return '';
+  const { lat, lon, ele } = point;
+  const parts = [`  <wpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}">`];
+  if (name) parts.push(`    <name>${escapeXml(name)}</name>`);
+  if (isFiniteNumber(ele)) {
+    parts.push(`    <ele>${ele.toFixed(1)}</ele>`);
+  }
+  parts.push('  </wpt>');
+  return parts.join('\n');
+}
+
+export function geojsonToGpx(geojson, { creator = 'XploreMap' } = {}) {
+  if (!geojson || geojson.type !== 'FeatureCollection') {
+    throw new Error('Invalid GeoJSON dataset');
+  }
+
+  const safeCreator = typeof creator === 'string' && creator.trim().length ? creator.trim() : 'XploreMap';
+
+  const tracks = [];
+  const routes = [];
+  const waypoints = [];
+
+  let trackCount = 0;
+  let routeCount = 0;
+  let waypointCount = 0;
+
+  (geojson.features || []).forEach((feature) => {
+    if (!feature || !feature.geometry) return;
+    const props = feature.properties && typeof feature.properties === 'object' ? feature.properties : {};
+    const nameProp = typeof props.name === 'string' && props.name.trim().length ? props.name.trim() : null;
+    const source = typeof props.source === 'string' ? props.source.toLowerCase() : '';
+
+    switch (feature.geometry.type) {
+      case 'LineString': {
+        const points = (feature.geometry.coordinates || [])
+          .map(normalizeCoordinate)
+          .filter(Boolean);
+        if (points.length < 2) break;
+        if (source === 'route') {
+          const routeName = nameProp || `Route ${++routeCount}`;
+          routes.push({ name: routeName, points });
+        } else {
+          const trackName = nameProp || `Track ${++trackCount}`;
+          tracks.push({ name: trackName, segments: [points] });
+        }
+        break;
+      }
+      case 'MultiLineString': {
+        const segments = (feature.geometry.coordinates || [])
+          .map(segment => Array.isArray(segment)
+            ? segment.map(normalizeCoordinate).filter(Boolean)
+            : [])
+          .filter(segment => segment.length >= 2);
+        if (!segments.length) break;
+        if (source === 'route') {
+          const flattened = segments.flat();
+          if (flattened.length >= 2) {
+            const routeName = nameProp || `Route ${++routeCount}`;
+            routes.push({ name: routeName, points: flattened });
+          }
+        } else {
+          const trackName = nameProp || `Track ${++trackCount}`;
+          tracks.push({ name: trackName, segments });
+        }
+        break;
+      }
+      case 'Point': {
+        const point = normalizeCoordinate(feature.geometry.coordinates);
+        if (!point) break;
+        const label = nameProp || `Waypoint ${++waypointCount}`;
+        waypoints.push({ name: label, point });
+        break;
+      }
+      default:
+        break;
+    }
+  });
+
+  const gpxParts = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<gpx version="1.1" creator="${escapeXml(safeCreator)}" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">`
+  ];
+
+  waypoints.forEach(({ name, point }) => {
+    const block = serializeWaypoint(name, point);
+    if (block) gpxParts.push(block);
+  });
+
+  routes.forEach(({ name, points }) => {
+    const block = serializeRoute(name, points);
+    if (block) gpxParts.push(block);
+  });
+
+  tracks.forEach(({ name, segments }) => {
+    const block = serializeTrack(name, segments);
+    if (block) gpxParts.push(block);
+  });
+
+  gpxParts.push('</gpx>');
+
+  return gpxParts.join('\n');
+}
