@@ -3279,10 +3279,7 @@ export class DirectionsManager {
           extra_info: ['waytype', 'steepness'],
           preference: this.currentMode === 'foot-hiking' ? 'recommended' : 'fastest',
           units: 'km',
-          language: 'en',
-          options: {
-            geometry_simplify: false
-          }
+          language: 'en'
         })
       });
 
