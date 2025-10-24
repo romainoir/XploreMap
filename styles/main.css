@@ -381,31 +381,15 @@ html, body { margin:0; height:100%; }
 
 .directions-route-tooltip .tooltip-details {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   font-size: 11px;
   opacity: 0.9;
 }
 
-.directions-route-tooltip .tooltip-altitude {
-  font-variant-numeric: tabular-nums;
-}
-
+.directions-route-tooltip .tooltip-altitude,
 .directions-route-tooltip .tooltip-grade {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.directions-route-tooltip .tooltip-grade svg {
-  width: 12px;
-  height: 12px;
-  fill: currentColor;
-  opacity: 0.85;
-}
-
-.directions-route-tooltip .tooltip-grade span {
   font-variant-numeric: tabular-nums;
 }
 
