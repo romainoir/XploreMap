@@ -294,7 +294,21 @@ function createDistanceMarkerImage(label, {
   context.fillStyle = '#ffffff';
   context.fillText(label, baseWidth / 2, baseHeight / 2);
 
-  return { image: canvas, pixelRatio: deviceRatio };
+  const width = canvas.width;
+  const height = canvas.height;
+  if (!width || !height) {
+    return null;
+  }
+
+  const imageData = context.getImageData(0, 0, width, height);
+  return {
+    image: {
+      width,
+      height,
+      data: imageData.data
+    },
+    pixelRatio: deviceRatio
+  };
 }
 
 function ensureDistanceMarkerImage(map, label) {
