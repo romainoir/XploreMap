@@ -6,7 +6,8 @@ const EMPTY_COLLECTION = {
 const MODE_COLORS = {
   'foot-hiking': '#f8b40b',
   'cycling-regular': '#1bbd14',
-  'driving-car': '#193ae1'
+  'driving-car': '#193ae1',
+  'manual-draw': '#5a5bd6'
 };
 
 const HOVER_PIXEL_TOLERANCE = 12;
@@ -62,8 +63,14 @@ const SEGMENT_MARKER_ICONS = {
 
 const BIVOUAC_MARKER_IMAGE_URL = 'bivouac.png';
 
+const HIKER_MARKER_ICON_ID = 'route-hiker-icon';
+const HIKER_MARKER_LAYER_ID = 'route-hiker';
+const HIKER_MARKER_SOURCE_ID = 'route-hiker-source';
+const HIKER_MARKER_IMAGE_URL = 'randonneur.png';
+
 let bivouacMarkerImage = null;
 let bivouacMarkerImagePromise = null;
+let hikerMarkerImagePromise = null;
 
 function createMarkerCanvas(baseSize = 52) {
   const ratio = 2;
@@ -172,6 +179,31 @@ function getBivouacMarkerImage() {
   }
 
   return bivouacMarkerImagePromise;
+}
+
+function ensureHikerMarkerImage(map) {
+  if (!map || typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') {
+    return Promise.resolve();
+  }
+
+  if (map.hasImage(HIKER_MARKER_ICON_ID)) {
+    return Promise.resolve();
+  }
+
+  if (!hikerMarkerImagePromise) {
+    hikerMarkerImagePromise = loadImageAsset(HIKER_MARKER_IMAGE_URL)
+      .then((image) => {
+        if (image && !map.hasImage(HIKER_MARKER_ICON_ID)) {
+          map.addImage(HIKER_MARKER_ICON_ID, image, { pixelRatio: 2 });
+        }
+      })
+      .catch((error) => {
+        hikerMarkerImagePromise = null;
+        throw error;
+      });
+  }
+
+  return hikerMarkerImagePromise;
 }
 
 function ensureSegmentMarkerImages(map) {
@@ -376,31 +408,37 @@ export class DirectionsManager {
       throw new Error('A valid MapLibre GL JS map instance is required');
     }
 
-    const [
-      directionsToggle,
-      directionsDock,
-      directionsControl,
-      transportModes,
-      swapButton,
-      clearButton,
-      routeStats,
-      elevationChart,
-      directionsInfoButton,
-      directionsHint
-    ] = uiElements;
+    const config = Array.isArray(uiElements)
+      ? {
+          toggleButton: uiElements[0],
+          dock: uiElements[1],
+          control: uiElements[2],
+          modeButtons: uiElements[3],
+          reverseButton: uiElements[4],
+          clearButton: uiElements[5],
+          undoButton: uiElements[6],
+          redoButton: uiElements[7],
+          routeStats: uiElements[8],
+          elevationChart: uiElements[9],
+          infoButton: uiElements[10],
+          hint: uiElements[11]
+        }
+      : uiElements ?? {};
 
     this.map = map;
     this.mapContainer = map.getContainer?.() ?? null;
-    this.directionsToggle = directionsToggle ?? null;
-    this.directionsDock = directionsDock ?? null;
-    this.directionsControl = directionsControl ?? null;
-    this.transportModes = transportModes ? Array.from(transportModes) : [];
-    this.swapButton = swapButton ?? null;
-    this.clearButton = clearButton ?? null;
-    this.routeStats = routeStats ?? null;
-    this.elevationChart = elevationChart ?? null;
-    this.infoButton = directionsInfoButton ?? null;
-    this.directionsHint = directionsHint ?? null;
+    this.directionsToggle = config.toggleButton ?? null;
+    this.directionsDock = config.dock ?? null;
+    this.directionsControl = config.control ?? null;
+    this.transportModes = config.modeButtons ? Array.from(config.modeButtons) : [];
+    this.reverseButton = config.reverseButton ?? null;
+    this.clearButton = config.clearButton ?? null;
+    this.undoButton = config.undoButton ?? null;
+    this.redoButton = config.redoButton ?? null;
+    this.routeStats = config.routeStats ?? null;
+    this.elevationChart = config.elevationChart ?? null;
+    this.infoButton = config.infoButton ?? null;
+    this.directionsHint = config.hint ?? null;
 
     if (this.routeStats) {
       this.routeStats.setAttribute('aria-live', 'polite');
@@ -410,6 +448,13 @@ export class DirectionsManager {
     this.waypoints = [];
     this.currentMode = 'foot-hiking';
     this.modeColors = { ...MODE_COLORS };
+
+    this.transportModes.forEach((button) => {
+      if (!button) return;
+      const isActive = button.dataset?.mode === this.currentMode;
+      button.classList.toggle('active', Boolean(isActive));
+      button.setAttribute('aria-pressed', String(Boolean(isActive)));
+    });
 
     this.latestMetrics = null;
 
@@ -430,6 +475,16 @@ export class DirectionsManager {
     this.highlightedElevationBar = null;
     this.activeHoverSource = null;
     this.lastElevationHoverDistance = null;
+
+    this.history = [];
+    this.future = [];
+    this.isRestoringHistory = false;
+
+    this.hikerAnimationFrame = null;
+    this.hikerAnimationStart = null;
+    this.hikerAnimationDuration = 0;
+
+    this.manualModeId = 'manual-draw';
 
     this.setHintVisible(false);
 
@@ -458,6 +513,7 @@ export class DirectionsManager {
     this.setupUIHandlers();
     this.setupMapHandlers();
     this.updatePanelVisibilityState();
+    this.initializeHistory();
   }
 
   setupRouteLayers() {
@@ -480,6 +536,7 @@ export class DirectionsManager {
     removeLayer('waypoints');
     removeLayer('waypoints-hit-area');
     removeLayer(SEGMENT_MARKER_LAYER_ID);
+    removeLayer(HIKER_MARKER_LAYER_ID);
 
     removeSource('route-line-source');
     removeSource('route-segments-source');
@@ -487,6 +544,7 @@ export class DirectionsManager {
     removeSource('route-hover-point-source');
     removeSource('waypoints');
     removeSource(SEGMENT_MARKER_SOURCE_ID);
+    removeSource(HIKER_MARKER_SOURCE_ID);
 
     this.map.addSource('route-line-source', {
       type: 'geojson',
@@ -514,6 +572,11 @@ export class DirectionsManager {
     });
 
     this.map.addSource(SEGMENT_MARKER_SOURCE_ID, {
+      type: 'geojson',
+      data: EMPTY_COLLECTION
+    });
+
+    this.map.addSource(HIKER_MARKER_SOURCE_ID, {
       type: 'geojson',
       data: EMPTY_COLLECTION
     });
@@ -701,6 +764,47 @@ export class DirectionsManager {
     });
 
     this.updateSegmentMarkers();
+    this.ensureHikerLayer();
+  }
+
+  ensureHikerLayer() {
+    if (!this.map) {
+      return Promise.resolve();
+    }
+
+    if (!this.map.getSource(HIKER_MARKER_SOURCE_ID)) {
+      this.map.addSource(HIKER_MARKER_SOURCE_ID, {
+        type: 'geojson',
+        data: EMPTY_COLLECTION
+      });
+    }
+
+    return ensureHikerMarkerImage(this.map)
+      .then(() => {
+        if (this.map.getLayer(HIKER_MARKER_LAYER_ID)) {
+          return;
+        }
+        this.map.addLayer({
+          id: HIKER_MARKER_LAYER_ID,
+          type: 'symbol',
+          source: HIKER_MARKER_SOURCE_ID,
+          layout: {
+            'icon-image': HIKER_MARKER_ICON_ID,
+            'icon-anchor': 'bottom',
+            'icon-offset': [0, 0],
+            'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 12, 0.65, 16, 0.85],
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true
+          },
+          paint: {
+            'icon-opacity': 0
+          }
+        });
+      })
+      .catch((error) => {
+        console.error('Failed to prepare hiker marker layer', error);
+        throw error;
+      });
   }
 
   setupUIHandlers() {
@@ -727,15 +831,24 @@ export class DirectionsManager {
       this.infoButton.addEventListener('blur', hideHint);
     }
 
-    this.swapButton?.addEventListener('click', () => {
+    this.reverseButton?.addEventListener('click', () => {
       if (this.waypoints.length < 2) return;
       this.waypoints.reverse();
       this.updateWaypoints();
+      this.recordHistoryState();
       this.getRoute();
     });
 
     this.clearButton?.addEventListener('click', () => {
       this.clearDirections();
+    });
+
+    this.undoButton?.addEventListener('click', () => {
+      this.undo();
+    });
+
+    this.redoButton?.addEventListener('click', () => {
+      this.redo();
     });
   }
 
@@ -769,6 +882,166 @@ export class DirectionsManager {
     } catch (error) {
       console.error('Route segment listener failed', error);
     }
+  }
+
+  initializeHistory() {
+    this.history = [];
+    this.future = [];
+    this.isRestoringHistory = false;
+    this.recordHistoryState({ force: true });
+  }
+
+  snapshotWaypoints() {
+    if (!Array.isArray(this.waypoints)) {
+      return [];
+    }
+    return this.waypoints.map((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) {
+        return [];
+      }
+      const [lng, lat, ele] = coord;
+      const normalized = [
+        Number.isFinite(lng) ? lng : 0,
+        Number.isFinite(lat) ? lat : 0
+      ];
+      if (Number.isFinite(ele)) {
+        normalized.push(ele);
+      }
+      return normalized;
+    });
+  }
+
+  cloneWaypointState(state) {
+    if (!Array.isArray(state)) {
+      return [];
+    }
+    return state.map((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) {
+        return [];
+      }
+      const [lng, lat, ele] = coord;
+      const clone = [lng, lat];
+      if (Number.isFinite(ele)) {
+        clone.push(ele);
+      }
+      return clone;
+    });
+  }
+
+  areWaypointSetsEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    for (let index = 0; index < a.length; index += 1) {
+      const first = a[index];
+      const second = b[index];
+      if (!Array.isArray(first) || !Array.isArray(second)) {
+        return false;
+      }
+      const [lngA, latA] = first;
+      const [lngB, latB] = second;
+      if (Math.abs((lngA ?? 0) - (lngB ?? 0)) > COORD_EPSILON) {
+        return false;
+      }
+      if (Math.abs((latA ?? 0) - (latB ?? 0)) > COORD_EPSILON) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  recordHistoryState({ force = false } = {}) {
+    if (this.isRestoringHistory) {
+      this.updateHistoryButtons();
+      this.updateActionAvailability();
+      return;
+    }
+
+    const snapshot = this.snapshotWaypoints();
+    const last = this.history?.[this.history.length - 1] ?? null;
+    const isDuplicate = last ? this.areWaypointSetsEqual(last, snapshot) : false;
+
+    if (!force && isDuplicate) {
+      this.updateHistoryButtons();
+      this.updateActionAvailability();
+      return;
+    }
+
+    if (!Array.isArray(this.history)) {
+      this.history = [];
+    }
+    this.history.push(snapshot);
+    if (this.history.length > 100) {
+      this.history.shift();
+    }
+    this.future = [];
+    this.updateHistoryButtons();
+    this.updateActionAvailability();
+  }
+
+  updateHistoryButtons() {
+    const canUndo = Array.isArray(this.history) && this.history.length > 1;
+    const canRedo = Array.isArray(this.future) && this.future.length > 0;
+    if (this.undoButton) {
+      this.undoButton.disabled = !canUndo;
+    }
+    if (this.redoButton) {
+      this.redoButton.disabled = !canRedo;
+    }
+  }
+
+  updateActionAvailability() {
+    const waypointCount = Array.isArray(this.waypoints) ? this.waypoints.length : 0;
+    if (this.clearButton) {
+      this.clearButton.disabled = waypointCount === 0;
+    }
+    if (this.reverseButton) {
+      this.reverseButton.disabled = waypointCount < 2;
+    }
+  }
+
+  undo() {
+    if (!Array.isArray(this.history) || this.history.length <= 1) {
+      return;
+    }
+    const current = this.history.pop();
+    if (current) {
+      this.future = Array.isArray(this.future) ? this.future : [];
+      this.future.push(current);
+    }
+    const previous = this.history[this.history.length - 1] ?? [];
+    this.restoreHistoryState(previous);
+  }
+
+  redo() {
+    if (!Array.isArray(this.future) || this.future.length === 0) {
+      return;
+    }
+    const next = this.future.pop();
+    if (!next) {
+      this.updateHistoryButtons();
+      return;
+    }
+    const snapshot = this.cloneWaypointState(next);
+    this.history = Array.isArray(this.history) ? this.history : [];
+    this.history.push(snapshot);
+    this.restoreHistoryState(snapshot);
+  }
+
+  restoreHistoryState(state) {
+    this.isRestoringHistory = true;
+    this.waypoints = this.cloneWaypointState(state);
+    this.updateWaypoints();
+    if (this.waypoints.length >= 2) {
+      this.getRoute();
+    } else {
+      this.clearRoute();
+      this.updateStats(null);
+      this.updateElevationProfile([]);
+    }
+    this.isRestoringHistory = false;
+    this.updateHistoryButtons();
+    this.updateActionAvailability();
   }
 
   resetRouteCuts() {
@@ -1451,6 +1724,7 @@ export class DirectionsManager {
     });
 
     this.updateSegmentMarkers();
+    this.updateActionAvailability();
   }
 
   updateCutDisplays() {
@@ -1824,6 +2098,7 @@ export class DirectionsManager {
     this.setHoveredWaypointIndex(null);
     if (movedWaypoint && this.waypoints.length >= 2) {
       this.getRoute();
+      this.recordHistoryState();
     }
     if (movedBivouac) {
       const releaseLngLat = event?.lngLat ?? null;
@@ -1851,6 +2126,7 @@ export class DirectionsManager {
 
     this.waypoints.push([event.lngLat.lng, event.lngLat.lat]);
     this.updateWaypoints();
+    this.recordHistoryState();
     if (this.waypoints.length >= 2) {
       this.getRoute();
     }
@@ -1862,6 +2138,7 @@ export class DirectionsManager {
     if (!Number.isFinite(index) || index <= 0 || index >= this.waypoints.length - 1) return;
     this.waypoints.splice(index, 1);
     this.updateWaypoints();
+    this.recordHistoryState();
     if (this.waypoints.length >= 2) {
       this.getRoute();
     } else {
@@ -1999,6 +2276,7 @@ export class DirectionsManager {
     this.waypoints.splice(insertIndex, 0, snapped);
     this.updateWaypoints();
     this.resetSegmentHover();
+    this.recordHistoryState();
     this.getRoute();
   }
 
@@ -2752,6 +3030,7 @@ export class DirectionsManager {
   }
 
   clearRoute() {
+    this.stopHikerAnimation();
     this.routeGeojson = null;
     this.routeSegments = [];
     this.segmentLegLookup = [];
@@ -2784,13 +3063,17 @@ export class DirectionsManager {
     this.draggedWaypointIndex = null;
     this.draggedBivouacIndex = null;
     this.setHoveredWaypointIndex(null);
+    this.recordHistoryState();
   }
 
   setTransportMode(mode) {
     if (!this.modeColors[mode]) return;
     this.currentMode = mode;
     this.transportModes.forEach((button) => {
-      button.classList.toggle('active', button.dataset.mode === mode);
+      if (!button) return;
+      const isActive = button.dataset.mode === mode;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-pressed', String(isActive));
     });
     if (this.map.getLayer('route-line')) {
       this.map.setPaintProperty(
@@ -3421,6 +3704,117 @@ export class DirectionsManager {
     }
   }
 
+  stopHikerAnimation() {
+    if (typeof cancelAnimationFrame === 'function' && this.hikerAnimationFrame) {
+      cancelAnimationFrame(this.hikerAnimationFrame);
+    }
+    this.hikerAnimationFrame = null;
+    this.hikerAnimationStart = null;
+    this.hikerAnimationDuration = 0;
+    this.map.getSource(HIKER_MARKER_SOURCE_ID)?.setData(EMPTY_COLLECTION);
+    if (this.map.getLayer(HIKER_MARKER_LAYER_ID)) {
+      this.map.setPaintProperty(HIKER_MARKER_LAYER_ID, 'icon-opacity', 0);
+    }
+  }
+
+  updateHikerMarkerPosition(coord, distanceKm = 0) {
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return;
+    }
+    const [lng, lat] = coord;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return;
+    }
+    const feature = {
+      type: 'Feature',
+      properties: { distanceKm },
+      geometry: {
+        type: 'Point',
+        coordinates: [lng, lat]
+      }
+    };
+    this.map.getSource(HIKER_MARKER_SOURCE_ID)?.setData({
+      type: 'FeatureCollection',
+      features: [feature]
+    });
+    if (this.map.getLayer(HIKER_MARKER_LAYER_ID)) {
+      this.map.setPaintProperty(HIKER_MARKER_LAYER_ID, 'icon-opacity', 1);
+    }
+  }
+
+  runHikerAnimation() {
+    const profile = this.routeProfile;
+    const coordinates = profile?.coordinates;
+    const totalDistance = Number(profile?.totalDistanceKm) || 0;
+
+    if (!Array.isArray(coordinates) || coordinates.length < 2 || totalDistance <= 0) {
+      this.stopHikerAnimation();
+      return;
+    }
+
+    const startCoord = this.getCoordinateAtDistance(0);
+    if (startCoord) {
+      this.updateHikerMarkerPosition(startCoord, 0);
+    }
+
+    if (typeof requestAnimationFrame !== 'function') {
+      const endCoord = this.getCoordinateAtDistance(totalDistance);
+      if (endCoord) {
+        this.updateHikerMarkerPosition(endCoord, totalDistance);
+      }
+      return;
+    }
+
+    const minDuration = 12000;
+    const maxDuration = 90000;
+    const duration = Math.max(minDuration, Math.min(maxDuration, totalDistance * 5000));
+    this.hikerAnimationDuration = duration;
+    this.hikerAnimationStart = typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+
+    const step = (timestamp) => {
+      const startTime = this.hikerAnimationStart;
+      const totalDuration = this.hikerAnimationDuration;
+      if (!Number.isFinite(startTime) || !Number.isFinite(totalDuration) || totalDuration <= 0) {
+        return;
+      }
+      const currentTime = Number.isFinite(timestamp)
+        ? timestamp
+        : (typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now());
+      const elapsed = currentTime - startTime;
+      const progress = Math.max(0, Math.min(1, elapsed / totalDuration));
+      const distanceKm = totalDistance * progress;
+      const coord = this.getCoordinateAtDistance(distanceKm);
+      if (coord) {
+        this.updateHikerMarkerPosition(coord, distanceKm);
+      }
+      if (progress < 1) {
+        this.hikerAnimationFrame = requestAnimationFrame(step);
+      } else {
+        this.hikerAnimationFrame = null;
+      }
+    };
+
+    this.hikerAnimationFrame = requestAnimationFrame(step);
+  }
+
+  startHikerAnimation() {
+    this.stopHikerAnimation();
+    const setup = this.ensureHikerLayer();
+    if (setup && typeof setup.then === 'function') {
+      setup
+        .then(() => {
+          this.runHikerAnimation();
+        })
+        .catch(() => {});
+    } else {
+      this.runHikerAnimation();
+    }
+  }
+
   applyRoute(route) {
     this.hideRouteHover();
     const previousCuts = Array.isArray(this.routeCutDistances) ? [...this.routeCutDistances] : [];
@@ -3465,10 +3859,23 @@ export class DirectionsManager {
     this.updateCutDisplays();
     this.updateDistanceMarkers(route);
     this.updateStats(route);
+    this.startHikerAnimation();
   }
 
   async getRoute() {
     if (this.waypoints.length < 2) return;
+
+    if (this.currentMode === this.manualModeId) {
+      const manualRoute = this.buildManualRouteFeature();
+      if (manualRoute) {
+        this.applyRoute(manualRoute);
+      } else {
+        this.clearRoute();
+        this.updateStats(null);
+        this.updateElevationProfile([]);
+      }
+      return;
+    }
 
     try {
       const response = await fetch(`https://api.openrouteservice.org/v2/directions/${this.currentMode}/geojson`, {
@@ -3505,5 +3912,59 @@ export class DirectionsManager {
     } catch (error) {
       console.error('Failed to fetch route', error);
     }
+  }
+
+  buildManualRouteFeature() {
+    if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
+      return null;
+    }
+
+    const coordinates = this.waypoints
+      .map((coord) => (Array.isArray(coord) ? coord.slice(0, 3) : null))
+      .filter((coord) => {
+        if (!Array.isArray(coord) || coord.length < 2) {
+          return false;
+        }
+        const [lng, lat] = coord;
+        return Number.isFinite(lng) && Number.isFinite(lat);
+      })
+      .map((coord) => {
+        const [lng, lat, ele] = coord;
+        const cleaned = [lng, lat];
+        if (Number.isFinite(ele)) {
+          cleaned.push(ele);
+        }
+        return cleaned;
+      });
+
+    if (coordinates.length < 2) {
+      return null;
+    }
+
+    let totalDistanceKm = 0;
+    const segments = [];
+    for (let index = 1; index < coordinates.length; index += 1) {
+      const distanceKm = Number(this.computeDistanceKm(coordinates[index - 1], coordinates[index])) || 0;
+      totalDistanceKm += Math.max(0, distanceKm);
+      segments.push({
+        distance: distanceKm * 1000,
+        duration: null,
+        ascent: 0,
+        descent: 0
+      });
+    }
+
+    return {
+      type: 'Feature',
+      properties: {
+        mode: this.manualModeId,
+        summary: { distance: totalDistanceKm * 1000 },
+        segments
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates
+      }
+    };
   }
 }
