@@ -1706,12 +1706,6 @@ export class DirectionsManager {
     const hitWaypoints = this.map.queryRenderedFeatures(event.point, { layers: ['waypoints-hit-area'] });
     if (hitWaypoints.length) return;
 
-    const projection = this.projectOntoRoute(event.lngLat, ROUTE_CLICK_PIXEL_TOLERANCE);
-    if (projection) {
-      this.addViaWaypoint(event.lngLat, projection);
-      return;
-    }
-
     if (this.hoveredSegmentIndex !== null) {
       this.addViaWaypoint(event.lngLat);
       return;
@@ -1805,64 +1799,15 @@ export class DirectionsManager {
     this.clearHover(source);
   }
 
-  addViaWaypoint(lngLat, projectionOverride = null) {
-    if (!lngLat || this.waypoints.length < 2) {
-      return;
-    }
+  addViaWaypoint(lngLat) {
+    if (this.hoveredSegmentIndex === null) return;
+    const segment = this.routeSegments[this.hoveredSegmentIndex];
+    if (!segment) return;
 
-    const ensureProjection = () => {
-      if (projectionOverride) {
-        return projectionOverride;
-      }
-      return this.projectOntoRoute(lngLat, ROUTE_CLICK_PIXEL_TOLERANCE);
-    };
-
-    const projectionResult = ensureProjection();
-    let segmentIndex = Number.isInteger(projectionResult?.segmentIndex)
-      ? projectionResult.segmentIndex
-      : null;
-    let snappedCoords = Array.isArray(projectionResult?.projection?.coordinates)
-      ? projectionResult.projection.coordinates.slice()
-      : null;
-
-    if (!snappedCoords && this.hoveredSegmentIndex !== null) {
-      const segment = this.routeSegments[this.hoveredSegmentIndex];
-      if (segment) {
-        const projection = this.projectPointOnSegment(lngLat, segment.start, segment.end);
-        if (Array.isArray(projection?.coordinates)) {
-          snappedCoords = projection.coordinates.slice();
-          segmentIndex = this.hoveredSegmentIndex;
-        }
-      }
-    }
-
-    if (!Array.isArray(snappedCoords) || snappedCoords.length < 2) {
-      return;
-    }
-
-    const [lng, lat] = snappedCoords;
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-      return;
-    }
-
-    const snapped = [lng, lat];
-    const alreadyExists = this.waypoints.some((coord) => this.coordinatesMatch(coord, snapped));
-    if (alreadyExists) {
-      this.resetSegmentHover();
-      return;
-    }
-
-    let insertIndex = this.waypoints.length - 1;
-    const projectedLeg = Number.isInteger(segmentIndex)
-      ? this.segmentLegLookup?.[segmentIndex]
-      : null;
-    if (Number.isInteger(projectedLeg)) {
-      insertIndex = Math.min(projectedLeg + 1, this.waypoints.length - 1);
-    } else if (Number.isInteger(this.hoveredLegIndex)) {
-      insertIndex = Math.min(this.hoveredLegIndex + 1, this.waypoints.length - 1);
-    }
-
-    insertIndex = Math.max(1, insertIndex);
+    const { coordinates: snapped } = this.projectPointOnSegment(lngLat, segment.start, segment.end);
+    const insertIndex = this.hoveredLegIndex !== null
+      ? Math.min(this.hoveredLegIndex + 1, this.waypoints.length - 1)
+      : this.waypoints.length - 1;
 
     this.waypoints.splice(insertIndex, 0, snapped);
     this.updateWaypoints();
