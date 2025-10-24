@@ -124,14 +124,42 @@ html, body { margin:0; height:100%; }
   width: 100%;
 }
 
+.directions-dock {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  padding: 16px;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.directions-dock[aria-hidden="true"] {
+  display: none;
+}
+
 .directions-control {
   display: none;
-  background: rgba(17, 27, 36, 0.04);
-  border-radius: 8px;
-  padding: 10px;
+  width: min(100%, 960px);
+  background: rgba(245, 248, 252, 0.94);
+  border-radius: 16px 16px 0 0;
+  padding: 18px;
   border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  gap: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  gap: 16px;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  grid-template-areas:
+    "modes"
+    "actions"
+    "stats"
+    "chart"
+    "hint";
+}
+
+.directions-dock[aria-hidden="false"] {
+  pointer-events: auto;
 }
 
 .directions-control.visible {
@@ -144,18 +172,24 @@ html, body { margin:0; height:100%; }
 
 .transport-modes {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-area: modes;
 }
 
 .directions-actions {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-area: actions;
 }
 
 .route-stats {
   display: grid;
-  gap: 4px;
+  gap: 10px;
   font-size: 12px;
+  grid-area: stats;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .route-stats div {
@@ -163,6 +197,9 @@ html, body { margin:0; height:100%; }
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(17, 34, 48, 0.06);
 }
 
 .route-stats span {
@@ -171,19 +208,22 @@ html, body { margin:0; height:100%; }
 
 .elevation-chart {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  grid-area: chart;
 }
 
 .elevation-chart-container {
   display: grid;
   grid-auto-flow: column;
+  grid-auto-columns: minmax(2px, 1fr);
   align-items: end;
-  height: 80px;
+  height: 100px;
   gap: 2px;
+  overflow: hidden;
 }
 
 .elevation-bar {
-  width: 6px;
+  width: 100%;
   background: linear-gradient(180deg, rgba(58, 183, 198, 0.85) 0%, rgba(17, 98, 128, 0.85) 100%);
   border-radius: 3px 3px 0 0;
 }
@@ -199,6 +239,42 @@ html, body { margin:0; height:100%; }
   margin: 0;
   font-size: 11px;
   color: rgba(17, 34, 48, 0.7);
+  grid-area: hint;
+}
+
+@media (min-width: 768px) {
+  .directions-control.visible {
+    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-areas:
+      "modes chart"
+      "actions chart"
+      "stats chart"
+      "hint chart";
+    align-items: start;
+  }
+
+  .elevation-chart {
+    min-height: 140px;
+  }
+
+  .directions-hint {
+    align-self: end;
+  }
+}
+
+@media (max-width: 640px) {
+  .directions-dock {
+    padding: 12px;
+  }
+
+  .directions-control {
+    border-radius: 16px 16px 0 0;
+    padding: 16px;
+  }
+
+  .route-stats {
+    grid-template-columns: 1fr;
+  }
 }
 
 #gpxFileInput {
