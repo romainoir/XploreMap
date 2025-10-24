@@ -148,7 +148,7 @@ function ensureDistanceMarkerImage(map, label) {
   return imageId;
 }
 
-const createWaypointFeature = (coords, index, total) => {
+const createWaypointFeature = (coords, index, total, extraProperties = {}) => {
   const isStart = index === 0;
   const isEnd = index === total - 1 && total > 1;
   const role = isStart ? 'start' : isEnd ? 'end' : 'via';
@@ -165,7 +165,8 @@ const createWaypointFeature = (coords, index, total) => {
     properties: {
       index,
       role,
-      title
+      title,
+      ...extraProperties
     },
     geometry: {
       type: 'Point',
@@ -387,34 +388,34 @@ export class DirectionsManager {
           'case',
           ['==', ['get', 'role'], 'start'], 9,
           ['==', ['get', 'role'], 'end'], 9,
-          6
+          4.5
         ],
         'circle-color': [
           'case',
           ['==', ['get', 'role'], 'start'], '#2f8f3b',
           ['==', ['get', 'role'], 'end'], '#d64545',
-          '#116280'
+          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
         ],
         'circle-opacity': [
           'case',
           ['==', ['get', 'role'], 'start'], 1,
           ['==', ['get', 'role'], 'end'], 1,
-          0.2
+          1
         ],
         'circle-stroke-width': [
           'case',
           ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 2,
-          1.4
+          0
         ],
         'circle-stroke-color': [
           'case',
           ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], '#ffffff',
-          'rgba(17, 98, 128, 0.4)'
+          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
         ],
         'circle-stroke-opacity': [
           'case',
           ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 1,
-          0.6
+          0.85
         ]
       },
       filter: ['==', '$type', 'Point']
@@ -449,10 +450,31 @@ export class DirectionsManager {
       type: 'circle',
       source: 'waypoints',
       paint: {
-        'circle-radius': 16,
-        'circle-color': 'rgba(255, 255, 0, 0.5)',
-        'circle-stroke-width': 2,
-        'circle-stroke-color': 'rgba(0, 0, 0, 0.7)'
+        'circle-radius': [
+          'case',
+          ['==', ['get', 'role'], 'start'], 12,
+          ['==', ['get', 'role'], 'end'], 12,
+          7
+        ],
+        'circle-color': [
+          'case',
+          ['==', ['get', 'role'], 'start'], '#2f8f3b',
+          ['==', ['get', 'role'], 'end'], '#d64545',
+          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
+        ],
+        'circle-stroke-width': [
+          'case',
+          ['==', ['get', 'role'], 'start'], 2.5,
+          ['==', ['get', 'role'], 'end'], 2.5,
+          2
+        ],
+        'circle-stroke-color': [
+          'case',
+          ['==', ['get', 'role'], 'start'], 'rgba(255, 255, 255, 0.95)',
+          ['==', ['get', 'role'], 'end'], 'rgba(255, 255, 255, 0.95)',
+          'rgba(255, 255, 255, 0.85)'
+        ],
+        'circle-opacity': 0.95
       },
       filter: ['==', 'index', -1]
     });
@@ -692,6 +714,29 @@ export class DirectionsManager {
       });
     }
 
+    for (let index = 1; index < segments.length; index += 1) {
+      const previous = segments[index - 1];
+      const current = segments[index];
+      if (!previous || !current) {
+        continue;
+      }
+      const prevCoords = previous.coordinates;
+      const currentCoords = current.coordinates;
+      if (!Array.isArray(prevCoords) || !prevCoords.length || !Array.isArray(currentCoords) || !currentCoords.length) {
+        continue;
+      }
+      const boundaryKm = current.startKm;
+      let shared = Number.isFinite(boundaryKm) ? this.getCoordinateAtDistance(boundaryKm) : null;
+      if (!Array.isArray(shared) || shared.length < 2) {
+        const fallback = prevCoords[prevCoords.length - 1] ?? currentCoords[0];
+        shared = Array.isArray(fallback) ? fallback.slice() : null;
+      }
+      if (Array.isArray(shared) && shared.length >= 2) {
+        prevCoords[prevCoords.length - 1] = shared.slice();
+        currentCoords[0] = shared.slice();
+      }
+    }
+
     this.cutSegments = segments;
   }
 
@@ -776,6 +821,7 @@ export class DirectionsManager {
     this.updateRouteCutSegments();
     this.updateRouteLineSource();
     this.updateElevationProfile(coordinates);
+    this.updateWaypoints();
     this.notifyRouteSegmentsUpdated();
   }
 
@@ -864,11 +910,6 @@ export class DirectionsManager {
       return;
     }
 
-    const features = this.map.queryRenderedFeatures(event.point, { layers: ['route-line'] });
-    if (!features.length) {
-      return;
-    }
-
     const projection = this.projectOntoRoute(event.lngLat, ROUTE_CLICK_PIXEL_TOLERANCE);
     if (!projection || !Number.isFinite(projection.distanceKm)) {
       return;
@@ -938,13 +979,24 @@ export class DirectionsManager {
 
     const features = this.map.queryRenderedFeatures(event.point, { layers: ['waypoints-hit-area'] });
     if (features.length > 0) {
-      const index = Number(features[0].properties.index);
+      const feature = features[0];
+      const index = Number(feature.properties.index);
+      const role = feature.properties.role;
       this.setHoveredWaypointIndex(index);
+      if (!this.isDragging && role === 'via') {
+        this.resetSegmentHover('map');
+        return;
+      }
+      if (this.isDragging) {
+        return;
+      }
     } else if (!this.isDragging) {
       this.setHoveredWaypointIndex(null);
     }
 
-    this.handleRouteSegmentHover(event);
+    if (!this.isDragging) {
+      this.handleRouteSegmentHover(event);
+    }
   }
 
   onMapMouseUp() {
@@ -1077,11 +1129,55 @@ export class DirectionsManager {
     const source = this.map.getSource('waypoints');
     if (!source) return;
     const total = this.waypoints.length;
-    const features = this.waypoints.map((coords, index) => createWaypointFeature(coords, index, total));
+    const features = this.waypoints.map((coords, index) => {
+      const extras = this.buildWaypointDisplayProperties(coords, index, total);
+      return createWaypointFeature(coords, index, total, extras);
+    });
     source.setData({
       type: 'FeatureCollection',
       features
     });
+  }
+
+  buildWaypointDisplayProperties(coords, index, total) {
+    const color = this.resolveWaypointColor(coords, index, total);
+    return { color };
+  }
+
+  resolveWaypointColor(coords, index, total) {
+    const fallback = this.modeColors[this.currentMode];
+    if (!Array.isArray(coords) || coords.length < 2) {
+      return fallback;
+    }
+
+    const isStart = index === 0;
+    const isEnd = total > 1 && index === total - 1;
+    if (isStart) {
+      return '#2f8f3b';
+    }
+    if (isEnd) {
+      return '#d64545';
+    }
+
+    const viaFallback = this.cutSegments?.[0]?.color ?? fallback;
+    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
+      return viaFallback;
+    }
+
+    try {
+      const lngLat = toLngLat(coords);
+      const projection = this.projectOntoRoute(lngLat, ROUTE_CLICK_PIXEL_TOLERANCE);
+      if (projection && Number.isFinite(projection.distanceKm)) {
+        const segment = this.getCutSegmentForDistance(projection.distanceKm);
+        if (segment?.color) {
+          return segment.color;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to resolve waypoint color', error);
+    }
+
+    return viaFallback;
   }
 
   projectPointOnSegment(lngLat, startCoord, endCoord) {
@@ -1747,6 +1843,9 @@ export class DirectionsManager {
     }
 
     if (this.map.getLayer('route-hover-point')) {
+      const hoverSegment = this.getCutSegmentForDistance(distanceKm);
+      const hoverColor = hoverSegment?.color ?? this.modeColors[this.currentMode];
+      this.map.setPaintProperty('route-hover-point', 'circle-stroke-color', hoverColor);
       this.map.setPaintProperty('route-hover-point', 'circle-opacity', 1);
     }
     if (projection.coordinates) {
@@ -1790,6 +1889,7 @@ export class DirectionsManager {
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
     this.map.getSource('route-segments-source')?.setData(EMPTY_COLLECTION);
     this.clearHover();
+    this.updateWaypoints();
     this.notifyRouteSegmentsUpdated();
   }
 
@@ -1827,6 +1927,7 @@ export class DirectionsManager {
       }
       this.notifyRouteSegmentsUpdated();
     }
+    this.updateWaypoints();
     if (this.waypoints.length >= 2) {
       this.getRoute();
     }
@@ -2322,12 +2423,41 @@ export class DirectionsManager {
 
   applyRoute(route) {
     this.hideRouteHover();
+    const previousCuts = Array.isArray(this.routeCutDistances) ? [...this.routeCutDistances] : [];
+    const previousTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
     this.routeGeojson = route;
     const coordinates = route?.geometry?.coordinates ?? [];
     this.routeProfile = this.buildRouteProfile(coordinates);
     this.latestMetrics = this.calculateRouteMetrics(route);
     this.rebuildSegmentData();
+    const newTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
+    let restoredCuts = [];
+    if (previousCuts.length && previousTotalDistance > ROUTE_CUT_EPSILON_KM && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
+      restoredCuts = previousCuts
+        .map((value) => {
+          if (!Number.isFinite(value)) return null;
+          const normalized = value / previousTotalDistance;
+          if (!Number.isFinite(normalized)) return null;
+          const projected = normalized * newTotalDistance;
+          return Number.isFinite(projected) ? projected : null;
+        })
+        .filter((value) => Number.isFinite(value));
+    }
+
     this.resetRouteCuts();
+    if (restoredCuts.length && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
+      const clamped = restoredCuts
+        .map((value) => Math.max(0, Math.min(newTotalDistance, value)))
+        .filter((value) => value > ROUTE_CUT_EPSILON_KM && newTotalDistance - value > ROUTE_CUT_EPSILON_KM)
+        .sort((a, b) => a - b);
+      const uniqueCuts = [];
+      clamped.forEach((value) => {
+        if (!uniqueCuts.some((existing) => Math.abs(existing - value) <= ROUTE_CUT_EPSILON_KM / 2)) {
+          uniqueCuts.push(value);
+        }
+      });
+      this.routeCutDistances = uniqueCuts;
+    }
     this.updateCutDisplays();
     this.updateDistanceMarkers(route);
     this.updateStats(route);
