@@ -3479,6 +3479,8 @@ export class DirectionsManager {
           radiuses: Array(this.waypoints.length).fill(-1),
           elevation: true,
           extra_info: ['waytype', 'steepness'],
+          geometry_precision: 6,
+          geometry_simplify: false,
           preference: this.currentMode === 'foot-hiking' ? 'recommended' : 'fastest',
           units: 'km',
           language: 'en'
