@@ -105,12 +105,12 @@ html, body { margin:0; height:100%; }
   fill: currentColor;
 }
 
-.gpx-import {
-  display: flex;
-  justify-content: center;
+.gpx-tools {
+  display: grid;
+  gap: 6px;
 }
 
-.gpx-import .btn {
+.gpx-tools .btn {
   width: 100%;
   text-align: center;
 }

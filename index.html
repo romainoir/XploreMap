@@ -15,6 +15,10 @@
   <!-- Contours (worker) -->
   <script src="https://unpkg.com/@acalcutt/maplibre-contour-pmtiles@latest/dist/maplibre-contour-pmtiles.min.js"></script>
 
+  <!-- Mapbox GL Draw (for tracing GPX) -->
+  <link href="https://unpkg.com/mapbox-gl-draw@1.5.0/dist/mapbox-gl-draw.css" rel="stylesheet"/>
+  <script src="https://unpkg.com/mapbox-gl-draw@1.5.0/dist/mapbox-gl-draw.js"></script>
+
   <link rel="stylesheet" href="./styles/main.css"/>
   <script src="./maplibre-preload.js"></script>
 </head>
@@ -31,8 +35,10 @@
     </svg>
   </button>
   <input id="gpxFileInput" class="sr-only" type="file" accept=".gpx,application/gpx+xml">
-  <div class="gpx-import">
+  <div class="gpx-tools">
     <button id="gpxImportButton" class="btn" type="button">Import GPX</button>
+    <button id="gpxTraceButton" class="btn" type="button" aria-pressed="false">Trace GPX</button>
+    <button id="gpxExportButton" class="btn" type="button">Export GPX</button>
   </div>
 </div>
 
