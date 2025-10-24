@@ -188,8 +188,8 @@ html, body { margin:0; height:100%; }
     pointer-events: auto;
     backdrop-filter: blur(8px);
     grid-template-areas:
-      "modes"
-      "actions"
+      "toolbar"
+      "stats"
       "chart";
   }
 
@@ -201,25 +201,84 @@ html, body { margin:0; height:100%; }
   display: grid;
 }
 
-.directions-control .btn {
-  width: 100%;
+.directions-toolbars {
+  grid-area: toolbar;
+  display: grid;
+  gap: 12px;
+  justify-items: start;
 }
 
-.transport-modes {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  grid-area: modes;
+.icon-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(17, 34, 48, 0.1);
+  box-shadow: 0 8px 24px rgba(17, 34, 48, 0.16);
+  backdrop-filter: blur(6px);
 }
 
-.directions-actions {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  grid-area: actions;
+.toolbar-button {
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(17, 34, 48, 0.72);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.toolbar-button svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toolbar-button svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.toolbar-button:hover {
+  background: rgba(17, 34, 48, 0.1);
+  color: rgba(17, 34, 48, 0.95);
+  transform: translateY(-1px);
+}
+
+.toolbar-button:focus-visible {
+  outline: 2px solid rgba(17, 98, 128, 0.4);
+  outline-offset: 2px;
+}
+
+.toolbar-button.active {
+  background: #ffffff;
+  color: rgba(17, 98, 128, 0.95);
+  box-shadow: 0 0 0 1px rgba(17, 98, 128, 0.35), 0 4px 10px rgba(17, 34, 48, 0.12);
+}
+
+.toolbar-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.directions-action-toolbar .toolbar-button.active {
+  color: rgba(17, 34, 48, 0.95);
 }
 
 .route-stats {
+  grid-area: stats;
   color: rgba(17, 34, 48, 0.75);
   font-size: 13px;
 }
