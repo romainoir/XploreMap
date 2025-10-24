@@ -38,6 +38,8 @@ const SUMMARY_ICONS = {
   descent: DESCENT_ICON
 };
 
+const BIVOUAC_ELEVATION_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3c.36 0 .7.19.88.5l8 13.5a1 1 0 0 1-.86 1.5H4a1 1 0 0 1-.86-1.5l8-13.5A1 1 0 0 1 12 3Zm0 3.2L6.27 17h11.46ZM7 17h10a1 1 0 0 1 .8 1.6l-1.6 2a1 1 0 0 1-.8.4H8.6a1 1 0 0 1-.8-.4l-1.6-2A1 1 0 0 1 7 17Z"/></svg>';
+
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
 const DISTANCE_MARKER_COLOR = '#f38b1c';
 
@@ -384,6 +386,7 @@ export class DirectionsManager {
 
     this.isDragging = false;
     this.draggedWaypointIndex = null;
+    this.draggedBivouacIndex = null;
     this.hoveredWaypointIndex = null;
     this.hoveredSegmentIndex = null;
     this.hoveredLegIndex = null;
@@ -412,6 +415,7 @@ export class DirectionsManager {
     this.handleElevationPointerMove = (event) => this.onElevationPointerMove(event);
     this.handleElevationPointerLeave = () => this.onElevationPointerLeave();
     this.handleRouteContextMenu = (event) => this.onRouteContextMenu(event);
+    this.handleSegmentMarkerMouseDown = (event) => this.onSegmentMarkerMouseDown(event);
 
     this.routeHoverTooltip = null;
 
@@ -702,6 +706,8 @@ export class DirectionsManager {
 
   setupMapHandlers() {
     this.map.on('mousedown', 'waypoints-hit-area', this.handleWaypointMouseDown);
+    this.map.on('mousedown', SEGMENT_MARKER_LAYER_ID, this.handleSegmentMarkerMouseDown);
+    this.map.on('touchstart', SEGMENT_MARKER_LAYER_ID, this.handleSegmentMarkerMouseDown);
     this.map.on('mousemove', this.handleMapMouseMove);
     this.map.on('mouseup', this.handleMapMouseUp);
     this.map.on('mouseleave', this.handleMapMouseLeave);
@@ -720,7 +726,11 @@ export class DirectionsManager {
       return;
     }
     try {
-      this.routeSegmentsListener(this.buildExportFeatureCollection());
+      const payload = {
+        full: this.buildExportFeatureCollection(),
+        segments: this.buildSegmentExportCollections()
+      };
+      this.routeSegmentsListener(payload);
     } catch (error) {
       console.error('Route segment listener failed', error);
     }
@@ -879,6 +889,36 @@ export class DirectionsManager {
     }
 
     return markers;
+  }
+
+  getMarkerDistance(marker) {
+    if (!marker || !this.routeProfile) {
+      return null;
+    }
+
+    if (marker.type === 'start') {
+      return 0;
+    }
+
+    if (marker.type === 'end') {
+      return Number(this.routeProfile.totalDistanceKm) || 0;
+    }
+
+    if (marker.type === 'bivouac') {
+      const segmentIndex = Number(marker.segmentIndex);
+      if (Number.isInteger(segmentIndex) && segmentIndex > 0) {
+        const prevSegment = this.cutSegments?.[segmentIndex - 1];
+        if (prevSegment && Number.isFinite(prevSegment.endKm)) {
+          return Number(prevSegment.endKm);
+        }
+        const cutValue = this.routeCutDistances?.[segmentIndex - 1];
+        if (Number.isFinite(cutValue)) {
+          return cutValue;
+        }
+      }
+    }
+
+    return null;
   }
 
   assignSegmentNames() {
@@ -1204,6 +1244,96 @@ export class DirectionsManager {
     };
   }
 
+  buildSegmentExportCollections() {
+    if (!Array.isArray(this.cutSegments) || !this.cutSegments.length) {
+      return [];
+    }
+
+    const markers = this.computeSegmentMarkers(this.cutSegments);
+    if (!markers.length) {
+      return [];
+    }
+
+    const collections = this.cutSegments.map((segment, index) => {
+      if (!segment || !Array.isArray(segment.coordinates) || segment.coordinates.length < 2) {
+        return null;
+      }
+
+      const coordinates = segment.coordinates.map((coord) => coord.slice());
+      if (coordinates.length < 2) {
+        return null;
+      }
+
+      const startMarker = markers[index];
+      const endMarker = markers[index + 1];
+      const startKm = Number(segment.startKm ?? 0);
+      const endKm = Number(segment.endKm ?? 0);
+      const distanceKm = Number.isFinite(segment.distanceKm)
+        ? Number(segment.distanceKm)
+        : Number(endKm - startKm);
+      const segmentName = segment.name ?? `Segment ${index + 1}`;
+
+      const features = [
+        {
+          type: 'Feature',
+          properties: {
+            name: segmentName,
+            segmentIndex: segment.index,
+            start_km: Number.isFinite(startKm) ? Number(startKm.toFixed(3)) : 0,
+            end_km: Number.isFinite(endKm) ? Number(endKm.toFixed(3)) : 0,
+            distance_km: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(3)) : 0,
+            color: segment.color ?? null,
+            source: 'track'
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates
+          }
+        }
+      ];
+
+      const appendMarker = (marker) => {
+        const coords = Array.isArray(marker?.coordinates) ? marker.coordinates.slice() : null;
+        if (!coords || coords.length < 2) {
+          return;
+        }
+        const key = `${coords[0].toFixed(6)},${coords[1].toFixed(6)},${marker?.type ?? ''}`;
+        if (!appendMarker.cache.has(key)) {
+          appendMarker.cache.add(key);
+          features.push({
+            type: 'Feature',
+            properties: {
+              name: marker?.name ?? marker?.title ?? '',
+              marker_type: marker?.type ?? null,
+              segmentIndex: marker?.segmentIndex ?? null,
+              color: marker?.labelColor ?? null,
+              source: 'waypoint'
+            },
+            geometry: {
+              type: 'Point',
+              coordinates: coords
+            }
+          });
+        }
+      };
+      appendMarker.cache = new Set();
+
+      appendMarker(startMarker);
+      appendMarker(endMarker);
+
+      return {
+        name: segmentName,
+        index,
+        collection: {
+          type: 'FeatureCollection',
+          features
+        }
+      };
+    }).filter(Boolean);
+
+    return collections;
+  }
+
   updateRouteLineSource() {
     const source = this.map.getSource('route-line-source');
     if (!source) {
@@ -1300,6 +1430,65 @@ export class DirectionsManager {
     };
   }
 
+  snapWaypointsToRoute() {
+    if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
+      return false;
+    }
+    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
+      return false;
+    }
+
+    const lastIndex = this.waypoints.length - 1;
+    const updated = this.waypoints.map((coord) => (Array.isArray(coord) ? coord.slice() : coord));
+    const firstSegment = this.routeSegments[0];
+    const lastSegment = this.routeSegments[this.routeSegments.length - 1];
+
+    if (firstSegment && Array.isArray(firstSegment.start)) {
+      updated[0] = [firstSegment.start[0], firstSegment.start[1]];
+    }
+    if (lastSegment && Array.isArray(lastSegment.end)) {
+      updated[lastIndex] = [lastSegment.end[0], lastSegment.end[1]];
+    }
+
+    for (let index = 1; index < lastIndex; index += 1) {
+      const current = updated[index];
+      if (!Array.isArray(current) || current.length < 2) {
+        continue;
+      }
+      const lngLat = toLngLat(current);
+      const projection = this.projectOntoRoute(lngLat, Number.MAX_SAFE_INTEGER);
+      if (projection?.projection?.coordinates) {
+        const [lng, lat] = projection.projection.coordinates;
+        updated[index] = [lng, lat];
+      }
+    }
+
+    let changed = false;
+    updated.forEach((coord, index) => {
+      if (!Array.isArray(coord) || coord.length < 2) {
+        return;
+      }
+      const next = [coord[0], coord[1]];
+      const force = index === 0 || index === lastIndex;
+      const currentWaypoint = Array.isArray(this.waypoints[index]) ? this.waypoints[index] : [];
+      const hasElevation = currentWaypoint.length > 2;
+      const differs = !this.coordinatesMatch(currentWaypoint, next);
+      if (force && (differs || hasElevation)) {
+        this.waypoints[index] = next;
+        changed = true;
+        return;
+      }
+      if (!force && differs) {
+        this.waypoints[index] = next;
+        changed = true;
+      } else if (hasElevation) {
+        this.waypoints[index] = next;
+      }
+    });
+
+    return changed;
+  }
+
   addRouteCut(distanceKm) {
     if (!this.routeProfile) {
       return;
@@ -1322,6 +1511,48 @@ export class DirectionsManager {
 
     this.routeCutDistances.push(clamped);
     this.routeCutDistances.sort((a, b) => a - b);
+    this.updateCutDisplays();
+  }
+
+  updateDraggedBivouac(distanceKm) {
+    if (this.draggedBivouacIndex === null) {
+      return;
+    }
+    if (!this.routeProfile || !Array.isArray(this.routeCutDistances) || !this.routeCutDistances.length) {
+      return;
+    }
+
+    const index = this.draggedBivouacIndex;
+    if (index < 0 || index >= this.routeCutDistances.length) {
+      return;
+    }
+
+    const totalDistance = Number(this.routeProfile.totalDistanceKm) || 0;
+    if (!Number.isFinite(totalDistance) || totalDistance <= ROUTE_CUT_EPSILON_KM) {
+      return;
+    }
+
+    const prev = index > 0 ? this.routeCutDistances[index - 1] : 0;
+    const next = index < this.routeCutDistances.length - 1 ? this.routeCutDistances[index + 1] : totalDistance;
+    const minDistance = index > 0 ? prev + ROUTE_CUT_EPSILON_KM : ROUTE_CUT_EPSILON_KM;
+    const maxDistance = index < this.routeCutDistances.length - 1
+      ? next - ROUTE_CUT_EPSILON_KM
+      : totalDistance - ROUTE_CUT_EPSILON_KM;
+    if (maxDistance <= minDistance) {
+      return;
+    }
+
+    const clamped = Math.max(minDistance, Math.min(maxDistance, distanceKm));
+    if (!Number.isFinite(clamped)) {
+      return;
+    }
+
+    const current = this.routeCutDistances[index];
+    if (Number.isFinite(current) && Math.abs(current - clamped) <= 1e-5) {
+      return;
+    }
+
+    this.routeCutDistances[index] = clamped;
     this.updateCutDisplays();
   }
 
@@ -1389,12 +1620,45 @@ export class DirectionsManager {
     this.map.dragPan?.disable();
   }
 
+  onSegmentMarkerMouseDown(event) {
+    if (!this.isPanelVisible()) return;
+    const feature = event.features?.[0];
+    const type = feature?.properties?.type;
+    if (type !== 'bivouac') {
+      return;
+    }
+
+    const order = Number(feature.properties?.order);
+    const cutIndex = Number.isFinite(order) ? order - 1 : null;
+    if (!Number.isInteger(cutIndex) || cutIndex < 0) {
+      return;
+    }
+
+    if (!Array.isArray(this.routeCutDistances) || cutIndex >= this.routeCutDistances.length) {
+      return;
+    }
+
+    this.isDragging = true;
+    this.draggedWaypointIndex = null;
+    this.draggedBivouacIndex = cutIndex;
+    this.map.dragPan?.disable();
+    event.preventDefault?.();
+    event.originalEvent?.preventDefault?.();
+  }
+
   onMapMouseMove(event) {
     if (!this.isPanelVisible()) return;
 
     if (this.isDragging && this.draggedWaypointIndex !== null) {
       this.waypoints[this.draggedWaypointIndex] = [event.lngLat.lng, event.lngLat.lat];
       this.updateWaypoints();
+    }
+
+    if (this.isDragging && this.draggedBivouacIndex !== null) {
+      const projection = this.projectOntoRoute(event.lngLat, Number.MAX_SAFE_INTEGER);
+      if (projection && Number.isFinite(projection.distanceKm)) {
+        this.updateDraggedBivouac(projection.distanceKm);
+      }
     }
 
     const features = this.map.queryRenderedFeatures(event.point, { layers: ['waypoints-hit-area'] });
@@ -1421,12 +1685,18 @@ export class DirectionsManager {
 
   onMapMouseUp() {
     if (!this.isDragging) return;
+    const movedWaypoint = this.draggedWaypointIndex !== null;
+    const movedBivouac = this.draggedBivouacIndex !== null;
     this.isDragging = false;
     this.draggedWaypointIndex = null;
+    this.draggedBivouacIndex = null;
     this.map.dragPan?.enable();
     this.setHoveredWaypointIndex(null);
-    if (this.waypoints.length >= 2) {
+    if (movedWaypoint && this.waypoints.length >= 2) {
       this.getRoute();
+    }
+    if (movedBivouac) {
+      this.updateCutDisplays();
     }
   }
 
@@ -2304,6 +2574,7 @@ export class DirectionsManager {
     this.elevationChartContainer = null;
     this.highlightedElevationBar = null;
     this.lastElevationHoverDistance = null;
+    this.draggedBivouacIndex = null;
 
     this.updateRouteLineSource();
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
@@ -2320,6 +2591,7 @@ export class DirectionsManager {
     this.updateStats(null);
     this.updateElevationProfile([]);
     this.draggedWaypointIndex = null;
+    this.draggedBivouacIndex = null;
     this.setHoveredWaypointIndex(null);
   }
 
@@ -2740,6 +3012,54 @@ export class DirectionsManager {
       .map((value) => `<span>${this.formatDistanceTick(value)}</span>`)
       .join('');
 
+    const markerOverlay = (() => {
+      if (!totalDistance) {
+        return '';
+      }
+      const markers = this.computeSegmentMarkers();
+      if (!Array.isArray(markers) || !markers.length) {
+        return '';
+      }
+      const elements = markers
+        .filter((marker) => marker?.type === 'bivouac')
+        .map((marker) => {
+          const distanceKm = this.getMarkerDistance(marker);
+          if (!Number.isFinite(distanceKm) || distanceKm < 0 || distanceKm > totalDistance) {
+            return null;
+          }
+          const percentX = Math.max(0, Math.min(100, (distanceKm / totalDistance) * 100));
+          const elevation = this.getElevationAtDistance(distanceKm);
+          let percentY = null;
+          if (Number.isFinite(elevation)) {
+            const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
+            percentY = ((clampedElevation - yAxis.min) / range) * 100;
+            percentY = Math.max(0, Math.min(100, percentY));
+          }
+          const styleParts = [`left:${percentX.toFixed(2)}%`];
+          if (Number.isFinite(percentY)) {
+            styleParts.push(`bottom:${percentY.toFixed(2)}%`);
+          } else {
+            styleParts.push('bottom:0');
+          }
+          const title = marker?.name ?? marker?.title ?? 'Bivouac';
+          return `
+            <div
+              class="elevation-marker bivouac"
+              style="${styleParts.join(';')}"
+              title="${title}"
+            >
+              ${BIVOUAC_ELEVATION_ICON}
+            </div>
+          `;
+        })
+        .filter(Boolean)
+        .join('');
+      if (!elements) {
+        return '';
+      }
+      return `<div class="elevation-marker-layer" aria-hidden="true">${elements}</div>`;
+    })();
+
     this.elevationChart.innerHTML = `
       <div class="elevation-summary" role="presentation">
         <div class="summary-item ascent" title="Total ascent">
@@ -2757,7 +3077,7 @@ export class DirectionsManager {
       <div class="elevation-plot">
         <div class="elevation-y-axis">${yAxisLabels}</div>
         <div class="elevation-plot-area">
-          <div class="elevation-chart-container" role="presentation">${chartHtml}</div>
+          <div class="elevation-chart-container" role="presentation">${chartHtml}${markerOverlay}</div>
           <div class="elevation-x-axis">${xAxisLabels}</div>
         </div>
       </div>
@@ -2850,6 +3170,10 @@ export class DirectionsManager {
     this.routeProfile = this.buildRouteProfile(coordinates);
     this.latestMetrics = this.calculateRouteMetrics(route);
     this.rebuildSegmentData();
+    const snapped = this.snapWaypointsToRoute();
+    if (snapped) {
+      this.rebuildSegmentData();
+    }
     const newTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
     let restoredCuts = [];
     if (previousCuts.length && previousTotalDistance > ROUTE_CUT_EPSILON_KM && newTotalDistance > ROUTE_CUT_EPSILON_KM) {

@@ -174,6 +174,7 @@ async function init() {
 
   let currentGpxData = EMPTY_COLLECTION;
   let directionsExportData = EMPTY_COLLECTION;
+  let directionsSegmentExports = [];
 
   const ensureFeatureCollection = (geojson) => {
     if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
@@ -195,6 +196,32 @@ async function init() {
       });
     });
     return { type: 'FeatureCollection', features };
+  };
+
+  const cloneFeature = (feature) => {
+    if (!feature) return null;
+    try {
+      if (typeof structuredClone === 'function') {
+        return structuredClone(feature);
+      }
+    } catch (_) {}
+    try {
+      return JSON.parse(JSON.stringify(feature));
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const slugify = (value) => {
+    if (typeof value !== 'string') return 'segment';
+    const normalized = value
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return normalized || 'segment';
   };
 
   const applyGpxData = (geojson, { fitBounds = false } = {}) => {
@@ -230,8 +257,27 @@ async function init() {
         directionsInfoButton,
         directionsHint
       ]);
-      directionsManager.setRouteSegmentsListener((featureCollection) => {
-        directionsExportData = ensureFeatureCollection(featureCollection);
+      directionsManager.setRouteSegmentsListener((payload) => {
+        const isObject = payload && typeof payload === 'object';
+        const dataset = isObject && payload.full ? payload.full : payload;
+        directionsExportData = ensureFeatureCollection(dataset);
+        const segments = isObject && Array.isArray(payload.segments) ? payload.segments : [];
+        directionsSegmentExports = segments
+          .map((entry) => {
+            const collection = ensureFeatureCollection(entry?.collection);
+            if (!collection.features || !collection.features.length) {
+              return null;
+            }
+            const name = typeof entry?.name === 'string' && entry.name.trim().length
+              ? entry.name.trim()
+              : null;
+            return {
+              name,
+              index: Number.isInteger(entry?.index) ? entry.index : null,
+              collection
+            };
+          })
+          .filter(Boolean);
       });
     } catch (error) {
       console.error('Failed to initialize directions manager', error);
@@ -271,17 +317,53 @@ async function init() {
         return;
       }
       try {
-        const gpxContent = geojsonToGpx(dataset);
-        const blob = new Blob([gpxContent], { type: 'application/gpx+xml' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
+        const downloadGpx = (content, filename) => {
+          const blob = new Blob([content], { type: 'application/gpx+xml' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(url), 0);
+        };
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        link.href = url;
-        link.download = `xploremap-${timestamp}.gpx`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 0);
+        const baseName = `xploremap-${timestamp}`;
+        const segmentCollections = Array.isArray(directionsSegmentExports)
+          ? directionsSegmentExports.filter((entry) => entry && entry.collection?.features?.length)
+          : [];
+
+        if (segmentCollections.length) {
+          segmentCollections.forEach((entry, index) => {
+            try {
+              const combinedFeatures = [];
+              (currentGpxData.features || []).forEach((feature) => {
+                const clone = cloneFeature(feature);
+                if (clone) combinedFeatures.push(clone);
+              });
+              (entry.collection.features || []).forEach((feature) => {
+                const clone = cloneFeature(feature);
+                if (clone) combinedFeatures.push(clone);
+              });
+              if (!combinedFeatures.length) {
+                return;
+              }
+              const segmentDataset = { type: 'FeatureCollection', features: combinedFeatures };
+              const segmentLabel = entry.name ? slugify(entry.name) : `segment-${String(index + 1).padStart(2, '0')}`;
+              const filename = `${baseName}-${String(index + 1).padStart(2, '0')}-${segmentLabel}.gpx`;
+              const gpxContent = geojsonToGpx(segmentDataset);
+              downloadGpx(gpxContent, filename);
+            } catch (segmentError) {
+              console.error('Failed to export segmented GPX data', segmentError);
+            }
+          });
+          return;
+        }
+
+        const gpxContent = geojsonToGpx(dataset);
+        downloadGpx(gpxContent, `${baseName}.gpx`);
       } catch (error) {
         console.error('Failed to export GPX data', error);
         window.alert('Unable to export GPX data.');
