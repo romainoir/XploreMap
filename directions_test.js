@@ -367,7 +367,7 @@ const createWaypointFeature = (coords, index, total, extraProperties = {}) => {
 const toLngLat = (coord) => new maplibregl.LngLat(coord[0], coord[1]);
 
 export class DirectionsManager {
-  constructor(map, uiElements = []) {
+  constructor(map, uiElements = [], options = {}) {
     if (!map || typeof map.addSource !== 'function') {
       throw new Error('A valid MapLibre GL JS map instance is required');
     }
@@ -384,6 +384,8 @@ export class DirectionsManager {
       directionsInfoButton,
       directionsHint
     ] = uiElements;
+
+    const { router = null } = options ?? {};
 
     this.map = map;
     this.mapContainer = map.getContainer?.() ?? null;
@@ -429,6 +431,13 @@ export class DirectionsManager {
 
     this.setHintVisible(false);
 
+    this.router = router ?? null;
+    if (this.router && typeof this.router.ensureReady === 'function') {
+      this.router.ensureReady().catch((error) => {
+        console.error('Offline router failed to initialize', error);
+      });
+    }
+
     this.handleWaypointMouseDown = (event) => this.onWaypointMouseDown(event);
     this.handleMapMouseMove = (event) => this.onMapMouseMove(event);
     this.handleMapMouseUp = (event) => this.onMapMouseUp(event);
@@ -454,6 +463,7 @@ export class DirectionsManager {
     this.setupUIHandlers();
     this.setupMapHandlers();
     this.updatePanelVisibilityState();
+    this.updateModeAvailability();
   }
 
   setupRouteLayers() {
@@ -745,6 +755,44 @@ export class DirectionsManager {
     this.map.on('click', this.handleMapClick);
     this.map.on('dblclick', 'waypoints-hit-area', this.handleWaypointDoubleClick);
     this.map.on('contextmenu', this.handleRouteContextMenu);
+  }
+
+  updateModeAvailability() {
+    if (!Array.isArray(this.transportModes) || !this.transportModes.length) {
+      return;
+    }
+
+    const supports = (mode) => {
+      if (!this.router || typeof this.router.supportsMode !== 'function') {
+        return true;
+      }
+      return this.router.supportsMode(mode);
+    };
+
+    let hasActiveMode = false;
+
+    this.transportModes.forEach((button) => {
+      const mode = button.dataset.mode;
+      if (!mode) return;
+      const supported = supports(mode);
+      button.disabled = !supported;
+      button.classList.toggle('mode-disabled', !supported);
+      const shouldBeActive = supported && mode === this.currentMode;
+      button.classList.toggle('active', shouldBeActive);
+      if (shouldBeActive) {
+        hasActiveMode = true;
+      }
+    });
+
+    if (!hasActiveMode) {
+      const fallbackButton = this.transportModes.find((button) => {
+        const mode = button.dataset.mode;
+        return mode && supports(mode);
+      });
+      if (fallbackButton) {
+        this.setTransportMode(fallbackButton.dataset.mode);
+      }
+    }
   }
 
   setRouteSegmentsListener(callback) {
@@ -1850,6 +1898,7 @@ export class DirectionsManager {
     if (this.waypoints.length >= 2) {
       this.getRoute();
     }
+    this.updateModeAvailability();
   }
 
   onWaypointDoubleClick(event) {
@@ -2784,6 +2833,9 @@ export class DirectionsManager {
 
   setTransportMode(mode) {
     if (!this.modeColors[mode]) return;
+    if (this.router && typeof this.router.supportsMode === 'function' && !this.router.supportsMode(mode)) {
+      return;
+    }
     this.currentMode = mode;
     this.transportModes.forEach((button) => {
       button.classList.toggle('active', button.dataset.mode === mode);
@@ -3467,38 +3519,16 @@ export class DirectionsManager {
     if (this.waypoints.length < 2) return;
 
     try {
-      const response = await fetch(`https://api.openrouteservice.org/v2/directions/${this.currentMode}/geojson`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
-          'Content-Type': 'application/json',
-          Authorization: '5b3ce3597851110001cf62483828a115553d4a98817dd43f61935829'
-        },
-        body: JSON.stringify({
-          coordinates: this.waypoints,
-          radiuses: Array(this.waypoints.length).fill(-1),
-          elevation: true,
-          extra_info: ['waytype', 'steepness'],
-          preference: this.currentMode === 'foot-hiking' ? 'recommended' : 'fastest',
-          units: 'km',
-          language: 'en'
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Unable to fetch directions');
+      if (!this.router || typeof this.router.getRoute !== 'function') {
+        throw new Error('No routing engine is configured');
       }
-
-      const data = await response.json();
-      const route = data.features?.[0];
-      if (!route) {
-        throw new Error('No route returned from the directions service');
+      const route = await this.router.getRoute(this.waypoints, { mode: this.currentMode });
+      if (!route || !route.geometry) {
+        throw new Error('No route returned from the offline router');
       }
-
       this.applyRoute(route);
     } catch (error) {
-      console.error('Failed to fetch route', error);
+      console.error('Failed to compute route', error);
     }
   }
 }
