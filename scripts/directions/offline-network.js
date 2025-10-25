@@ -1,11 +1,11 @@
 const NETWORK_GEOJSON_URL = './data/offline-network.geojson';
-const MAX_NETWORK_RADIUS_METERS = 40000;
+const PATH_FINDER_MODULE = 'https://cdn.skypack.dev/geojson-path-finder@1.5.3?min';
 const EARTH_RADIUS_METERS = 6371000;
 const DEFAULT_ELEVATION = 0;
 
 const networkState = {
   loadPromise: null,
-  graph: null
+  pathFinder: null
 };
 
 function toRadians(value) {
@@ -33,193 +33,46 @@ function roundCoordinate(value) {
   return Number.isFinite(value) ? Number(value.toFixed(6)) : value;
 }
 
-function getNodeKey(lng, lat) {
-  return `${roundCoordinate(lng)},${roundCoordinate(lat)}`;
+function ensurePathFinderCtor(module) {
+  if (!module) return null;
+  if (typeof module === 'function') return module;
+  if (typeof module.default === 'function') return module.default;
+  if (typeof module.PathFinder === 'function') return module.PathFinder;
+  return null;
 }
 
-function ensureNode(graph, lng, lat) {
-  const key = getNodeKey(lng, lat);
-  if (!graph.nodes.has(key)) {
-    graph.nodes.set(key, {
-      id: key,
-      lng: roundCoordinate(lng),
-      lat: roundCoordinate(lat),
-      neighbors: new Map()
-    });
-  }
-  return graph.nodes.get(key);
-}
-
-function connectNodes(graph, fromNode, toNode) {
-  const distance = haversineDistanceMeters([fromNode.lng, fromNode.lat], [toNode.lng, toNode.lat]);
-  if (!Number.isFinite(distance) || distance <= 0) {
-    return;
-  }
-  const existingForward = fromNode.neighbors.get(toNode.id);
-  const existingBackward = toNode.neighbors.get(fromNode.id);
-  const weight = Number.isFinite(existingForward) ? Math.min(existingForward, distance) : distance;
-  fromNode.neighbors.set(toNode.id, weight);
-  toNode.neighbors.set(fromNode.id, Number.isFinite(existingBackward) ? Math.min(existingBackward, distance) : distance);
-  graph.edges += 1;
-}
-
-function buildGraphFromGeoJSON(data) {
-  const graph = { nodes: new Map(), edges: 0 };
-  if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
-    return graph;
-  }
-
-  data.features.forEach((feature) => {
-    if (!feature || feature.type !== 'Feature') return;
-    const geometry = feature.geometry;
-    if (!geometry) return;
-    if (geometry.type === 'LineString' && Array.isArray(geometry.coordinates)) {
-      const coords = geometry.coordinates;
-      for (let index = 1; index < coords.length; index += 1) {
-        const start = coords[index - 1];
-        const end = coords[index];
-        if (!Array.isArray(start) || !Array.isArray(end)) continue;
-        const startNode = ensureNode(graph, start[0], start[1]);
-        const endNode = ensureNode(graph, end[0], end[1]);
-        connectNodes(graph, startNode, endNode);
-      }
-    } else if (geometry.type === 'MultiLineString' && Array.isArray(geometry.coordinates)) {
-      geometry.coordinates.forEach((line) => {
-        if (!Array.isArray(line)) return;
-        for (let index = 1; index < line.length; index += 1) {
-          const start = line[index - 1];
-          const end = line[index];
-          if (!Array.isArray(start) || !Array.isArray(end)) continue;
-          const startNode = ensureNode(graph, start[0], start[1]);
-          const endNode = ensureNode(graph, end[0], end[1]);
-          connectNodes(graph, startNode, endNode);
-        }
-      });
-    }
-  });
-
-  return graph;
-}
-
-async function loadNetworkGraph() {
+async function loadPathFinder() {
   if (!networkState.loadPromise) {
-    networkState.loadPromise = fetch(NETWORK_GEOJSON_URL)
-      .then((response) => {
+    networkState.loadPromise = Promise.all([
+      fetch(NETWORK_GEOJSON_URL).then((response) => {
         if (!response.ok) {
           throw new Error(`Unable to load offline network (${response.status})`);
         }
         return response.json();
-      })
-      .then((data) => {
-        networkState.graph = buildGraphFromGeoJSON(data);
-        return networkState.graph;
+      }),
+      import(PATH_FINDER_MODULE)
+    ])
+      .then(([data, module]) => {
+        const PathFinderCtor = ensurePathFinderCtor(module);
+        if (typeof PathFinderCtor !== 'function') {
+          throw new Error('GeoJSON PathFinder module is not available');
+        }
+        networkState.pathFinder = new PathFinderCtor(data, {
+          precision: 1e-5
+        });
+        return networkState.pathFinder;
       })
       .catch((error) => {
-        networkState.graph = { nodes: new Map(), edges: 0 };
-        console.error('Failed to load offline network', error);
+        networkState.pathFinder = null;
+        console.error('Failed to initialize offline network', error);
         throw error;
       });
   }
   return networkState.loadPromise;
 }
 
-function getGraph() {
-  if (networkState.graph && networkState.graph.nodes.size) {
-    return networkState.graph;
-  }
-  return null;
-}
-
-function findNearestNode(graph, coordinate, radiusMeters = MAX_NETWORK_RADIUS_METERS) {
-  if (!graph || !Array.isArray(coordinate) || coordinate.length < 2) {
-    return null;
-  }
-  let bestNode = null;
-  let bestDistance = Infinity;
-  graph.nodes.forEach((node) => {
-    const distance = haversineDistanceMeters([node.lng, node.lat], coordinate);
-    if (distance < bestDistance && distance <= radiusMeters) {
-      bestDistance = distance;
-      bestNode = node;
-    }
-  });
-  return bestNode ? { node: bestNode, distance: bestDistance } : null;
-}
-
-function dijkstra(graph, startId, endId, allowedNodes) {
-  if (!startId || !endId || startId === endId) {
-    return startId === endId ? [startId] : null;
-  }
-  const visited = new Set();
-  const distances = new Map();
-  const previous = new Map();
-  const queue = [];
-
-  const pushQueue = (id, distance) => {
-    queue.push({ id, distance });
-    queue.sort((a, b) => a.distance - b.distance);
-  };
-
-  pushQueue(startId, 0);
-  distances.set(startId, 0);
-
-  while (queue.length) {
-    const current = queue.shift();
-    if (!current) break;
-    if (visited.has(current.id)) continue;
-    visited.add(current.id);
-
-    if (current.id === endId) {
-      break;
-    }
-
-    const node = graph.nodes.get(current.id);
-    if (!node) continue;
-
-    node.neighbors.forEach((weight, neighborId) => {
-      if (!graph.nodes.has(neighborId)) return;
-      if (allowedNodes && !allowedNodes.has(neighborId)) return;
-      if (allowedNodes && !allowedNodes.has(current.id)) return;
-      const nextDistance = current.distance + weight;
-      if (!distances.has(neighborId) || nextDistance < distances.get(neighborId)) {
-        distances.set(neighborId, nextDistance);
-        previous.set(neighborId, current.id);
-        pushQueue(neighborId, nextDistance);
-      }
-    });
-  }
-
-  if (!previous.has(endId) && startId !== endId) {
-    return null;
-  }
-
-  const path = [];
-  let currentId = endId;
-  path.unshift(currentId);
-  while (previous.has(currentId)) {
-    currentId = previous.get(currentId);
-    path.unshift(currentId);
-  }
-
-  if (!path.length || path[0] !== startId) {
-    return null;
-  }
-
-  return path;
-}
-
-function buildAllowedNodeSet(graph, centerCoordinate, radiusMeters = MAX_NETWORK_RADIUS_METERS) {
-  if (!Array.isArray(centerCoordinate) || centerCoordinate.length < 2) {
-    return null;
-  }
-  const allowed = new Set();
-  graph.nodes.forEach((node, nodeId) => {
-    const distance = haversineDistanceMeters([node.lng, node.lat], centerCoordinate);
-    if (distance <= radiusMeters) {
-      allowed.add(nodeId);
-    }
-  });
-  return allowed.size ? allowed : null;
+function getPathFinder() {
+  return networkState.pathFinder ?? null;
 }
 
 function sanitizeCoordinates(coordinates) {
@@ -239,37 +92,14 @@ function sanitizeCoordinates(coordinates) {
     .filter(Boolean);
 }
 
-function buildPathCoordinates(graph, path, startCoordinate, endCoordinate) {
-  const coordinates = [];
-  const first = path[0];
-  const last = path[path.length - 1];
-  if (startCoordinate && startCoordinate.length >= 2) {
-    coordinates.push([startCoordinate[0], startCoordinate[1], startCoordinate[2] ?? DEFAULT_ELEVATION]);
-  } else if (first && graph.nodes.has(first)) {
-    const node = graph.nodes.get(first);
-    coordinates.push([node.lng, node.lat, DEFAULT_ELEVATION]);
+function toCoordinate3D(coord, elevation) {
+  const lng = Number(coord?.[0]);
+  const lat = Number(coord?.[1]);
+  const ele = Number.isFinite(elevation) ? elevation : DEFAULT_ELEVATION;
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return null;
   }
-
-  for (let index = 0; index < path.length; index += 1) {
-    const nodeId = path[index];
-    const node = graph.nodes.get(nodeId);
-    if (!node) continue;
-    const lastCoord = coordinates[coordinates.length - 1];
-    const candidate = [node.lng, node.lat, lastCoord?.[2] ?? DEFAULT_ELEVATION];
-    if (!lastCoord || lastCoord[0] !== candidate[0] || lastCoord[1] !== candidate[1]) {
-      coordinates.push(candidate);
-    }
-  }
-
-  if (endCoordinate && endCoordinate.length >= 2) {
-    const lastCoord = coordinates[coordinates.length - 1];
-    const normalized = [endCoordinate[0], endCoordinate[1], endCoordinate[2] ?? DEFAULT_ELEVATION];
-    if (!lastCoord || lastCoord[0] !== normalized[0] || lastCoord[1] !== normalized[1]) {
-      coordinates.push(normalized);
-    }
-  }
-
-  return coordinates;
+  return [roundCoordinate(lng), roundCoordinate(lat), ele];
 }
 
 function computeSegmentMetrics(coordinates) {
@@ -287,27 +117,24 @@ function computeSegmentMetrics(coordinates) {
   };
 }
 
-async function ensureGraphLoaded() {
-  if (getGraph()) {
-    return networkState.graph;
+async function ensurePathFinderLoaded() {
+  if (getPathFinder()) {
+    return networkState.pathFinder;
   }
-  return loadNetworkGraph();
+  return loadPathFinder();
 }
 
 export async function computeOfflineRouteSegment(rawWaypoints, options = {}) {
-  const { radiusMeters = MAX_NETWORK_RADIUS_METERS } = options;
   const sanitized = sanitizeCoordinates(rawWaypoints);
   if (sanitized.length < 2) {
     throw new Error('Not enough coordinates to compute an offline segment');
   }
 
-  const graph = await ensureGraphLoaded();
-  if (!graph || !graph.nodes.size) {
+  await ensurePathFinderLoaded();
+  const pathFinder = getPathFinder();
+  if (!pathFinder) {
     throw new Error('Offline network is not available');
   }
-
-  const center = sanitized[0];
-  const allowedNodes = buildAllowedNodeSet(graph, center, radiusMeters);
 
   const combined = [];
   const segments = [];
@@ -315,21 +142,29 @@ export async function computeOfflineRouteSegment(rawWaypoints, options = {}) {
   for (let index = 1; index < sanitized.length; index += 1) {
     const start = sanitized[index - 1];
     const end = sanitized[index];
-    const startNode = findNearestNode(graph, start, radiusMeters);
-    const endNode = findNearestNode(graph, end, radiusMeters);
-    if (!startNode || !endNode) {
-      throw new Error('Unable to match waypoints to offline network');
-    }
-
-    const path = dijkstra(graph, startNode.node.id, endNode.node.id, allowedNodes);
-    if (!path || !path.length) {
+    const result = pathFinder.findPath([start[0], start[1]], [end[0], end[1]]);
+    if (!result || !Array.isArray(result.path) || result.path.length < 2) {
       throw new Error('No offline path found between waypoints');
     }
 
-    const pathCoordinates = buildPathCoordinates(graph, path, start, end);
+    const pathCoordinates = result.path
+      .map((coord, coordIndex) => {
+        const baseElevation =
+          coordIndex === 0
+            ? start[2]
+            : coordIndex === result.path.length - 1
+              ? end[2]
+              : start[2] ?? end[2];
+        return toCoordinate3D(coord, baseElevation);
+      })
+      .filter(Boolean);
+
     if (pathCoordinates.length < 2) {
       throw new Error('Offline path contains too few coordinates');
     }
+
+    pathCoordinates[0] = toCoordinate3D(start, start[2]);
+    pathCoordinates[pathCoordinates.length - 1] = toCoordinate3D(end, end[2]);
 
     const segmentMetrics = computeSegmentMetrics(pathCoordinates);
     segments.push(segmentMetrics);
@@ -368,5 +203,5 @@ export async function computeOfflineRouteSegment(rawWaypoints, options = {}) {
 
 export function resetOfflineNetworkCache() {
   networkState.loadPromise = null;
-  networkState.graph = null;
+  networkState.pathFinder = null;
 }
