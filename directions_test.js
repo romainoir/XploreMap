@@ -1,39 +1,451 @@
-import {
-  EMPTY_COLLECTION,
-  MODE_COLORS,
-  HOVER_PIXEL_TOLERANCE,
-  COORD_EPSILON,
-  WAYPOINT_MATCH_TOLERANCE_METERS,
-  MAX_ELEVATION_POINTS,
-  MAX_DISTANCE_MARKERS,
-  ELEVATION_TICK_TARGET,
-  DISTANCE_TICK_TARGET,
-  ROUTE_CUT_EPSILON_KM,
-  ROUTE_CLICK_PIXEL_TOLERANCE,
-  SUMMARY_ICONS,
-  BIVOUAC_ELEVATION_ICON,
-  SEGMENT_MARKER_SOURCE_ID,
-  SEGMENT_MARKER_LAYER_ID,
-  SEGMENT_MARKER_COLORS,
-  SEGMENT_MARKER_ICONS,
-  HIKER_MARKER_LAYER_ID,
-  HIKER_MARKER_SOURCE_ID,
-  HIKER_MARKER_ICON_ID,
-  BIVOUAC_MARKER_ICON_ID,
-  turfApi
-} from './constants.js';
-import {
-  blendHexColors,
-  getSegmentPaletteColor,
-  createWaypointFeature,
-  toLngLat
-} from './utils.js';
-import {
-  ensureSegmentMarkerImages,
-  ensureHikerMarkerImage
-} from './marker-images.js';
-import { ensureDistanceMarkerImage } from './distance-markers.js';
-import { computeOfflineRouteSegment } from './offline-network.js';
+const EMPTY_COLLECTION = {
+  type: 'FeatureCollection',
+  features: []
+};
+
+const MODE_COLORS = {
+  'foot-hiking': '#f6a662',
+  'cycling-regular': '#8fd3a5',
+  'driving-car': '#f19595',
+  'manual-draw': '#c3a3e0'
+};
+
+const HOVER_PIXEL_TOLERANCE = 12;
+const COORD_EPSILON = 1e-6;
+const WAYPOINT_MATCH_TOLERANCE_METERS = 30;
+const MAX_ELEVATION_POINTS = 180;
+const MAX_DISTANCE_MARKERS = 60;
+const ELEVATION_TICK_TARGET = 5;
+const DISTANCE_TICK_TARGET = 6;
+const ROUTE_CUT_EPSILON_KM = 0.02;
+const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
+const turfApi = typeof turf !== 'undefined' ? turf : null;
+
+const SEGMENT_COLOR_PALETTE = [
+  '#8ecae6',
+  '#f6bd60',
+  '#bde0fe',
+  '#c1fba4',
+  '#f4a7bb',
+  '#d0bdf4',
+  '#ffd6a5',
+  '#a3c4f3'
+];
+
+const ASCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 18a1 1 0 0 1-.7-1.7l6.3-6.3a1 1 0 0 1 1.4 0l3.3 3.3 4.9-6.7H17a1 1 0 0 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V7.41l-5.6 7.6a1 1 0 0 1-1.5.12l-3.3-3.3-5.6 5.6a1 1 0 0 1-.7.27Z"/></svg>';
+const DESCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 6a1 1 0 0 1 .7 1.7l-6.3 6.3a1 1 0 0 1-1.4 0l-3.3-3.3-4.9 6.7H7a1 1 0 0 1 0 2H2a1 1 0 0 1-1-1v-5a1 1 0 0 1 2 0v3.59l5.6-7.6a1 1 0 0 1 1.5-.12l3.3 3.3 5.6-5.6a1 1 0 0 1 .7-.27Z"/></svg>';
+
+const SUMMARY_ICONS = {
+  ascent: ASCENT_ICON,
+  descent: DESCENT_ICON
+};
+
+const BIVOUAC_ELEVATION_ICON =
+  '<img src="bivouac.png" alt="Bivouac" class="bivouac-elevation-icon" loading="lazy" decoding="async" />';
+
+const DISTANCE_MARKER_PREFIX = 'distance-marker-';
+const DEFAULT_DISTANCE_MARKER_COLOR = '#f6bd60';
+
+const SEGMENT_MARKER_SOURCE_ID = 'segment-markers';
+const SEGMENT_MARKER_LAYER_ID = 'segment-markers';
+const SEGMENT_MARKER_COLORS = {
+  start: '#4f9d69',
+  bivouac: '#6c91bf',
+  end: '#e07a5f'
+};
+const START_MARKER_ICON_ID = 'segment-marker-start';
+const BIVOUAC_MARKER_ICON_ID = 'segment-marker-bivouac';
+const END_MARKER_ICON_ID = 'segment-marker-end';
+const SEGMENT_MARKER_ICONS = {
+  start: START_MARKER_ICON_ID,
+  bivouac: BIVOUAC_MARKER_ICON_ID,
+  end: END_MARKER_ICON_ID
+};
+
+const BIVOUAC_MARKER_IMAGE_URL = 'bivouac.png';
+
+const HIKER_MARKER_ICON_ID = 'route-hiker-icon';
+const HIKER_MARKER_LAYER_ID = 'route-hiker';
+const HIKER_MARKER_SOURCE_ID = 'route-hiker-source';
+const HIKER_MARKER_IMAGE_URL = 'randonneur.png';
+
+let bivouacMarkerImage = null;
+let bivouacMarkerImagePromise = null;
+let hikerMarkerImagePromise = null;
+
+function createMarkerCanvas(baseSize = 52) {
+  const ratio = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = baseSize * ratio;
+  canvas.height = baseSize * ratio;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return null;
+  }
+  ctx.scale(ratio, ratio);
+  ctx.clearRect(0, 0, baseSize, baseSize);
+  return { canvas, ctx, ratio, size: baseSize };
+}
+
+function finalizeMarkerImage(base) {
+  if (!base) {
+    return null;
+  }
+
+  const { canvas, ctx, ratio } = base;
+  const width = canvas.width;
+  const height = canvas.height;
+
+  if (!width || !height) {
+    return null;
+  }
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  return { image: imageData, pixelRatio: ratio };
+}
+
+function createFlagMarkerImage(fillColor) {
+  const base = createMarkerCanvas();
+  if (!base) {
+    return null;
+  }
+
+  const { ctx, size } = base;
+  const poleX = size * 0.5;
+  const poleTop = size * 0.16;
+  const poleBottom = size * 0.88;
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+  ctx.beginPath();
+  ctx.ellipse(poleX, poleBottom + size * 0.03, size * 0.2, size * 0.08, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#27363f';
+  ctx.lineWidth = size * 0.06;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(poleX, poleTop);
+  ctx.lineTo(poleX, poleBottom);
+  ctx.stroke();
+
+  const flagWidth = size * 0.36;
+  const flagHeight = size * 0.3;
+  ctx.fillStyle = fillColor;
+  ctx.strokeStyle = 'rgba(17, 34, 48, 0.18)';
+  ctx.lineWidth = size * 0.025;
+  ctx.beginPath();
+  ctx.moveTo(poleX, poleTop + size * 0.02);
+  ctx.quadraticCurveTo(poleX + flagWidth, poleTop - size * 0.04, poleX + flagWidth, poleTop + flagHeight * 0.35);
+  ctx.quadraticCurveTo(poleX + flagWidth, poleTop + flagHeight * 0.75, poleX, poleTop + flagHeight);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  return finalizeMarkerImage(base);
+}
+
+function loadImageAsset(url) {
+  if (!url) {
+    return Promise.reject(new Error('Missing image URL'));
+  }
+
+  if (typeof Image === 'undefined') {
+    return Promise.reject(new Error('Image constructor is not available in this environment'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Unable to load image: ${url}`));
+    image.src = url;
+  });
+}
+
+function getBivouacMarkerImage() {
+  if (bivouacMarkerImage) {
+    return Promise.resolve(bivouacMarkerImage);
+  }
+
+  if (!bivouacMarkerImagePromise) {
+    bivouacMarkerImagePromise = loadImageAsset(BIVOUAC_MARKER_IMAGE_URL)
+      .then((image) => {
+        bivouacMarkerImage = image;
+        return image;
+      })
+      .catch((error) => {
+        bivouacMarkerImagePromise = null;
+        throw error;
+      });
+  }
+
+  return bivouacMarkerImagePromise;
+}
+
+function ensureHikerMarkerImage(map) {
+  if (!map || typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') {
+    return Promise.resolve();
+  }
+
+  if (map.hasImage(HIKER_MARKER_ICON_ID)) {
+    return Promise.resolve();
+  }
+
+  if (!hikerMarkerImagePromise) {
+    hikerMarkerImagePromise = loadImageAsset(HIKER_MARKER_IMAGE_URL)
+      .then((image) => {
+        if (image && !map.hasImage(HIKER_MARKER_ICON_ID)) {
+          map.addImage(HIKER_MARKER_ICON_ID, image, { pixelRatio: 2 });
+        }
+      })
+      .catch((error) => {
+        hikerMarkerImagePromise = null;
+        throw error;
+      });
+  }
+
+  return hikerMarkerImagePromise;
+}
+
+function ensureSegmentMarkerImages(map) {
+  if (!map || typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') {
+    return;
+  }
+
+  if (!map.hasImage(START_MARKER_ICON_ID)) {
+    const startIcon = createFlagMarkerImage(SEGMENT_MARKER_COLORS.start);
+    if (startIcon) {
+      map.addImage(START_MARKER_ICON_ID, startIcon.image, { pixelRatio: startIcon.pixelRatio });
+    }
+  }
+
+  if (!map.hasImage(END_MARKER_ICON_ID)) {
+    const endIcon = createFlagMarkerImage(SEGMENT_MARKER_COLORS.end);
+    if (endIcon) {
+      map.addImage(END_MARKER_ICON_ID, endIcon.image, { pixelRatio: endIcon.pixelRatio });
+    }
+  }
+
+  if (!map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+    getBivouacMarkerImage()
+      .then((image) => {
+        if (!image || !map || typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') {
+          return;
+        }
+        if (!map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+          map.addImage(BIVOUAC_MARKER_ICON_ID, image);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load bivouac marker image', error);
+      });
+  }
+}
+
+function adjustHexColor(hex, ratio = 0) {
+  if (typeof hex !== 'string' || !/^#([0-9a-f]{6})$/i.test(hex)) {
+    return hex;
+  }
+
+  const normalized = hex.slice(1);
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  const clampedRatio = Math.max(-1, Math.min(1, Number(ratio) || 0));
+
+  const transform = (channel) => {
+    if (clampedRatio >= 0) {
+      return Math.round(channel + (255 - channel) * clampedRatio);
+    }
+    return Math.round(channel * (1 + clampedRatio));
+  };
+
+  const toHex = (value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0');
+
+  const nextR = toHex(transform(r));
+  const nextG = toHex(transform(g));
+  const nextB = toHex(transform(b));
+  return `#${nextR}${nextG}${nextB}`;
+}
+
+function parseHexColor(hex) {
+  if (typeof hex !== 'string') {
+    return null;
+  }
+  const match = hex.trim().match(/^#([0-9a-f]{6})$/i);
+  if (!match) {
+    return null;
+  }
+  const value = match[1];
+  return [
+    parseInt(value.slice(0, 2), 16),
+    parseInt(value.slice(2, 4), 16),
+    parseInt(value.slice(4, 6), 16)
+  ];
+}
+
+function blendHexColors(colorA, colorB, weight = 0.5) {
+  const parsedA = parseHexColor(colorA);
+  const parsedB = parseHexColor(colorB);
+  if (!parsedA && !parsedB) {
+    return null;
+  }
+  if (!parsedA) {
+    return colorB;
+  }
+  if (!parsedB) {
+    return colorA;
+  }
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(weight) ? Number(weight) : 0.5));
+  const mix = (index) => Math.round(parsedA[index] + (parsedB[index] - parsedA[index]) * clamped);
+  const toHex = (value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0');
+  return `#${toHex(mix(0))}${toHex(mix(1))}${toHex(mix(2))}`;
+}
+
+function getSegmentPaletteColor(index) {
+  if (!Number.isInteger(index) || index < 0) {
+    return null;
+  }
+  if (!Array.isArray(SEGMENT_COLOR_PALETTE) || !SEGMENT_COLOR_PALETTE.length) {
+    return null;
+  }
+  return SEGMENT_COLOR_PALETTE[index % SEGMENT_COLOR_PALETTE.length];
+}
+
+function createDistanceMarkerImage(label, {
+  fill = DEFAULT_DISTANCE_MARKER_COLOR
+} = {}) {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return null;
+  }
+
+  const deviceRatio = 2;
+  const fontSize = 13;
+  const paddingX = 8;
+  const paddingY = 6;
+  const borderRadius = 8;
+  const font = `600 ${fontSize * deviceRatio}px 'Noto Sans', 'Noto Sans Bold', sans-serif`;
+  context.font = font;
+  const metrics = context.measureText(label);
+  const textWidth = metrics.width;
+
+  const baseWidth = Math.ceil(textWidth / deviceRatio + paddingX * 2);
+  const baseHeight = Math.ceil(fontSize + paddingY * 2);
+
+  canvas.width = baseWidth * deviceRatio;
+  canvas.height = baseHeight * deviceRatio;
+
+  context.scale(deviceRatio, deviceRatio);
+  context.font = `600 ${fontSize}px 'Noto Sans', 'Noto Sans Bold', sans-serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+
+  const drawRoundedRect = (x, y, width, height, radius) => {
+    const r = Math.min(radius, width / 2, height / 2);
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.lineTo(x + width - r, y);
+    context.quadraticCurveTo(x + width, y, x + width, y + r);
+    context.lineTo(x + width, y + height - r);
+    context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    context.lineTo(x + r, y + height);
+    context.quadraticCurveTo(x, y + height, x, y + height - r);
+    context.lineTo(x, y + r);
+    context.quadraticCurveTo(x, y, x + r, y);
+    context.closePath();
+  };
+
+  drawRoundedRect(0, 0, baseWidth, baseHeight, borderRadius);
+  const strokeColor = adjustHexColor(fill, -0.2);
+
+  context.save();
+  context.shadowColor = 'rgba(17, 34, 48, 0.3)';
+  context.shadowBlur = 8;
+  context.shadowOffsetY = 2;
+  context.fillStyle = fill;
+  context.fill();
+  context.restore();
+
+  context.lineWidth = 1.5;
+  context.strokeStyle = strokeColor;
+  context.stroke();
+
+  context.fillStyle = '#ffffff';
+  context.fillText(label, baseWidth / 2, baseHeight / 2);
+
+  const width = canvas.width;
+  const height = canvas.height;
+  if (!width || !height) {
+    return null;
+  }
+
+  const imageData = context.getImageData(0, 0, width, height);
+  return {
+    image: {
+      width,
+      height,
+      data: imageData.data
+    },
+    pixelRatio: deviceRatio
+  };
+}
+
+function buildDistanceMarkerId(label, fill) {
+  const normalizedLabel = String(label)
+    .toLowerCase()
+    .replace(/[^0-9a-z]+/gi, '-');
+  const normalizedColor = typeof fill === 'string' && fill
+    ? fill.toLowerCase().replace(/[^0-9a-f]+/g, '')
+    : 'default';
+  return `${DISTANCE_MARKER_PREFIX}${normalizedLabel}-${normalizedColor}`;
+}
+
+function ensureDistanceMarkerImage(map, label, { fill } = {}) {
+  const color = typeof fill === 'string' && fill ? fill : DEFAULT_DISTANCE_MARKER_COLOR;
+  const imageId = buildDistanceMarkerId(label, color);
+  if (map.hasImage(imageId)) {
+    return imageId;
+  }
+
+  const rendered = createDistanceMarkerImage(label, { fill: color });
+  if (!rendered) {
+    return null;
+  }
+
+  map.addImage(imageId, rendered.image, { pixelRatio: rendered.pixelRatio });
+  return imageId;
+}
+
+const createWaypointFeature = (coords, index, total, extraProperties = {}) => {
+  const isStart = index === 0;
+  const isEnd = index === total - 1 && total > 1;
+  const role = isStart ? 'start' : isEnd ? 'end' : 'via';
+
+  let title = '';
+  if (isStart) {
+    title = 'Départ';
+  } else if (isEnd) {
+    title = 'Arrivée';
+  }
+
+  return {
+    type: 'Feature',
+    properties: {
+      index,
+      role,
+      title,
+      ...extraProperties
+    },
+    geometry: {
+      type: 'Point',
+      coordinates: coords
+    }
+  };
+};
+
+const toLngLat = (coord) => new maplibregl.LngLat(coord[0], coord[1]);
 
 export class DirectionsManager {
   constructor(map, uiElements = []) {
@@ -145,7 +557,6 @@ export class DirectionsManager {
 
     this.routeCutDistances = [];
     this.bivouacWaypointIndexes = [];
-    this.bivouacAnchors = [];
     this.cutSegments = [];
     this.routeSegmentsListener = null;
     this.elevationResizeObserver = null;
@@ -793,7 +1204,6 @@ export class DirectionsManager {
   resetRouteCuts() {
     this.routeCutDistances = [];
     this.bivouacWaypointIndexes = [];
-    this.bivouacAnchors = [];
     this.cutSegments = [];
     this.updateSegmentMarkers();
     this.updateDistanceMarkers(this.routeGeojson);
@@ -1632,7 +2042,7 @@ export class DirectionsManager {
     return changed;
   }
 
-  addRouteCut(distanceKm, { anchor } = {}) {
+  addRouteCut(distanceKm) {
     if (!this.routeProfile) {
       return;
     }
@@ -1657,21 +2067,15 @@ export class DirectionsManager {
           distance: cut,
           waypointIndex: Array.isArray(this.bivouacWaypointIndexes)
             ? this.bivouacWaypointIndexes[index] ?? null
-            : null,
-          anchor: this.normalizeLngLatInput(this.bivouacAnchors?.[index])
+            : null
         }))
       : [];
 
-    const normalizedAnchor = this.normalizeLngLatInput(anchor)
-      ?? this.getCoordinateAtDistance(clamped)
-      ?? null;
-
-    existingEntries.push({ distance: clamped, waypointIndex: null, anchor: normalizedAnchor });
+    existingEntries.push({ distance: clamped, waypointIndex: null });
     existingEntries.sort((a, b) => a.distance - b.distance);
 
     this.routeCutDistances = existingEntries.map((entry) => entry.distance);
     this.bivouacWaypointIndexes = existingEntries.map((entry) => entry.waypointIndex ?? null);
-    this.bivouacAnchors = existingEntries.map((entry) => entry.anchor ?? null);
     this.updateCutDisplays();
   }
 
@@ -1714,28 +2118,6 @@ export class DirectionsManager {
     }
 
     this.routeCutDistances[index] = clamped;
-    if (!Array.isArray(this.bivouacAnchors)) {
-      this.bivouacAnchors = new Array(this.routeCutDistances.length).fill(null);
-    }
-    const previewAnchor = this.normalizeLngLatInput(this.draggedBivouacLngLat);
-    let snappedAnchor = null;
-    if (previewAnchor) {
-      try {
-        const projection = this.projectOntoRoute(toLngLat(previewAnchor), Number.MAX_SAFE_INTEGER);
-        if (Array.isArray(projection?.projection?.coordinates)) {
-          snappedAnchor = projection.projection.coordinates.slice(0, 2);
-        }
-      } catch (error) {
-        console.warn('Failed to project bivouac preview', error);
-      }
-    }
-    if (snappedAnchor) {
-      this.bivouacAnchors[index] = snappedAnchor;
-    } else if (previewAnchor) {
-      this.bivouacAnchors[index] = previewAnchor;
-    } else {
-      this.bivouacAnchors[index] = this.getCoordinateAtDistance(clamped) ?? null;
-    }
     this.updateCutDisplays();
   }
 
@@ -1837,12 +2219,6 @@ export class DirectionsManager {
     while (this.bivouacWaypointIndexes.length < targetLength) {
       this.bivouacWaypointIndexes.push(null);
     }
-    if (!Array.isArray(this.bivouacAnchors)) {
-      this.bivouacAnchors = new Array(targetLength).fill(null);
-    }
-    while (this.bivouacAnchors.length < targetLength) {
-      this.bivouacAnchors.push(null);
-    }
     for (let index = 0; index < this.bivouacWaypointIndexes.length; index += 1) {
       if (index === skipIndex) {
         continue;
@@ -1857,7 +2233,6 @@ export class DirectionsManager {
   updateBivouacDistancesFromWaypoints() {
     if (!Array.isArray(this.routeCutDistances) || !this.routeCutDistances.length) {
       this.bivouacWaypointIndexes = [];
-      this.bivouacAnchors = [];
       return;
     }
 
@@ -1869,8 +2244,6 @@ export class DirectionsManager {
     const entries = this.routeCutDistances.map((distance, index) => {
       const waypointIndex = this.bivouacWaypointIndexes?.[index];
       let resolvedDistance = Number(distance);
-      const anchor = this.normalizeLngLatInput(this.bivouacAnchors?.[index]);
-      let resolvedAnchor = anchor;
       if (
         Number.isInteger(waypointIndex)
         && Array.isArray(this.waypoints?.[waypointIndex])
@@ -1882,25 +2255,11 @@ export class DirectionsManager {
         );
         if (projection && Number.isFinite(projection.distanceKm)) {
           resolvedDistance = projection.distanceKm;
-          const snapped = this.normalizeLngLatInput(projection.projection?.coordinates);
-          if (snapped) {
-            resolvedAnchor = snapped;
-          }
-        }
-      } else if (anchor) {
-        const projection = this.projectOntoRoute(toLngLat(anchor), Number.MAX_SAFE_INTEGER);
-        if (projection && Number.isFinite(projection.distanceKm)) {
-          resolvedDistance = projection.distanceKm;
-          const snapped = this.normalizeLngLatInput(projection.projection?.coordinates);
-          if (snapped) {
-            resolvedAnchor = snapped;
-          }
         }
       }
       return {
         distance: resolvedDistance,
-        waypointIndex: Number.isInteger(waypointIndex) ? waypointIndex : null,
-        anchor: resolvedAnchor
+        waypointIndex: Number.isInteger(waypointIndex) ? waypointIndex : null
       };
     });
 
@@ -1918,12 +2277,11 @@ export class DirectionsManager {
       if (filtered.some((existing) => Math.abs(existing.distance - distance) <= ROUTE_CUT_EPSILON_KM / 2)) {
         return;
       }
-      filtered.push({ distance, waypointIndex: entry.waypointIndex, anchor: entry.anchor ?? null });
+      filtered.push({ distance, waypointIndex: entry.waypointIndex });
     });
 
     this.routeCutDistances = filtered.map((entry) => entry.distance);
     this.bivouacWaypointIndexes = filtered.map((entry) => entry.waypointIndex ?? null);
-    this.bivouacAnchors = filtered.map((entry) => entry.anchor ?? null);
   }
 
   finishBivouacDrag(lngLat) {
@@ -1938,16 +2296,6 @@ export class DirectionsManager {
       return;
     }
 
-    let effectiveCoord = targetCoord;
-    try {
-      const projection = this.projectOntoRoute(toLngLat(targetCoord), Number.MAX_SAFE_INTEGER);
-      if (Array.isArray(projection?.projection?.coordinates)) {
-        effectiveCoord = projection.projection.coordinates.slice(0, 2);
-      }
-    } catch (error) {
-      console.warn('Failed to snap bivouac coordinate', error);
-    }
-
     let changed = false;
     let waypointIndex = this.findWaypointIndexForCut(cutIndex);
 
@@ -1955,8 +2303,8 @@ export class DirectionsManager {
       const currentWaypoint = Array.isArray(this.waypoints?.[waypointIndex])
         ? this.waypoints[waypointIndex]
         : null;
-      if (!currentWaypoint || !this.coordinatesMatch(currentWaypoint, effectiveCoord)) {
-        this.waypoints[waypointIndex] = [effectiveCoord[0], effectiveCoord[1]];
+      if (!currentWaypoint || !this.coordinatesMatch(currentWaypoint, targetCoord)) {
+        this.waypoints[waypointIndex] = [targetCoord[0], targetCoord[1]];
         changed = true;
       }
     } else {
@@ -1972,7 +2320,7 @@ export class DirectionsManager {
       this.normalizeLegModes();
       const splitLegIndex = Math.max(0, Math.min(this.waypoints.length - 2, clampedIndex - 1));
       const baseMode = this.legModes?.[splitLegIndex] ?? this.currentMode;
-      this.waypoints.splice(clampedIndex, 0, [effectiveCoord[0], effectiveCoord[1]]);
+      this.waypoints.splice(clampedIndex, 0, [targetCoord[0], targetCoord[1]]);
       this.legModes.splice(splitLegIndex + 1, 0, baseMode);
       this.adjustBivouacWaypointIndexesForInsertion(clampedIndex, cutIndex);
       waypointIndex = clampedIndex;
@@ -1993,11 +2341,6 @@ export class DirectionsManager {
       this.updateCutDisplays();
     }
 
-    if (!Array.isArray(this.bivouacAnchors)) {
-      this.bivouacAnchors = new Array(this.routeCutDistances.length).fill(null);
-    }
-    this.bivouacAnchors[cutIndex] = [effectiveCoord[0], effectiveCoord[1]];
-
     this.draggedBivouacLngLat = null;
     this.updateSegmentMarkers();
   }
@@ -2015,10 +2358,7 @@ export class DirectionsManager {
     event.preventDefault?.();
     event.originalEvent?.preventDefault?.();
 
-    const anchor = Array.isArray(projection?.projection?.coordinates)
-      ? projection.projection.coordinates.slice()
-      : null;
-    this.addRouteCut(projection.distanceKm, { anchor });
+    this.addRouteCut(projection.distanceKm);
   }
 
   setHintVisible(isVisible) {
@@ -3964,9 +4304,6 @@ export class DirectionsManager {
     const previousCutMappings = Array.isArray(this.bivouacWaypointIndexes)
       ? [...this.bivouacWaypointIndexes]
       : [];
-    const previousAnchors = Array.isArray(this.bivouacAnchors)
-      ? this.bivouacAnchors.map((anchor) => this.normalizeLngLatInput(anchor))
-      : [];
     this.routeGeojson = route;
     const coordinates = route?.geometry?.coordinates ?? [];
     this.routeProfile = this.buildRouteProfile(coordinates);
@@ -3988,8 +4325,7 @@ export class DirectionsManager {
           const waypointIndex = Number.isInteger(previousCutMappings[index])
             ? previousCutMappings[index]
             : null;
-          const anchor = this.normalizeLngLatInput(previousAnchors[index]);
-          return { distance, waypointIndex, anchor };
+          return { distance, waypointIndex };
         })
         .filter(Boolean);
     }
@@ -3998,16 +4334,13 @@ export class DirectionsManager {
     if (restoredEntries.length && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
       const clampedEntries = restoredEntries.map((entry) => ({
         distance: Math.max(0, Math.min(newTotalDistance, entry.distance)),
-        waypointIndex: Number.isInteger(entry.waypointIndex) ? entry.waypointIndex : null,
-        anchor: this.normalizeLngLatInput(entry.anchor)
+        waypointIndex: Number.isInteger(entry.waypointIndex) ? entry.waypointIndex : null
       }));
       this.routeCutDistances = clampedEntries.map((entry) => entry.distance);
       this.bivouacWaypointIndexes = clampedEntries.map((entry) => entry.waypointIndex);
-      this.bivouacAnchors = clampedEntries.map((entry) => entry.anchor ?? null);
       this.updateBivouacDistancesFromWaypoints();
     } else {
       this.bivouacWaypointIndexes = [];
-      this.bivouacAnchors = [];
     }
     this.updateCutDisplays();
     this.updateDistanceMarkers(route);
@@ -4114,14 +4447,43 @@ export class DirectionsManager {
       throw new Error('Not enough coordinates for routing');
     }
 
-    const route = await computeOfflineRouteSegment(coords, {
-      radiusMeters: 40000
+    const response = await fetch(`https://api.openrouteservice.org/v2/directions/${group.mode}/geojson`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
+        'Content-Type': 'application/json',
+        Authorization: '5b3ce3597851110001cf62483828a115553d4a98817dd43f61935829'
+      },
+      body: JSON.stringify({
+        coordinates: coords,
+        radiuses: Array(coords.length).fill(-1),
+        elevation: true,
+        extra_info: ['waytype', 'steepness'],
+        geometry_simplify: false,
+        preference: group.mode === 'foot-hiking' ? 'recommended' : 'fastest',
+        units: 'km',
+        language: 'en'
+      })
     });
 
-    if (!route || route.geometry?.type !== 'LineString' || !Array.isArray(route.geometry.coordinates)) {
-      throw new Error('Offline routing returned invalid geometry');
+    if (!response.ok) {
+      let message = 'Unable to fetch directions';
+      try {
+        const errorData = await response.json();
+        if (errorData?.error?.message) {
+          message = errorData.error.message;
+        }
+      } catch (_) {
+        // ignore
+      }
+      throw new Error(message);
     }
 
+    const data = await response.json();
+    const route = data?.features?.[0];
+    if (!route) {
+      throw new Error('No route returned from the directions service');
+    }
     return route;
   }
 
