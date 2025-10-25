@@ -33,6 +33,7 @@ import {
   ensureHikerMarkerImage
 } from './marker-images.js';
 import { ensureDistanceMarkerImage } from './distance-markers.js';
+import { computeOfflineRouteSegment } from './offline-network.js';
 
 export class DirectionsManager {
   constructor(map, uiElements = []) {
@@ -4113,43 +4114,14 @@ export class DirectionsManager {
       throw new Error('Not enough coordinates for routing');
     }
 
-    const response = await fetch(`https://api.openrouteservice.org/v2/directions/${group.mode}/geojson`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
-        'Content-Type': 'application/json',
-        Authorization: '5b3ce3597851110001cf62483828a115553d4a98817dd43f61935829'
-      },
-      body: JSON.stringify({
-        coordinates: coords,
-        radiuses: Array(coords.length).fill(-1),
-        elevation: true,
-        extra_info: ['waytype', 'steepness'],
-        geometry_simplify: false,
-        preference: group.mode === 'foot-hiking' ? 'recommended' : 'fastest',
-        units: 'km',
-        language: 'en'
-      })
+    const route = await computeOfflineRouteSegment(coords, {
+      radiusMeters: 40000
     });
 
-    if (!response.ok) {
-      let message = 'Unable to fetch directions';
-      try {
-        const errorData = await response.json();
-        if (errorData?.error?.message) {
-          message = errorData.error.message;
-        }
-      } catch (_) {
-        // ignore
-      }
-      throw new Error(message);
+    if (!route || route.geometry?.type !== 'LineString' || !Array.isArray(route.geometry.coordinates)) {
+      throw new Error('Offline routing returned invalid geometry');
     }
 
-    const data = await response.json();
-    const route = data?.features?.[0];
-    if (!route) {
-      throw new Error('No route returned from the directions service');
-    }
     return route;
   }
 
