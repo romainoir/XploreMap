@@ -246,7 +246,7 @@ async function init() {
 
   applyGpxData(EMPTY_COLLECTION);
 
-  map.on('load', () => {
+  const initializeDirections = () => {
     try {
       const directionsManager = new DirectionsManager(map, {
         toggleButton: directionsToggle,
@@ -288,7 +288,28 @@ async function init() {
     } catch (error) {
       console.error('Failed to initialize directions manager', error);
     }
-  });
+  };
+
+  let directionsAttached = false;
+
+  const attachDirections = () => {
+    if (directionsAttached) {
+      return;
+    }
+    directionsAttached = true;
+    if (typeof map.isStyleLoaded === 'function' && map.isStyleLoaded()) {
+      initializeDirections();
+    } else {
+      map.once('style.load', initializeDirections);
+    }
+  };
+
+  if (typeof map.loaded === 'function' && map.loaded()) {
+    attachDirections();
+  } else {
+    map.once('load', attachDirections);
+    map.once('styledata', attachDirections);
+  }
 
   if (gpxImportButton && gpxFileInput) {
     gpxImportButton.addEventListener('click', () => {
