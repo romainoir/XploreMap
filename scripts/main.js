@@ -163,11 +163,8 @@ async function init() {
   const directionsDock = document.getElementById('directionsDock');
   const directionsControl = document.getElementById('directionsControl');
   const transportModes = directionsControl?.querySelectorAll('[data-mode]') ?? [];
-  const reverseButton = document.getElementById('reverseRouteButton');
+  const swapButton = document.getElementById('swapDirectionsButton');
   const clearButton = document.getElementById('clearDirectionsButton');
-  const undoButton = document.getElementById('undoDirectionsButton');
-  const redoButton = document.getElementById('redoDirectionsButton');
-  const playButton = document.getElementById('playRouteButton');
   const routeStats = document.getElementById('routeStats');
   const elevationChart = document.getElementById('elevationChart');
   const directionsInfoButton = document.getElementById('directionsInfoButton');
@@ -248,21 +245,18 @@ async function init() {
 
   map.on('load', () => {
     try {
-      const directionsManager = new DirectionsManager(map, {
-        toggleButton: directionsToggle,
-        dock: directionsDock,
-        control: directionsControl,
-        modeButtons: transportModes,
-        reverseButton,
+      const directionsManager = new DirectionsManager(map, [
+        directionsToggle,
+        directionsDock,
+        directionsControl,
+        transportModes,
+        swapButton,
         clearButton,
-        undoButton,
-        redoButton,
-        playButton,
         routeStats,
         elevationChart,
-        infoButton: directionsInfoButton,
-        hint: directionsHint
-      });
+        directionsInfoButton,
+        directionsHint
+      ]);
       directionsManager.setRouteSegmentsListener((payload) => {
         const isObject = payload && typeof payload === 'object';
         const dataset = isObject && payload.full ? payload.full : payload;
