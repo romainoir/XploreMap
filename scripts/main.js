@@ -182,6 +182,16 @@ async function init() {
   let debugNetworkVisible = false;
   let debugNetworkData = null;
 
+  const bringDebugNetworkToFront = () => {
+    if (!map || typeof map.moveLayer !== 'function') {
+      return;
+    }
+    if (!map.getLayer(DEBUG_NETWORK_LAYER_ID)) {
+      return;
+    }
+    map.moveLayer(DEBUG_NETWORK_LAYER_ID);
+  };
+
   const ensureMapStyleReady = () => {
     if (!map || typeof map.isStyleLoaded !== 'function') {
       return Promise.resolve();
@@ -262,6 +272,7 @@ async function init() {
       });
     }
     map.setLayoutProperty(DEBUG_NETWORK_LAYER_ID, 'visibility', 'visible');
+    bringDebugNetworkToFront();
     return true;
   };
 
@@ -757,6 +768,10 @@ async function init() {
 
     const symbolLayers = (map.getStyle().layers || []).filter(l => l.type === 'symbol');
     symbolLayers.forEach(l => map.moveLayer(l.id));
+
+    if (debugNetworkVisible) {
+      bringDebugNetworkToFront();
+    }
 
     syncTerrainAndSky();
 
