@@ -170,11 +170,106 @@ async function init() {
   const elevationChart = document.getElementById('elevationChart');
   const directionsInfoButton = document.getElementById('directionsInfoButton');
   const directionsHint = document.getElementById('directionsHint');
+  const debugNetworkButton = document.getElementById('toggleDebugNetwork');
 
   const offlineRouter = new OfflineRouter({ networkUrl: './data/offline-network.geojson' });
   offlineRouter.ensureReady().catch((error) => {
     console.error('Failed to preload offline routing network', error);
   });
+
+  const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
+  const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
+  let debugNetworkVisible = false;
+  let debugNetworkData = null;
+
+  const ensureMapStyleReady = () => {
+    if (!map || typeof map.isStyleLoaded !== 'function') {
+      return Promise.resolve();
+    }
+    if (map.isStyleLoaded()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      map.once('style.load', resolve);
+    });
+  };
+
+  const updateDebugNetworkButton = (active) => {
+    if (!debugNetworkButton) return;
+    debugNetworkButton.classList.toggle('active', active);
+    debugNetworkButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+    debugNetworkButton.textContent = active ? 'Hide routing network' : 'Show routing network';
+  };
+
+  const loadDebugNetworkData = async () => {
+    if (debugNetworkData) {
+      return debugNetworkData;
+    }
+    try {
+      await offlineRouter.ensureReady();
+      const dataset = offlineRouter.getNetworkGeoJSON();
+      if (dataset && typeof dataset === 'object') {
+        debugNetworkData = dataset;
+        return debugNetworkData;
+      }
+    } catch (error) {
+      console.warn('Failed to access cached offline network data', error);
+    }
+    try {
+      const response = await fetch('./data/offline-network.geojson', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Debug network request failed (${response.status})`);
+      }
+      debugNetworkData = await response.json();
+      return debugNetworkData;
+    } catch (error) {
+      console.error('Failed to load offline routing network for debugging', error);
+      return null;
+    }
+  };
+
+  const applyDebugNetworkLayer = async () => {
+    const data = await loadDebugNetworkData();
+    if (!data) {
+      return false;
+    }
+    await ensureMapStyleReady();
+    if (!map.getSource(DEBUG_NETWORK_SOURCE_ID)) {
+      map.addSource(DEBUG_NETWORK_SOURCE_ID, { type: 'geojson', data });
+    } else {
+      map.getSource(DEBUG_NETWORK_SOURCE_ID).setData(data);
+    }
+    if (!map.getLayer(DEBUG_NETWORK_LAYER_ID)) {
+      map.addLayer({
+        id: DEBUG_NETWORK_LAYER_ID,
+        type: 'line',
+        source: DEBUG_NETWORK_SOURCE_ID,
+        paint: {
+          'line-color': '#2d7bd6',
+          'line-width': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            10,
+            1.1,
+            13,
+            1.8,
+            16,
+            3.2
+          ],
+          'line-opacity': 0.65
+        }
+      });
+    }
+    map.setLayoutProperty(DEBUG_NETWORK_LAYER_ID, 'visibility', 'visible');
+    return true;
+  };
+
+  const hideDebugNetworkLayer = () => {
+    if (map.getLayer(DEBUG_NETWORK_LAYER_ID)) {
+      map.setLayoutProperty(DEBUG_NETWORK_LAYER_ID, 'visibility', 'none');
+    }
+  };
 
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
@@ -289,6 +384,39 @@ async function init() {
       console.error('Failed to initialize directions manager', error);
     }
   });
+
+  map.on('style.load', () => {
+    if (!debugNetworkVisible) {
+      return;
+    }
+    applyDebugNetworkLayer().catch((error) => {
+      console.error('Failed to reapply routing network debug layer', error);
+    });
+  });
+
+  if (debugNetworkButton) {
+    updateDebugNetworkButton(false);
+    debugNetworkButton.addEventListener('click', async () => {
+      const targetState = !debugNetworkVisible;
+      debugNetworkButton.disabled = true;
+      try {
+        if (targetState) {
+          const applied = await applyDebugNetworkLayer();
+          if (!applied) {
+            window.alert('Unable to display the routing network. Check the console for details.');
+          }
+          debugNetworkVisible = applied;
+          updateDebugNetworkButton(applied);
+        } else {
+          hideDebugNetworkLayer();
+          debugNetworkVisible = false;
+          updateDebugNetworkButton(false);
+        }
+      } finally {
+        debugNetworkButton.disabled = false;
+      }
+    });
+  }
 
   if (gpxImportButton && gpxFileInput) {
     gpxImportButton.addEventListener('click', () => {

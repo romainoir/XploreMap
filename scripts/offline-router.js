@@ -91,11 +91,16 @@ export class OfflineRouter {
 
     this.nodes = new Map();
     this.nodeList = [];
+    this.networkGeoJSON = null;
     this.readyPromise = null;
   }
 
   supportsMode(mode) {
     return this.supportedModes.has(mode);
+  }
+
+  getNetworkGeoJSON() {
+    return this.networkGeoJSON;
   }
 
   async ensureReady() {
@@ -117,7 +122,8 @@ export class OfflineRouter {
       throw new Error(`Failed to load offline network (${response.status})`);
     }
     const data = await response.json();
-    this.buildGraph(data);
+    this.networkGeoJSON = data && typeof data === 'object' ? data : null;
+    this.buildGraph(this.networkGeoJSON);
   }
 
   buildGraph(geojson) {
