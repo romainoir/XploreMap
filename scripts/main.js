@@ -15,6 +15,7 @@ import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from 
 import { DirectionsManager } from '../directions_test.js';
 import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
 import { waitForSWReady } from './service-worker.js';
+import { OfflineRouter } from './offline-router.js';
 
 const PEAK_POINTER_ID = 'peak-pointer';
 
@@ -170,6 +171,11 @@ async function init() {
   const directionsInfoButton = document.getElementById('directionsInfoButton');
   const directionsHint = document.getElementById('directionsHint');
 
+  const offlineRouter = new OfflineRouter({ networkUrl: './data/offline-network.geojson' });
+  offlineRouter.ensureReady().catch((error) => {
+    console.error('Failed to preload offline routing network', error);
+  });
+
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
   let currentGpxData = EMPTY_COLLECTION;
@@ -256,7 +262,7 @@ async function init() {
         elevationChart,
         directionsInfoButton,
         directionsHint
-      ]);
+      ], { router: offlineRouter });
       directionsManager.setRouteSegmentsListener((payload) => {
         const isObject = payload && typeof payload === 'object';
         const dataset = isObject && payload.full ? payload.full : payload;
