@@ -556,6 +556,7 @@ export class DirectionsManager {
     this.routeHoverTooltip = null;
 
     this.routeCutDistances = [];
+    this.bivouacWaypointIndexes = [];
     this.cutSegments = [];
     this.routeSegmentsListener = null;
     this.elevationResizeObserver = null;
@@ -1202,6 +1203,7 @@ export class DirectionsManager {
 
   resetRouteCuts() {
     this.routeCutDistances = [];
+    this.bivouacWaypointIndexes = [];
     this.cutSegments = [];
     this.updateSegmentMarkers();
     this.updateDistanceMarkers(this.routeGeojson);
@@ -2060,8 +2062,20 @@ export class DirectionsManager {
       return;
     }
 
-    this.routeCutDistances.push(clamped);
-    this.routeCutDistances.sort((a, b) => a - b);
+    const existingEntries = Array.isArray(this.routeCutDistances)
+      ? this.routeCutDistances.map((cut, index) => ({
+          distance: cut,
+          waypointIndex: Array.isArray(this.bivouacWaypointIndexes)
+            ? this.bivouacWaypointIndexes[index] ?? null
+            : null
+        }))
+      : [];
+
+    existingEntries.push({ distance: clamped, waypointIndex: null });
+    existingEntries.sort((a, b) => a.distance - b.distance);
+
+    this.routeCutDistances = existingEntries.map((entry) => entry.distance);
+    this.bivouacWaypointIndexes = existingEntries.map((entry) => entry.waypointIndex ?? null);
     this.updateCutDisplays();
   }
 
@@ -2107,27 +2121,222 @@ export class DirectionsManager {
     this.updateCutDisplays();
   }
 
-  finishBivouacDrag(lngLat) {
-    const previewLngLat = Array.isArray(this.draggedBivouacLngLat)
-      ? this.draggedBivouacLngLat
-      : null;
-    let target = null;
+  normalizeLngLatInput(value) {
+    if (value && Number.isFinite(value.lng) && Number.isFinite(value.lat)) {
+      return [value.lng, value.lat];
+    }
+    if (Array.isArray(value) && value.length >= 2) {
+      const [lng, lat] = value;
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        return [lng, lat];
+      }
+    }
+    return null;
+  }
 
-    if (lngLat && Number.isFinite(lngLat.lng) && Number.isFinite(lngLat.lat)) {
-      target = lngLat;
-    } else if (Array.isArray(lngLat) && lngLat.length >= 2) {
-      target = toLngLat(lngLat);
-    } else if (previewLngLat) {
-      target = toLngLat(previewLngLat);
+  findWaypointIndexForCut(cutIndex) {
+    if (!Number.isInteger(cutIndex) || cutIndex < 0) {
+      return null;
+    }
+    if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
+      return null;
     }
 
-    if (target) {
-      const projection = this.projectOntoRoute(target, Number.MAX_SAFE_INTEGER);
-      if (projection && Number.isFinite(projection.distanceKm)) {
-        this.updateDraggedBivouac(projection.distanceKm);
-      } else {
-        this.updateCutDisplays();
+    const mappedIndex = this.bivouacWaypointIndexes?.[cutIndex];
+    if (Number.isInteger(mappedIndex) && Array.isArray(this.waypoints[mappedIndex])) {
+      return mappedIndex;
+    }
+
+    const distance = this.routeCutDistances?.[cutIndex];
+    if (!Number.isFinite(distance)) {
+      return null;
+    }
+
+    const targetCoord = this.getCoordinateAtDistance(distance);
+    if (!Array.isArray(targetCoord) || targetCoord.length < 2) {
+      return null;
+    }
+
+    for (let index = 1; index < this.waypoints.length - 1; index += 1) {
+      const waypoint = this.waypoints[index];
+      if (!Array.isArray(waypoint) || waypoint.length < 2) {
+        continue;
       }
+      if (this.coordinatesMatch(waypoint, targetCoord)) {
+        if (!Array.isArray(this.bivouacWaypointIndexes)) {
+          this.bivouacWaypointIndexes = [];
+        }
+        this.bivouacWaypointIndexes[cutIndex] = index;
+        return index;
+      }
+    }
+
+    return null;
+  }
+
+  findLegIndexForDistance(distanceKm) {
+    if (!Number.isFinite(distanceKm)) {
+      return null;
+    }
+    const segmentIndex = this.findSegmentIndexByDistance(distanceKm);
+    if (Number.isInteger(segmentIndex)) {
+      const legIndex = this.segmentLegLookup?.[segmentIndex];
+      if (Number.isInteger(legIndex)) {
+        return legIndex;
+      }
+    }
+    const totalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
+    if (Number.isFinite(totalDistance) && totalDistance > 0) {
+      if (distanceKm >= totalDistance - ROUTE_CUT_EPSILON_KM) {
+        return Math.max(0, this.waypoints.length - 2);
+      }
+    }
+    return null;
+  }
+
+  getWaypointInsertionIndexForCut(cutIndex) {
+    if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
+      return null;
+    }
+    const distance = this.routeCutDistances?.[cutIndex];
+    if (Number.isFinite(distance)) {
+      const legIndex = this.findLegIndexForDistance(distance);
+      if (Number.isInteger(legIndex)) {
+        return legIndex + 1;
+      }
+    }
+    const fallback = cutIndex + 1;
+    const maxIndex = Math.max(1, this.waypoints.length - 1);
+    return Math.max(1, Math.min(maxIndex, fallback));
+  }
+
+  adjustBivouacWaypointIndexesForInsertion(insertionIndex, skipIndex = null) {
+    if (!Array.isArray(this.bivouacWaypointIndexes)) {
+      this.bivouacWaypointIndexes = new Array(this.routeCutDistances.length).fill(null);
+      return;
+    }
+    const targetLength = this.routeCutDistances.length;
+    while (this.bivouacWaypointIndexes.length < targetLength) {
+      this.bivouacWaypointIndexes.push(null);
+    }
+    for (let index = 0; index < this.bivouacWaypointIndexes.length; index += 1) {
+      if (index === skipIndex) {
+        continue;
+      }
+      const waypointIndex = this.bivouacWaypointIndexes[index];
+      if (Number.isInteger(waypointIndex) && waypointIndex >= insertionIndex) {
+        this.bivouacWaypointIndexes[index] = waypointIndex + 1;
+      }
+    }
+  }
+
+  updateBivouacDistancesFromWaypoints() {
+    if (!Array.isArray(this.routeCutDistances) || !this.routeCutDistances.length) {
+      this.bivouacWaypointIndexes = [];
+      return;
+    }
+
+    const totalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
+    if (!Number.isFinite(totalDistance) || totalDistance <= ROUTE_CUT_EPSILON_KM) {
+      return;
+    }
+
+    const entries = this.routeCutDistances.map((distance, index) => {
+      const waypointIndex = this.bivouacWaypointIndexes?.[index];
+      let resolvedDistance = Number(distance);
+      if (
+        Number.isInteger(waypointIndex)
+        && Array.isArray(this.waypoints?.[waypointIndex])
+        && this.waypoints[waypointIndex].length >= 2
+      ) {
+        const projection = this.projectOntoRoute(
+          toLngLat(this.waypoints[waypointIndex]),
+          Number.MAX_SAFE_INTEGER
+        );
+        if (projection && Number.isFinite(projection.distanceKm)) {
+          resolvedDistance = projection.distanceKm;
+        }
+      }
+      return {
+        distance: resolvedDistance,
+        waypointIndex: Number.isInteger(waypointIndex) ? waypointIndex : null
+      };
+    });
+
+    entries.sort((a, b) => a.distance - b.distance);
+
+    const filtered = [];
+    entries.forEach((entry) => {
+      const distance = Math.max(0, Math.min(totalDistance, entry.distance));
+      if (!Number.isFinite(distance)) {
+        return;
+      }
+      if (distance <= ROUTE_CUT_EPSILON_KM || totalDistance - distance <= ROUTE_CUT_EPSILON_KM) {
+        return;
+      }
+      if (filtered.some((existing) => Math.abs(existing.distance - distance) <= ROUTE_CUT_EPSILON_KM / 2)) {
+        return;
+      }
+      filtered.push({ distance, waypointIndex: entry.waypointIndex });
+    });
+
+    this.routeCutDistances = filtered.map((entry) => entry.distance);
+    this.bivouacWaypointIndexes = filtered.map((entry) => entry.waypointIndex ?? null);
+  }
+
+  finishBivouacDrag(lngLat) {
+    const cutIndex = Number.isInteger(this.draggedBivouacIndex) ? this.draggedBivouacIndex : null;
+    const targetCoord = this.normalizeLngLatInput(lngLat)
+      ?? this.normalizeLngLatInput(this.draggedBivouacLngLat);
+
+    if (cutIndex === null || !targetCoord) {
+      this.updateCutDisplays();
+      this.draggedBivouacLngLat = null;
+      this.updateSegmentMarkers();
+      return;
+    }
+
+    let changed = false;
+    let waypointIndex = this.findWaypointIndexForCut(cutIndex);
+
+    if (Number.isInteger(waypointIndex)) {
+      const currentWaypoint = Array.isArray(this.waypoints?.[waypointIndex])
+        ? this.waypoints[waypointIndex]
+        : null;
+      if (!currentWaypoint || !this.coordinatesMatch(currentWaypoint, targetCoord)) {
+        this.waypoints[waypointIndex] = [targetCoord[0], targetCoord[1]];
+        changed = true;
+      }
+    } else {
+      const insertionIndex = this.getWaypointInsertionIndexForCut(cutIndex);
+      if (!Number.isInteger(insertionIndex)) {
+        this.updateCutDisplays();
+        this.draggedBivouacLngLat = null;
+        this.updateSegmentMarkers();
+        return;
+      }
+      const maxIndex = Math.max(1, this.waypoints.length - 1);
+      const clampedIndex = Math.max(1, Math.min(maxIndex, insertionIndex));
+      this.normalizeLegModes();
+      const splitLegIndex = Math.max(0, Math.min(this.waypoints.length - 2, clampedIndex - 1));
+      const baseMode = this.legModes?.[splitLegIndex] ?? this.currentMode;
+      this.waypoints.splice(clampedIndex, 0, [targetCoord[0], targetCoord[1]]);
+      this.legModes.splice(splitLegIndex + 1, 0, baseMode);
+      this.adjustBivouacWaypointIndexesForInsertion(clampedIndex, cutIndex);
+      waypointIndex = clampedIndex;
+      changed = true;
+    }
+
+    if (changed) {
+      if (!Array.isArray(this.bivouacWaypointIndexes)) {
+        this.bivouacWaypointIndexes = new Array(this.routeCutDistances.length).fill(null);
+      }
+      this.bivouacWaypointIndexes[cutIndex] = waypointIndex;
+      this.updateWaypoints();
+      if (this.waypoints.length >= 2) {
+        this.getRoute();
+      }
+      this.recordHistoryState();
     } else {
       this.updateCutDisplays();
     }
@@ -4092,6 +4301,9 @@ export class DirectionsManager {
   applyRoute(route) {
     this.hideRouteHover();
     const previousCuts = Array.isArray(this.routeCutDistances) ? [...this.routeCutDistances] : [];
+    const previousCutMappings = Array.isArray(this.bivouacWaypointIndexes)
+      ? [...this.bivouacWaypointIndexes]
+      : [];
     this.routeGeojson = route;
     const coordinates = route?.geometry?.coordinates ?? [];
     this.routeProfile = this.buildRouteProfile(coordinates);
@@ -4102,26 +4314,33 @@ export class DirectionsManager {
       this.rebuildSegmentData();
     }
     const newTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
-    let restoredCuts = [];
+    let restoredEntries = [];
     if (previousCuts.length && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
-      restoredCuts = previousCuts
-        .map((value) => (Number.isFinite(value) ? value : null))
-        .filter((value) => Number.isFinite(value));
+      restoredEntries = previousCuts
+        .map((value, index) => {
+          const distance = Number(value);
+          if (!Number.isFinite(distance)) {
+            return null;
+          }
+          const waypointIndex = Number.isInteger(previousCutMappings[index])
+            ? previousCutMappings[index]
+            : null;
+          return { distance, waypointIndex };
+        })
+        .filter(Boolean);
     }
 
     this.resetRouteCuts();
-    if (restoredCuts.length && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
-      const clamped = restoredCuts
-        .map((value) => Math.max(0, Math.min(newTotalDistance, value)))
-        .filter((value) => value > ROUTE_CUT_EPSILON_KM && newTotalDistance - value > ROUTE_CUT_EPSILON_KM)
-        .sort((a, b) => a - b);
-      const uniqueCuts = [];
-      clamped.forEach((value) => {
-        if (!uniqueCuts.some((existing) => Math.abs(existing - value) <= ROUTE_CUT_EPSILON_KM / 2)) {
-          uniqueCuts.push(value);
-        }
-      });
-      this.routeCutDistances = uniqueCuts;
+    if (restoredEntries.length && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
+      const clampedEntries = restoredEntries.map((entry) => ({
+        distance: Math.max(0, Math.min(newTotalDistance, entry.distance)),
+        waypointIndex: Number.isInteger(entry.waypointIndex) ? entry.waypointIndex : null
+      }));
+      this.routeCutDistances = clampedEntries.map((entry) => entry.distance);
+      this.bivouacWaypointIndexes = clampedEntries.map((entry) => entry.waypointIndex);
+      this.updateBivouacDistancesFromWaypoints();
+    } else {
+      this.bivouacWaypointIndexes = [];
     }
     this.updateCutDisplays();
     this.updateDistanceMarkers(route);
