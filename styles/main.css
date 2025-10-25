@@ -115,6 +115,11 @@ html, body { margin:0; height:100%; }
   text-align: center;
 }
 
+.debug-tools {
+  display: grid;
+  gap: 6px;
+}
+
 .directions-ui {
   display: grid;
   gap: 6px;
