@@ -4,10 +4,10 @@ const EMPTY_COLLECTION = {
 };
 
 const MODE_COLORS = {
-  'foot-hiking': '#f4a259',
-  'cycling-regular': '#7bd389',
-  'driving-car': '#7aa5f7',
-  'manual-draw': '#b993d6'
+  'foot-hiking': '#f6a662',
+  'cycling-regular': '#8fd3a5',
+  'driving-car': '#f19595',
+  'manual-draw': '#c3a3e0'
 };
 
 const HOVER_PIXEL_TOLERANCE = 12;
