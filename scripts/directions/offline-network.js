@@ -41,6 +41,21 @@ function ensurePathFinderCtor(module) {
   return null;
 }
 
+function computeEdgeLength(edge) {
+  const coordinates = edge?.geometry?.coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return Infinity;
+  }
+
+  let total = 0;
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const previous = coordinates[index - 1];
+    const current = coordinates[index];
+    total += haversineDistanceMeters(previous, current);
+  }
+  return Number.isFinite(total) && total > 0 ? total : Infinity;
+}
+
 async function loadPathFinder() {
   if (!networkState.loadPromise) {
     networkState.loadPromise = Promise.all([
@@ -58,7 +73,12 @@ async function loadPathFinder() {
           throw new Error('GeoJSON PathFinder module is not available');
         }
         networkState.pathFinder = new PathFinderCtor(data, {
-          precision: 1e-5
+          precision: 1e-5,
+          weightFn: (edge) => {
+            const weight = computeEdgeLength(edge);
+            return Number.isFinite(weight) ? weight : Infinity;
+          },
+          edgeDataReduceFn: (accumulated, edge) => edge
         });
         return networkState.pathFinder;
       })
