@@ -12,7 +12,7 @@ import {
   VERSATILES_LOCAL_JSON
 } from './constants.js';
 import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from './gpx.js';
-import { DirectionsManager } from '../directions_test.js';
+import { DirectionsManager } from './directions/index.js';
 import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
 import { waitForSWReady } from './service-worker.js';
 
