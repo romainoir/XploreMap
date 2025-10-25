@@ -50,6 +50,26 @@ function mergeCoordinates(preferred, fallback) {
   return target;
 }
 
+function buildDirectSegment(startCoord, endCoord) {
+  if (!Array.isArray(startCoord) || startCoord.length < 2 || !Array.isArray(endCoord) || endCoord.length < 2) {
+    return null;
+  }
+
+  const start = mergeCoordinates(startCoord, startCoord);
+  const end = mergeCoordinates(endCoord, endCoord);
+
+  const distanceKm = haversineDistanceKm(start, end);
+  const ascent = Math.max(0, (end[2] ?? 0) - (start[2] ?? 0));
+  const descent = Math.max(0, (start[2] ?? 0) - (end[2] ?? 0));
+
+  return {
+    coordinates: [start, end],
+    distanceKm,
+    ascent,
+    descent
+  };
+}
+
 export class OfflineRouter {
   constructor(options = {}) {
     const {
@@ -270,7 +290,14 @@ export class OfflineRouter {
     if (!startSnap || !endSnap) {
       throw new Error('Offline network is unavailable for routing');
     }
-    if (startSnap.distanceMeters > this.maxSnapDistanceMeters || endSnap.distanceMeters > this.maxSnapDistanceMeters) {
+    const startTooFar = startSnap.distanceMeters > this.maxSnapDistanceMeters;
+    const endTooFar = endSnap.distanceMeters > this.maxSnapDistanceMeters;
+
+    if (startTooFar || endTooFar) {
+      const direct = buildDirectSegment(startCoord, endCoord);
+      if (direct) {
+        return direct;
+      }
       throw new Error('Selected points are too far from the offline routing network');
     }
 
