@@ -471,11 +471,7 @@ export class OfflineRouter {
       if (!segment || !Array.isArray(segment.coordinates) || segment.coordinates.length < 2) {
         throw new Error('No offline route found between the selected points');
       }
-      if (!coordinates.length) {
-        coordinates.push(...segment.coordinates);
-      } else {
-        coordinates.push(...segment.coordinates.slice(1));
-      }
+      appendCoordinateSequence(coordinates, segment.coordinates);
       totalDistanceKm += segment.distanceKm;
       totalAscent += segment.ascent;
       totalDescent += segment.descent;
