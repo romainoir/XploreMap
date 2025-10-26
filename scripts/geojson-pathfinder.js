@@ -1,4 +1,6 @@
 const EARTH_RADIUS_KM = 6371;
+const EARTH_RADIUS_METERS = EARTH_RADIUS_KM * 1000;
+const DEG_TO_RAD = Math.PI / 180;
 
 export function haversineDistanceKm(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
@@ -51,6 +53,89 @@ function coordsEqual(a, b) {
     return false;
   }
   return Math.abs(a[0] - b[0]) <= 1e-7 && Math.abs(a[1] - b[1]) <= 1e-7;
+}
+
+function interpolateElevation(start, end, fraction) {
+  if (!Number.isFinite(fraction)) {
+    return 0;
+  }
+  const startElevation = Number.isFinite(start?.[2]) ? start[2] : 0;
+  const endElevation = Number.isFinite(end?.[2]) ? end[2] : 0;
+  return startElevation + (endElevation - startElevation) * fraction;
+}
+
+function toProjectedMeters(coord, referenceLat) {
+  if (!Array.isArray(coord) || coord.length < 2) {
+    return null;
+  }
+  const latRad = coord[1] * DEG_TO_RAD;
+  const lngRad = coord[0] * DEG_TO_RAD;
+  const refRad = referenceLat * DEG_TO_RAD;
+  const x = EARTH_RADIUS_METERS * lngRad * Math.cos(refRad);
+  const y = EARTH_RADIUS_METERS * latRad;
+  return { x, y };
+}
+
+function projectPointOnSegment(point, start, end) {
+  if (!Array.isArray(point) || !Array.isArray(start) || !Array.isArray(end)) {
+    return null;
+  }
+  if (start.length < 2 || end.length < 2) {
+    return null;
+  }
+  const referenceLat = (start[1] + end[1]) / 2;
+  const projectedPoint = toProjectedMeters(point, referenceLat);
+  const projectedStart = toProjectedMeters(start, referenceLat);
+  const projectedEnd = toProjectedMeters(end, referenceLat);
+  if (!projectedPoint || !projectedStart || !projectedEnd) {
+    return null;
+  }
+
+  const segment = {
+    x: projectedEnd.x - projectedStart.x,
+    y: projectedEnd.y - projectedStart.y
+  };
+  const lengthSq = segment.x * segment.x + segment.y * segment.y;
+  if (lengthSq === 0) {
+    return null;
+  }
+
+  const fromStart = {
+    x: projectedPoint.x - projectedStart.x,
+    y: projectedPoint.y - projectedStart.y
+  };
+  let fraction = (fromStart.x * segment.x + fromStart.y * segment.y) / lengthSq;
+  if (!Number.isFinite(fraction)) {
+    return null;
+  }
+  fraction = Math.max(0, Math.min(1, fraction));
+
+  const closest = {
+    x: projectedStart.x + segment.x * fraction,
+    y: projectedStart.y + segment.y * fraction
+  };
+
+  const cosRef = Math.cos(referenceLat * DEG_TO_RAD);
+  const lng = cosRef !== 0
+    ? (closest.x / (EARTH_RADIUS_METERS * cosRef)) / DEG_TO_RAD
+    : point[0];
+  const lat = (closest.y / EARTH_RADIUS_METERS) / DEG_TO_RAD;
+  const elevation = interpolateElevation(start, end, fraction);
+  const snapPoint = [lng, lat, elevation];
+
+  const totalDistanceKm = haversineDistanceKm(start, end);
+  const distanceToStartKm = totalDistanceKm * fraction;
+  const distanceToEndKm = totalDistanceKm * (1 - fraction);
+  const distanceKm = haversineDistanceKm(point, snapPoint);
+
+  return {
+    point: snapPoint,
+    distanceKm,
+    distanceMeters: distanceKm * 1000,
+    fraction,
+    distanceToStartKm,
+    distanceToEndKm
+  };
 }
 
 export class GeoJsonPathFinder {
@@ -221,6 +306,74 @@ export class GeoJsonPathFinder {
       distanceKm: bestDistance,
       distanceMeters: bestDistance * 1000
     };
+  }
+
+  findNearestPoint(coord) {
+    if (!Array.isArray(coord) || coord.length < 2 || !this.nodeList.length) {
+      return null;
+    }
+
+    let bestSnap = null;
+
+    this.nodeList.forEach((node) => {
+      const distanceKm = haversineDistanceKm(node.coord, coord);
+      if (!bestSnap || distanceKm < bestSnap.distanceKm) {
+        bestSnap = {
+          type: 'node',
+          node,
+          point: cloneCoordinate(node.coord),
+          distanceKm,
+          distanceMeters: distanceKm * 1000
+        };
+      }
+    });
+
+    if (!bestSnap) {
+      return null;
+    }
+
+    const processedEdges = new Set();
+
+    this.nodes.forEach((node) => {
+      node.edges.forEach((edge) => {
+        const targetKey = edge.key;
+        if (!targetKey) {
+          return;
+        }
+        const pairKey = node.key <= targetKey ? `${node.key}|${targetKey}` : `${targetKey}|${node.key}`;
+        if (processedEdges.has(pairKey)) {
+          return;
+        }
+        processedEdges.add(pairKey);
+        const target = this.nodes.get(edge.key);
+        if (!target) {
+          return;
+        }
+        const projection = projectPointOnSegment(coord, node.coord, target.coord);
+        if (!projection) {
+          return;
+        }
+        if (projection.fraction <= 1e-6 || projection.fraction >= 1 - 1e-6) {
+          return;
+        }
+        if (bestSnap && projection.distanceKm >= bestSnap.distanceKm) {
+          return;
+        }
+        bestSnap = {
+          type: 'edge',
+          edgeStart: node,
+          edgeEnd: target,
+          point: projection.point,
+          distanceKm: projection.distanceKm,
+          distanceMeters: projection.distanceMeters,
+          fraction: projection.fraction,
+          distanceToStartKm: projection.distanceToStartKm,
+          distanceToEndKm: projection.distanceToEndKm
+        };
+      });
+    });
+
+    return bestSnap;
   }
 
   buildPath(startKey, endKey, mode) {
