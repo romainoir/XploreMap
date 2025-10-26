@@ -6,6 +6,7 @@ const DEFAULT_SPEEDS = Object.freeze({
   'driving-car': 40
 });
 const DEFAULT_SNAP_TOLERANCE_METERS = 500;
+const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 8;
 const MIN_BRIDGE_DISTANCE_METERS = 1500;
 const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
 // Use a much tighter tolerance when we deduplicate consecutive coordinates so we only
@@ -411,7 +412,11 @@ export class OfflineRouter {
     this.maxSnapDistanceMeters = Number.isFinite(maxSnapDistanceMeters)
       ? maxSnapDistanceMeters
       : DEFAULT_SNAP_TOLERANCE_METERS;
-    this.pathFinderOptions = { tolerance: 1e-3, ...(pathFinderOptions || {}) };
+    this.pathFinderOptions = {
+      tolerance: 1e-3,
+      nodeConnectionToleranceMeters: DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
+      ...(pathFinderOptions || {})
+    };
 
     this.networkGeoJSON = null;
     this.pathFinder = null;
