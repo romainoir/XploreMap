@@ -1,6 +1,8 @@
 const EARTH_RADIUS_KM = 6371;
 const EARTH_RADIUS_METERS = EARTH_RADIUS_KM * 1000;
 const DEG_TO_RAD = Math.PI / 180;
+const NODE_CONNECTION_TOLERANCE_METERS = 3;
+const NODE_CONNECTION_TOLERANCE_KM = NODE_CONNECTION_TOLERANCE_METERS / 1000;
 
 export function haversineDistanceKm(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
@@ -204,16 +206,34 @@ export class GeoJsonPathFinder {
       return null;
     }
     const key = createNodeKey(rounded[0], rounded[1], rounded[2]);
-    if (!this.nodes.has(key)) {
-      const node = {
-        key,
-        coord: rounded,
-        edges: new Map()
-      };
-      this.nodes.set(key, node);
-      this.nodeList.push(node);
+    if (this.nodes.has(key)) {
+      return this.nodes.get(key);
     }
-    return this.nodes.get(key);
+
+    let nearestNode = null;
+    let nearestDistanceKm = Infinity;
+
+    for (let index = 0; index < this.nodeList.length; index += 1) {
+      const candidate = this.nodeList[index];
+      const distanceKm = haversineDistanceKm(candidate.coord, rounded);
+      if (distanceKm < NODE_CONNECTION_TOLERANCE_KM && distanceKm < nearestDistanceKm) {
+        nearestNode = candidate;
+        nearestDistanceKm = distanceKm;
+      }
+    }
+
+    if (nearestNode) {
+      return nearestNode;
+    }
+
+    const node = {
+      key,
+      coord: rounded,
+      edges: new Map()
+    };
+    this.nodes.set(key, node);
+    this.nodeList.push(node);
+    return node;
   }
 
   _addDirectedEdge(source, target, edge) {
