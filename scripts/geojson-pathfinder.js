@@ -3,6 +3,9 @@ const EARTH_RADIUS_METERS = EARTH_RADIUS_KM * 1000;
 const DEG_TO_RAD = Math.PI / 180;
 const NODE_CONNECTION_TOLERANCE_METERS = 8;
 const NODE_CONNECTION_TOLERANCE_KM = NODE_CONNECTION_TOLERANCE_METERS / 1000;
+// Treat distances under ~1 mm as effectively identical when we need to allow
+// nodes to merge despite the avoid-key guard.
+const DUPLICATE_NODE_DISTANCE_KM = 1e-6;
 const METERS_PER_LATITUDE_DEGREE = 111132;
 
 export function haversineDistanceKm(a, b) {
@@ -227,7 +230,7 @@ export class GeoJsonPathFinder {
     return [lng, lat, elevation];
   }
 
-  _getOrCreateNode(coord) {
+  _getOrCreateNode(coord, options = {}) {
     const rounded = this._roundCoord(coord);
     if (!rounded) {
       return null;
@@ -237,13 +240,22 @@ export class GeoJsonPathFinder {
       return this.nodes.get(key);
     }
 
+    const avoidKey = typeof options?.avoidKey === 'string'
+      ? options.avoidKey
+      : null;
     let nearestNode = null;
     let nearestDistanceKm = Infinity;
     const toleranceKm = this.nodeConnectionToleranceKm;
 
     for (let index = 0; index < this.nodeList.length; index += 1) {
       const candidate = this.nodeList[index];
+      if (!candidate || !Array.isArray(candidate.coord)) {
+        continue;
+      }
       const distanceKm = haversineDistanceKm(candidate.coord, rounded);
+      if (avoidKey && candidate.key === avoidKey && distanceKm > DUPLICATE_NODE_DISTANCE_KM) {
+        continue;
+      }
       if (distanceKm < toleranceKm && distanceKm < nearestDistanceKm) {
         nearestNode = candidate;
         nearestDistanceKm = distanceKm;
@@ -306,7 +318,9 @@ export class GeoJsonPathFinder {
       }
       for (let index = 0; index < coords.length - 1; index += 1) {
         const start = this._getOrCreateNode(coords[index]);
-        const end = this._getOrCreateNode(coords[index + 1]);
+        const end = this._getOrCreateNode(coords[index + 1], {
+          avoidKey: start?.key
+        });
         if (!start || !end) {
           continue;
         }
