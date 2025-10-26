@@ -511,6 +511,8 @@ async function init() {
     }
 
     try {
+      const params = new URLSearchParams(window.location.search);
+      const enableWaypointLogging = params.has('directionsDebug');
       const directionsManager = new DirectionsManager(map, [
         directionsToggle,
         directionsDock,
@@ -522,7 +524,10 @@ async function init() {
         elevationChart,
         directionsInfoButton,
         directionsHint
-      ], { router: offlineRouter });
+      ], {
+        router: offlineRouter,
+        enableWaypointLogging
+      });
       directionsManager.setRouteSegmentsListener((payload) => {
         const isObject = payload && typeof payload === 'object';
         const dataset = isObject && payload.full ? payload.full : payload;
