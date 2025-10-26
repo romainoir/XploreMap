@@ -414,8 +414,6 @@ export class DirectionsManager {
     this.modeColors = { ...MODE_COLORS };
 
     this.latestMetrics = null;
-    this.elevationSampler = null;
-    this.endpointNetworkCallback = null;
 
     this.isDragging = false;
     this.draggedWaypointIndex = null;
@@ -833,14 +831,6 @@ export class DirectionsManager {
 
   setNetworkPreparationCallback(callback) {
     this.networkPreparationCallback = typeof callback === 'function' ? callback : null;
-  }
-
-  setElevationSampler(callback) {
-    this.elevationSampler = typeof callback === 'function' ? callback : null;
-  }
-
-  setEndpointNetworkCallback(callback) {
-    this.endpointNetworkCallback = typeof callback === 'function' ? callback : null;
   }
 
   async prepareNetwork(context = {}) {
@@ -1689,63 +1679,6 @@ export class DirectionsManager {
       return [];
     }
     return this.waypoints.map((coord) => (Array.isArray(coord) ? coord.slice() : coord));
-  }
-
-  normalizeRouteCoordinate(coord, fallback) {
-    const fallbackArray = Array.isArray(fallback) ? fallback.slice(0, 3) : null;
-    const baseArray = Array.isArray(coord) ? coord : [];
-
-    const parseNumber = (value) => {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    };
-
-    const lng = parseNumber(baseArray[0] ?? fallbackArray?.[0]);
-    const lat = parseNumber(baseArray[1] ?? fallbackArray?.[1]);
-
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-      return fallbackArray ? fallbackArray.slice() : [];
-    }
-
-    let elevation = null;
-    if (baseArray.length > 2 && Number.isFinite(baseArray[2])) {
-      elevation = Number(baseArray[2]);
-    } else if (fallbackArray && fallbackArray.length > 2 && Number.isFinite(fallbackArray[2])) {
-      elevation = Number(fallbackArray[2]);
-    }
-
-    const result = [lng, lat];
-    if (Number.isFinite(elevation)) {
-      result.push(elevation);
-    }
-    return result;
-  }
-
-  async enrichRouteWithElevations(route) {
-    if (!route || typeof this.elevationSampler !== 'function') {
-      return;
-    }
-
-    const coordinates = Array.isArray(route?.geometry?.coordinates)
-      ? route.geometry.coordinates
-      : null;
-    if (!coordinates || coordinates.length < 2) {
-      return;
-    }
-
-    const input = coordinates.map((coord) => (Array.isArray(coord) ? coord.slice(0, 3) : []));
-
-    try {
-      const enriched = await this.elevationSampler(input);
-      if (!Array.isArray(enriched) || enriched.length !== coordinates.length) {
-        return;
-      }
-      route.geometry.coordinates = enriched.map((coord, index) =>
-        this.normalizeRouteCoordinate(coord, coordinates[index])
-      );
-    } catch (error) {
-      console.warn('Failed to sample terrain elevations for route', error);
-    }
   }
 
   normalizeWaypointForLog(coord) {
@@ -4480,9 +4413,8 @@ export class DirectionsManager {
     }
   }
 
-  async applyRoute(route) {
+  applyRoute(route) {
     this.hideRouteHover();
-    await this.enrichRouteWithElevations(route);
     const previousCuts = Array.isArray(this.routeCutDistances) ? [...this.routeCutDistances] : [];
     const previousTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
     this.routeGeojson = route;
@@ -4526,18 +4458,6 @@ export class DirectionsManager {
     this.updateCutDisplays();
     this.updateDistanceMarkers(route);
     this.updateStats(route);
-
-    if (typeof this.endpointNetworkCallback === 'function') {
-      try {
-        this.endpointNetworkCallback({
-          waypoints: this.snapshotWaypoints(),
-          mode: this.currentMode,
-          route: this.routeGeojson
-        });
-      } catch (error) {
-        console.error('Endpoint network callback failed', error);
-      }
-    }
   }
 
   async getRoute() {
@@ -4556,7 +4476,7 @@ export class DirectionsManager {
       if (!route || !route.geometry) {
         throw new Error('No route returned from the offline router');
       }
-      await this.applyRoute(route);
+      this.applyRoute(route);
     } catch (error) {
       console.error('Failed to compute route', error);
     }
