@@ -15,7 +15,11 @@ import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from 
 import { DirectionsManager } from '../directions_test.js';
 import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
 import { waitForSWReady } from './service-worker.js';
-import { OfflineRouter, DEFAULT_NODE_CONNECTION_TOLERANCE_METERS } from './offline-router.js';
+import {
+  OfflineRouter,
+  DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
+  MAX_NODE_CONNECTION_TOLERANCE_METERS
+} from './offline-router.js';
 import { extractOpenFreeMapNetwork, computeExpandedBounds as expandNetworkBounds } from './openfreemap-network.js';
 
 const PEAK_POINTER_ID = 'peak-pointer';
@@ -331,6 +335,14 @@ async function init() {
     }
   };
 
+  const clampNodeToleranceMeters = (value) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+      return null;
+    }
+    return Math.min(numericValue, MAX_NODE_CONNECTION_TOLERANCE_METERS);
+  };
+
   const formatNodeToleranceLabel = (meters) => {
     const value = Number(meters);
     if (!Number.isFinite(value) || value < 0) {
@@ -346,20 +358,19 @@ async function init() {
   };
 
   const updateNodeToleranceDisplay = (meters) => {
-    const numericValue = Number(meters);
+    const normalized = clampNodeToleranceMeters(meters);
+    const numericValue = normalized ?? DEFAULT_NODE_CONNECTION_TOLERANCE_METERS;
     if (nodeToleranceValue) {
       nodeToleranceValue.textContent = formatNodeToleranceLabel(numericValue);
     }
-    if (nodeToleranceSlider && Number.isFinite(numericValue)) {
+    if (nodeToleranceSlider) {
       nodeToleranceSlider.value = String(numericValue);
     }
   };
 
   const applyNodeToleranceMeters = (meters, { reroute = false } = {}) => {
-    const numericValue = Number(meters);
-    if (!Number.isFinite(numericValue) || numericValue < 0) {
-      return;
-    }
+    const normalized = clampNodeToleranceMeters(meters);
+    const numericValue = normalized ?? DEFAULT_NODE_CONNECTION_TOLERANCE_METERS;
 
     updateNodeToleranceDisplay(numericValue);
 
@@ -748,16 +759,11 @@ async function init() {
 
   if (nodeToleranceSlider) {
     nodeToleranceSlider.addEventListener('input', (event) => {
-      const value = Number(event.currentTarget?.value);
-      applyNodeToleranceMeters(Number.isFinite(value) ? value : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS);
+      applyNodeToleranceMeters(event.currentTarget?.value);
     });
 
     nodeToleranceSlider.addEventListener('change', (event) => {
-      const value = Number(event.currentTarget?.value);
-      applyNodeToleranceMeters(
-        Number.isFinite(value) ? value : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
-        { reroute: true }
-      );
+      applyNodeToleranceMeters(event.currentTarget?.value, { reroute: true });
     });
   }
 
