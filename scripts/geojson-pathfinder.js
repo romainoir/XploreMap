@@ -50,7 +50,7 @@ function coordsEqual(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b)) {
     return false;
   }
-  return Math.abs(a[0] - b[0]) <= 1e-6 && Math.abs(a[1] - b[1]) <= 1e-6;
+  return Math.abs(a[0] - b[0]) <= 1e-7 && Math.abs(a[1] - b[1]) <= 1e-7;
 }
 
 export class GeoJsonPathFinder {
@@ -63,7 +63,7 @@ export class GeoJsonPathFinder {
       modeSeparator
     } = options;
 
-    this.precision = Number.isFinite(precision) && precision > 0 ? precision : 1e6;
+    this.precision = Number.isFinite(precision) && precision > 0 ? precision : 1e7;
     this.elevationPrecision = Number.isFinite(elevationPrecision) && elevationPrecision >= 0
       ? elevationPrecision
       : 2;
