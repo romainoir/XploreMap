@@ -361,6 +361,30 @@ async function init() {
       && inner.north <= outer.north + epsilon;
   };
 
+  const mergeBounds = (...boundsList) => {
+    let west = Infinity;
+    let east = -Infinity;
+    let south = Infinity;
+    let north = -Infinity;
+
+    boundsList.forEach((entry) => {
+      const plain = boundsToPlain(entry);
+      if (!plain) {
+        return;
+      }
+      if (plain.west < west) west = plain.west;
+      if (plain.east > east) east = plain.east;
+      if (plain.south < south) south = plain.south;
+      if (plain.north > north) north = plain.north;
+    });
+
+    if (![west, east, south, north].every((value) => Number.isFinite(value))) {
+      return null;
+    }
+
+    return { west, east, south, north };
+  };
+
   const computeCoordinateBounds = (coordinates) => {
     if (!Array.isArray(coordinates) || !coordinates.length) {
       return null;
@@ -423,17 +447,23 @@ async function init() {
     return !boundsContains(offlineNetworkCoverage, current);
   };
 
-  const refreshOfflineNetwork = async () => {
+  const refreshOfflineNetwork = async (options = {}) => {
     if (!map) {
       return null;
     }
     if (offlineNetworkRefreshPromise) {
       return offlineNetworkRefreshPromise;
     }
+    const { waypointBounds = null } = options || {};
     offlineNetworkRefreshPromise = (async () => {
       try {
+        const mapBounds = typeof map.getBounds === 'function' ? map.getBounds() : null;
+        const combinedBounds = mergeBounds(mapBounds, waypointBounds);
+        const fallbackBounds = boundsToPlain(mapBounds) ?? boundsToPlain(waypointBounds);
+        const targetBounds = combinedBounds ?? fallbackBounds;
         const network = await extractOpenFreeMapNetwork(map, {
-          boundsPaddingRatio: OFFLINE_NETWORK_COVERAGE_PADDING_RATIO
+          boundsPaddingRatio: OFFLINE_NETWORK_COVERAGE_PADDING_RATIO,
+          targetBounds
         });
         if (network && Array.isArray(network.features) && network.features.length) {
           offlineRouter.setNetworkGeoJSON(network);
@@ -441,14 +471,10 @@ async function init() {
             ? offlineRouter.getNetworkDebugGeoJSON({ intersectionsOnly: true })
             : network;
           debugNetworkData = debugDataset || network;
-          if (typeof map.getBounds === 'function') {
-            offlineNetworkCoverage = expandNetworkBounds(
-              map.getBounds(),
-              OFFLINE_NETWORK_COVERAGE_PADDING_RATIO * 1.5
-            );
-          } else {
-            offlineNetworkCoverage = null;
-          }
+          const coverageSource = targetBounds ?? fallbackBounds;
+          offlineNetworkCoverage = coverageSource
+            ? expandNetworkBounds(coverageSource, OFFLINE_NETWORK_COVERAGE_PADDING_RATIO * 1.5)
+            : null;
           if (debugNetworkVisible) {
             await applyDebugNetworkLayer();
           }
@@ -613,7 +639,7 @@ async function init() {
         };
 
         if (lacksWaypointCoverage() || lacksMapCoverage()) {
-          await refreshOfflineNetwork();
+          await refreshOfflineNetwork({ waypointBounds: bounds });
         }
       });
     } catch (error) {

@@ -7,7 +7,8 @@ const DEFAULT_OPTIONS = Object.freeze({
   sourceId: 'openmaptiles',
   sourceLayer: 'transportation',
   boundsPaddingRatio: 0.2,
-  coordinatePrecision: 7
+  coordinatePrecision: 7,
+  targetBounds: null
 });
 const COORD_DUPLICATE_EPSILON = 1e-9;
 const ALLOWED_VALUES = new Set(['yes', 'designated', 'permissive', 'official', 'destination', 'unknown']);
@@ -319,7 +320,13 @@ export async function extractOpenFreeMapNetwork(map, options = {}) {
   }
 
   const merged = { ...DEFAULT_OPTIONS, ...(options || {}) };
-  const { sourceId, sourceLayer, boundsPaddingRatio, coordinatePrecision } = merged;
+  const {
+    sourceId,
+    sourceLayer,
+    boundsPaddingRatio,
+    coordinatePrecision,
+    targetBounds
+  } = merged;
 
   await waitForMapIdle(map);
 
@@ -339,8 +346,8 @@ export async function extractOpenFreeMapNetwork(map, options = {}) {
     return { type: 'FeatureCollection', features: [] };
   }
 
-  const mapBounds = map.getBounds ? map.getBounds() : null;
-  const expandedBounds = expandBounds(mapBounds, Number.isFinite(boundsPaddingRatio) ? boundsPaddingRatio : 0.2);
+  const boundsSource = targetBounds ?? (map.getBounds ? map.getBounds() : null);
+  const expandedBounds = expandBounds(boundsSource, Number.isFinite(boundsPaddingRatio) ? boundsPaddingRatio : 0.2);
 
   const featuresByGeometry = new Map();
 
