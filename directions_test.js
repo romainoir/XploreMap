@@ -1773,6 +1773,44 @@ export class DirectionsManager {
       .filter(Boolean);
   }
 
+  buildWaypointListEntries(summary = []) {
+    if (!Array.isArray(summary) || !summary.length) {
+      return [];
+    }
+
+    return summary
+      .map((item, index) => {
+        if (!item) {
+          return null;
+        }
+
+        const waypointNumber = index + 1;
+        const rawLng = Number(item.rawLng);
+        const rawLat = Number(item.rawLat);
+        const hasValidCoordinates = Number.isFinite(rawLng) && Number.isFinite(rawLat);
+        const coordinateText = hasValidCoordinates
+          ? `[${rawLng.toFixed(6)}, ${rawLat.toFixed(6)}]`
+          : null;
+        const roleLabel = typeof item.label === 'string' && item.label.length ? item.label : item.role;
+        const descriptionBase = `Waypoint ${waypointNumber}`;
+        const descriptionRole = roleLabel ? ` (${roleLabel})` : '';
+        const description = hasValidCoordinates
+          ? `${descriptionBase}${descriptionRole}: ${coordinateText}`
+          : `${descriptionBase}${descriptionRole}`;
+
+        return {
+          waypoint: `Waypoint ${waypointNumber}`,
+          index: item.index,
+          role: item.role,
+          label: roleLabel,
+          coordinates: hasValidCoordinates ? [rawLng, rawLat] : null,
+          coordinatesText: coordinateText,
+          description
+        };
+      })
+      .filter(Boolean);
+  }
+
   haveWaypointSummariesChanged(previous = [], next = []) {
     if (!Array.isArray(previous) || !Array.isArray(next)) {
       return true;
@@ -2101,6 +2139,10 @@ export class DirectionsManager {
 
     const beforeWaypointSummary = this.buildWaypointLogSummary(before);
     const afterWaypointSummary = this.buildWaypointLogSummary(after);
+    const beforeWaypointList = this.buildWaypointListEntries(beforeWaypointSummary);
+    const afterWaypointList = this.buildWaypointListEntries(afterWaypointSummary);
+    const beforeWaypointDescriptions = beforeWaypointList.map((item) => item.description).filter(Boolean);
+    const afterWaypointDescriptions = afterWaypointList.map((item) => item.description).filter(Boolean);
     const beforeBivouacSummary = this.buildBivouacLogSummary(Array.isArray(bivouacBefore) ? bivouacBefore : []);
     const afterBivouacSummary = this.buildBivouacLogSummary(
       Array.isArray(bivouacAfter) ? bivouacAfter : this.routeCutDistances
@@ -2132,6 +2174,12 @@ export class DirectionsManager {
       if (afterWaypointSummary.length) {
         summaryPayload.currentWaypoints = afterWaypointSummary;
       }
+      if (beforeWaypointDescriptions.length) {
+        summaryPayload.waypointListBefore = beforeWaypointDescriptions;
+      }
+      if (afterWaypointDescriptions.length) {
+        summaryPayload.waypointListAfter = afterWaypointDescriptions;
+      }
       if (afterBivouacSummary.length) {
         summaryPayload.currentBivouacs = afterBivouacSummary;
       }
@@ -2159,6 +2207,12 @@ export class DirectionsManager {
             console.log('Waypoint positions (after):');
             console.table(afterWaypointSummary);
           }
+          if (beforeWaypointDescriptions.length) {
+            console.log('Waypoint list (before):', beforeWaypointDescriptions);
+          }
+          if (afterWaypointDescriptions.length) {
+            console.log('Waypoint list (after):', afterWaypointDescriptions);
+          }
           if (beforeBivouacSummary.length) {
             console.log('Bivouac positions (before):');
             console.table(beforeBivouacSummary);
@@ -2178,6 +2232,12 @@ export class DirectionsManager {
           }
           if (afterWaypointSummary.length) {
             console.log('Waypoint positions (after):', afterWaypointSummary);
+          }
+          if (beforeWaypointDescriptions.length) {
+            console.log('Waypoint list (before):', beforeWaypointDescriptions);
+          }
+          if (afterWaypointDescriptions.length) {
+            console.log('Waypoint list (after):', afterWaypointDescriptions);
           }
           if (beforeBivouacSummary.length) {
             console.log('Bivouac positions (before):', beforeBivouacSummary);
@@ -2234,6 +2294,9 @@ export class DirectionsManager {
           }
           if (afterWaypointSummary.length) {
             console.log('Waypoint positions (after):', afterWaypointSummary);
+          }
+          if (afterWaypointDescriptions.length) {
+            console.log('Waypoint list (after):', afterWaypointDescriptions);
           }
           if (afterBivouacSummary.length) {
             console.log('Bivouac positions (after):', afterBivouacSummary);
