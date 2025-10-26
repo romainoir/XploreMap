@@ -9,6 +9,160 @@ const DEFAULT_SNAP_TOLERANCE_METERS = 500;
 const MIN_BRIDGE_DISTANCE_METERS = 1500;
 const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
 
+const OFFLINE_ROUTER_DEBUG_PREFIX = '[OfflineRouter]';
+
+function formatDistanceKm(distanceKm) {
+  const km = Number(distanceKm);
+  if (!Number.isFinite(km)) {
+    return 'n/a';
+  }
+  if (Math.abs(km) >= 1) {
+    return `${km.toFixed(2)} km`;
+  }
+  return `${(km * 1000).toFixed(0)} m`;
+}
+
+function formatElevationMeters(value) {
+  const meters = Number(value);
+  if (!Number.isFinite(meters)) {
+    return '0 m';
+  }
+  return `${meters.toFixed(0)} m`;
+}
+
+function formatCoordinateForDebug(coord) {
+  if (!Array.isArray(coord) || coord.length < 2) {
+    return 'n/a';
+  }
+  const lng = Number(coord[0]);
+  const lat = Number(coord[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return 'n/a';
+  }
+  const base = `${lng.toFixed(5)}, ${lat.toFixed(5)}`;
+  const elevation = coord.length > 2 ? Number(coord[2]) : null;
+  if (Number.isFinite(elevation)) {
+    return `${base} (${elevation.toFixed(0)}m)`;
+  }
+  return base;
+}
+
+function formatSnapForDebug(snap) {
+  if (!snap) {
+    return 'none';
+  }
+  const distanceLabel = formatDistanceKm(snap.distanceKm ?? (snap.distanceMeters ? snap.distanceMeters / 1000 : NaN));
+  if (snap.type === 'node') {
+    const key = snap.node?.key ?? 'unknown';
+    return `node ${key} @ ${distanceLabel}`;
+  }
+  if (snap.type === 'edge') {
+    const startKey = snap.edgeStart?.key ?? 'unknown';
+    const endKey = snap.edgeEnd?.key ?? 'unknown';
+    const fraction = Number(snap.fraction);
+    const fractionLabel = Number.isFinite(fraction) ? `${(fraction * 100).toFixed(1)}%` : 'n/a';
+    return `edge ${startKey}→${endKey} @ ${distanceLabel} (fraction ${fractionLabel})`;
+  }
+  return `${snap.type ?? 'unknown'} @ ${distanceLabel}`;
+}
+
+function formatMetricsForDebug(metrics) {
+  if (!metrics) {
+    return 'none';
+  }
+  return `${formatDistanceKm(metrics.distanceKm)} (↑${formatElevationMeters(metrics.ascent)} ↓${formatElevationMeters(metrics.descent)})`;
+}
+
+function formatPlanConnectors(plan) {
+  if (!plan) {
+    return null;
+  }
+  const segments = [];
+  if (plan.startConnector) {
+    segments.push(`start-waypoint: ${formatMetricsForDebug(plan.startConnector)}`);
+  }
+  if (plan.startApproach) {
+    segments.push(`start-approach: ${formatMetricsForDebug(plan.startApproach)}`);
+  }
+  segments.push(`network: ${formatDistanceKm(plan.baseDistanceKm)}`);
+  if (plan.endApproach) {
+    segments.push(`end-approach: ${formatMetricsForDebug(plan.endApproach)}`);
+  }
+  if (plan.endConnector) {
+    segments.push(`end-waypoint: ${formatMetricsForDebug(plan.endConnector)}`);
+  }
+  return segments.join(' | ');
+}
+
+function logSegmentDebug(info) {
+  if (typeof console !== 'object' || typeof console.info !== 'function') {
+    return;
+  }
+
+  const lines = [];
+  const indexLabel = Number.isInteger(info.segmentIndex)
+    ? `Segment ${info.segmentIndex}`
+    : 'Segment';
+  const modeLabel = info.mode ? ` [${info.mode}]` : '';
+  const resultLabel = info.result?.type ? ` – ${info.result.type}` : '';
+  lines.push(`${indexLabel}${modeLabel}${resultLabel}`);
+  lines.push(`  Waypoints: ${formatCoordinateForDebug(info.startWaypoint)} → ${formatCoordinateForDebug(info.endWaypoint)}`);
+  lines.push(`  Snap start: ${formatSnapForDebug(info.startSnap)}${info.startTooFar ? ' (too far)' : ''}`);
+  lines.push(`  Snap end: ${formatSnapForDebug(info.endSnap)}${info.endTooFar ? ' (too far)' : ''}`);
+  lines.push(`  Options: start=${info.startOptionsCount ?? 0}, end=${info.endOptionsCount ?? 0}`);
+
+  if (info.result?.type === 'network' && info.plan) {
+    const startKey = info.plan.startNodeKey ?? 'unknown';
+    const endKey = info.plan.endNodeKey ?? 'unknown';
+    lines.push(`  Network nodes: ${startKey} → ${endKey}`);
+    lines.push(`  Distance breakdown: ${formatPlanConnectors(info.plan)}`);
+    lines.push(`  Total: ${formatDistanceKm(info.result.segment?.distanceKm)} (↑${formatElevationMeters(info.result.segment?.ascent)} ↓${formatElevationMeters(info.result.segment?.descent)})`);
+    lines.push(`  Coordinates: ${Array.isArray(info.result.segment?.coordinates) ? info.result.segment.coordinates.length : 0}`);
+  } else if (info.result?.type === 'direct') {
+    lines.push(`  Direct distance: ${formatDistanceKm(info.result.segment?.distanceKm)}`);
+  } else if (info.result?.type === 'failed') {
+    const reason = info.result.reason ? ` (${info.result.reason})` : '';
+    lines.push(`  Failed${reason}`);
+  }
+
+  if (info.result?.note) {
+    lines.push(`  Note: ${info.result.note}`);
+  }
+
+  console.info(`${OFFLINE_ROUTER_DEBUG_PREFIX} ${lines.join('\n')}`);
+}
+
+function logPreservedSegmentDebug(info) {
+  if (typeof console !== 'object' || typeof console.info !== 'function') {
+    return;
+  }
+  const { segmentIndex, mode, startWaypoint, endWaypoint, metrics, coordinateCount } = info;
+  const indexLabel = Number.isInteger(segmentIndex)
+    ? `Segment ${segmentIndex}`
+    : 'Segment';
+  const modeLabel = mode ? ` [${mode}]` : '';
+  const lines = [];
+  lines.push(`${indexLabel}${modeLabel} – preserved`);
+  lines.push(`  Waypoints: ${formatCoordinateForDebug(startWaypoint)} → ${formatCoordinateForDebug(endWaypoint)}`);
+  lines.push(`  Distance: ${formatDistanceKm(metrics?.distanceKm)} (↑${formatElevationMeters(metrics?.ascent)} ↓${formatElevationMeters(metrics?.descent)})`);
+  lines.push(`  Coordinates: ${coordinateCount ?? 0}`);
+  console.info(`${OFFLINE_ROUTER_DEBUG_PREFIX} ${lines.join('\n')}`);
+}
+
+function logRouteSummaryDebug(info) {
+  if (typeof console !== 'object' || typeof console.info !== 'function') {
+    return;
+  }
+  const { segmentCount, totalDistanceKm, totalAscent, totalDescent, coordinateCount, mode } = info;
+  const lines = [];
+  const modeLabel = mode ? ` [${mode}]` : '';
+  lines.push(`Route summary${modeLabel}`);
+  lines.push(`  Segments: ${segmentCount}`);
+  lines.push(`  Distance: ${formatDistanceKm(totalDistanceKm)} (↑${formatElevationMeters(totalAscent)} ↓${formatElevationMeters(totalDescent)})`);
+  lines.push(`  Coordinates: ${coordinateCount}`);
+  console.info(`${OFFLINE_ROUTER_DEBUG_PREFIX} ${lines.join('\n')}`);
+}
+
 function coordinatesAlmostEqual(a, b, toleranceMeters = COORDINATE_EQUALITY_TOLERANCE_METERS) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
     return false;
@@ -272,6 +426,12 @@ export class OfflineRouter {
       const start = waypoints[index];
       const end = waypoints[index + 1];
       const preserved = preservedMap.get(index);
+      const debugContext = {
+        segmentIndex: index,
+        mode: travelMode,
+        startWaypoint: start,
+        endWaypoint: end
+      };
       if (preserved && preserved.endIndex === index + 1) {
         const preservedCoords = preserved.coordinates.map((coord) => coord.slice());
         if (preservedCoords.length >= 2) {
@@ -295,11 +455,19 @@ export class OfflineRouter {
               start_index: index,
               end_index: index + 1
             });
+            logPreservedSegmentDebug({
+              segmentIndex: index,
+              mode: travelMode,
+              startWaypoint: start,
+              endWaypoint: end,
+              metrics,
+              coordinateCount: preservedCoords.length
+            });
             continue;
           }
         }
       }
-      const segment = this.findPathBetween(start, end, travelMode);
+      const segment = this.findPathBetween(start, end, travelMode, debugContext);
       if (!segment || !Array.isArray(segment.coordinates) || segment.coordinates.length < 2) {
         throw new Error('No offline route found between the selected points');
       }
@@ -327,6 +495,15 @@ export class OfflineRouter {
       ascent: totalAscent,
       descent: totalDescent
     };
+
+    logRouteSummaryDebug({
+      segmentCount: segments.length,
+      totalDistanceKm,
+      totalAscent,
+      totalDescent,
+      coordinateCount: coordinates.length,
+      mode: travelMode
+    });
 
     return {
       type: 'Feature',
@@ -395,10 +572,25 @@ export class OfflineRouter {
     return Math.max(0, hours * 3600);
   }
 
-  findPathBetween(startCoord, endCoord, mode) {
+  findPathBetween(startCoord, endCoord, mode, debugContext = {}) {
     if (!this.pathFinder) {
       throw new Error('Offline network is unavailable for routing');
     }
+
+    const debugInfo = {
+      segmentIndex: Number.isInteger(debugContext.segmentIndex) ? debugContext.segmentIndex : null,
+      mode,
+      startWaypoint: Array.isArray(startCoord) ? startCoord : debugContext.startWaypoint,
+      endWaypoint: Array.isArray(endCoord) ? endCoord : debugContext.endWaypoint,
+      startOptionsCount: 0,
+      endOptionsCount: 0
+    };
+
+    const returnWithDebug = (result) => {
+      logSegmentDebug({ ...debugInfo, result });
+      return result.segment;
+    };
+
     const startSnap = this.pathFinder.findNearestPoint(startCoord);
     const endSnap = this.pathFinder.findNearestPoint(endCoord);
     if (!startSnap || !endSnap) {
@@ -408,13 +600,30 @@ export class OfflineRouter {
     const startTooFar = startSnap.distanceMeters > this.maxSnapDistanceMeters;
     const endTooFar = endSnap.distanceMeters > this.maxSnapDistanceMeters;
 
+    debugInfo.startSnap = startSnap;
+    debugInfo.endSnap = endSnap;
+    debugInfo.startTooFar = !!startTooFar;
+    debugInfo.endTooFar = !!endTooFar;
+
     const maxBridgeDistanceMeters = Math.max(this.maxSnapDistanceMeters, MIN_BRIDGE_DISTANCE_METERS);
     if ((startTooFar && startSnap.distanceMeters > maxBridgeDistanceMeters)
       || (endTooFar && endSnap.distanceMeters > maxBridgeDistanceMeters)) {
       const direct = buildDirectSegment(startCoord, endCoord);
       if (direct) {
-        return direct;
+        return returnWithDebug({
+          type: 'direct',
+          segment: direct,
+          reason: 'snap-distance'
+        });
       }
+      logSegmentDebug({
+        ...debugInfo,
+        result: {
+          type: 'failed',
+          segment: null,
+          reason: 'snap-distance'
+        }
+      });
       throw new Error('Selected points are too far from the offline routing network');
     }
 
@@ -447,6 +656,8 @@ export class OfflineRouter {
       }
     }
 
+    debugInfo.startOptionsCount = startOptions.length;
+
     const endOptions = [];
     if (endPoint) {
       const pushEndOption = (node) => {
@@ -470,12 +681,22 @@ export class OfflineRouter {
       }
     }
 
+    debugInfo.endOptionsCount = endOptions.length;
+
     if (!startOptions.length || !endOptions.length) {
       const direct = buildDirectSegment(startCoord, endCoord);
       if (direct) {
-        return direct;
+        return returnWithDebug({
+          type: 'direct',
+          segment: direct,
+          reason: 'no-network-options'
+        });
       }
-      return null;
+      return returnWithDebug({
+        type: 'failed',
+        segment: null,
+        reason: 'no-network-options'
+      });
     }
 
     let bestPlan = null;
@@ -515,7 +736,14 @@ export class OfflineRouter {
             endOption,
             totalDistanceKm,
             totalAscent,
-            totalDescent
+            totalDescent,
+            baseDistanceKm,
+            baseAscent,
+            baseDescent,
+            startConnector,
+            endConnector,
+            startApproach: startSegment,
+            endApproach: endSegment
           };
         }
       });
@@ -524,12 +752,30 @@ export class OfflineRouter {
     if (!bestPlan) {
       const direct = buildDirectSegment(startCoord, endCoord);
       if (direct) {
-        return direct;
+        return returnWithDebug({
+          type: 'direct',
+          segment: direct,
+          reason: 'no-path'
+        });
       }
-      return null;
+      return returnWithDebug({
+        type: 'failed',
+        segment: null,
+        reason: 'no-path'
+      });
     }
 
     const coordinates = [];
+
+    debugInfo.plan = {
+      startNodeKey: bestPlan.startOption?.key,
+      endNodeKey: bestPlan.endOption?.key,
+      baseDistanceKm: bestPlan.baseDistanceKm,
+      startConnector: bestPlan.startConnector,
+      endConnector: bestPlan.endConnector,
+      startApproach: bestPlan.startApproach,
+      endApproach: bestPlan.endApproach
+    };
 
     if (startConnector) {
       appendCoordinateSequence(coordinates, [startConnector.start, startConnector.end]);
@@ -567,16 +813,29 @@ export class OfflineRouter {
     if (uniqueCoordinates.length < 2) {
       const direct = buildDirectSegment(startCoord, endCoord);
       if (direct) {
-        return direct;
+        return returnWithDebug({
+          type: 'direct',
+          segment: direct,
+          reason: 'insufficient-coordinates'
+        });
       }
-      return null;
+      return returnWithDebug({
+        type: 'failed',
+        segment: null,
+        reason: 'insufficient-coordinates'
+      });
     }
 
-    return {
+    const result = {
       coordinates: uniqueCoordinates,
       distanceKm: bestPlan.totalDistanceKm,
       ascent: bestPlan.totalAscent,
       descent: bestPlan.totalDescent
     };
+
+    return returnWithDebug({
+      type: 'network',
+      segment: result
+    });
   }
 }
