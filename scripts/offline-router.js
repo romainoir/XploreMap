@@ -52,16 +52,19 @@ function formatSnapForDebug(snap) {
     return 'none';
   }
   const distanceLabel = formatDistanceKm(snap.distanceKm ?? (snap.distanceMeters ? snap.distanceMeters / 1000 : NaN));
+  const pointLabel = Array.isArray(snap.point) ? formatCoordinateForDebug(snap.point) : null;
   if (snap.type === 'node') {
     const key = snap.node?.key ?? 'unknown';
-    return `node ${key} @ ${distanceLabel}`;
+    const pointSuffix = pointLabel ? ` (point ${pointLabel})` : '';
+    return `node ${key} @ ${distanceLabel}${pointSuffix}`;
   }
   if (snap.type === 'edge') {
     const startKey = snap.edgeStart?.key ?? 'unknown';
     const endKey = snap.edgeEnd?.key ?? 'unknown';
     const fraction = Number(snap.fraction);
     const fractionLabel = Number.isFinite(fraction) ? `${(fraction * 100).toFixed(1)}%` : 'n/a';
-    return `edge ${startKey}→${endKey} @ ${distanceLabel} (fraction ${fractionLabel})`;
+    const pointSuffix = pointLabel ? `, point ${pointLabel}` : '';
+    return `edge ${startKey}→${endKey} @ ${distanceLabel} (fraction ${fractionLabel}${pointSuffix})`;
   }
   return `${snap.type ?? 'unknown'} @ ${distanceLabel}`;
 }
@@ -94,6 +97,70 @@ function formatPlanConnectors(plan) {
   return segments.join(' | ');
 }
 
+function connectorReferenceCoordinate(connector, position) {
+  if (!connector) {
+    return null;
+  }
+  if (position === 'start') {
+    return Array.isArray(connector.end) ? connector.end : null;
+  }
+  return Array.isArray(connector.start) ? connector.start : null;
+}
+
+function computeWaypointShiftKm({ waypoint, connector, segmentCoordinates, position }) {
+  if (!Array.isArray(waypoint) || waypoint.length < 2) {
+    return null;
+  }
+  const connectorDistanceKm = connector && Number.isFinite(connector.distanceKm)
+    ? connector.distanceKm
+    : null;
+  if (connectorDistanceKm != null) {
+    return connectorDistanceKm;
+  }
+  let reference = connectorReferenceCoordinate(connector, position);
+  if (!reference && Array.isArray(segmentCoordinates) && segmentCoordinates.length) {
+    const index = position === 'start' ? 0 : segmentCoordinates.length - 1;
+    reference = segmentCoordinates[index];
+  }
+  if (!Array.isArray(reference) || reference.length < 2) {
+    return null;
+  }
+  return haversineDistanceKm(waypoint, reference);
+}
+
+function formatWaypointShiftForDebug(info) {
+  if (!info || !info.result || !info.result.segment) {
+    return null;
+  }
+  const coordinates = Array.isArray(info.result.segment.coordinates)
+    ? info.result.segment.coordinates
+    : null;
+  const plan = info.plan || {};
+  const startShiftKm = computeWaypointShiftKm({
+    waypoint: info.startWaypoint,
+    connector: plan.startConnector,
+    segmentCoordinates: coordinates,
+    position: 'start'
+  });
+  const endShiftKm = computeWaypointShiftKm({
+    waypoint: info.endWaypoint,
+    connector: plan.endConnector,
+    segmentCoordinates: coordinates,
+    position: 'end'
+  });
+  if (startShiftKm == null && endShiftKm == null) {
+    return null;
+  }
+  const parts = [];
+  if (startShiftKm != null) {
+    parts.push(`start=${formatDistanceKm(startShiftKm)}`);
+  }
+  if (endShiftKm != null) {
+    parts.push(`end=${formatDistanceKm(endShiftKm)}`);
+  }
+  return parts.join(', ');
+}
+
 function logSegmentDebug(info) {
   if (typeof console !== 'object' || typeof console.info !== 'function') {
     return;
@@ -123,6 +190,11 @@ function logSegmentDebug(info) {
   } else if (info.result?.type === 'failed') {
     const reason = info.result.reason ? ` (${info.result.reason})` : '';
     lines.push(`  Failed${reason}`);
+  }
+
+  const waypointShift = formatWaypointShiftForDebug(info);
+  if (waypointShift) {
+    lines.push(`  Waypoint shift: ${waypointShift}`);
   }
 
   if (info.result?.note) {
