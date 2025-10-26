@@ -385,7 +385,10 @@ export class DirectionsManager {
       directionsHint
     ] = uiElements;
 
-    const { router = null } = options ?? {};
+    const {
+      router = null,
+      enableWaypointLogging = false
+    } = options ?? {};
 
     this.map = map;
     this.mapContainer = map.getContainer?.() ?? null;
@@ -399,6 +402,7 @@ export class DirectionsManager {
     this.elevationChart = elevationChart ?? null;
     this.infoButton = directionsInfoButton ?? null;
     this.directionsHint = directionsHint ?? null;
+    this.enableWaypointLogging = Boolean(enableWaypointLogging);
 
     if (this.routeStats) {
       this.routeStats.setAttribute('aria-live', 'polite');
@@ -466,6 +470,10 @@ export class DirectionsManager {
     this.setupMapHandlers();
     this.updatePanelVisibilityState();
     this.updateModeAvailability();
+  }
+
+  setWaypointLoggingEnabled(isEnabled) {
+    this.enableWaypointLogging = Boolean(isEnabled);
   }
 
   setupRouteLayers() {
@@ -1682,6 +1690,10 @@ export class DirectionsManager {
   }
 
   logViaWaypointState(context, before = [], after = [], options = {}) {
+    if (!this.enableWaypointLogging) {
+      return;
+    }
+
     const { force = false } = options ?? {};
     const beforeEntries = this.collectViaWaypointEntries(before);
     const afterEntries = this.collectViaWaypointEntries(after);
