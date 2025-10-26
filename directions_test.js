@@ -1710,8 +1710,17 @@ export class DirectionsManager {
 
     const title = `[DirectionsManager] ${context}`;
     if (typeof console !== 'undefined' && console) {
+      const summaryPayload = { waypoints: viaSummary };
+      if (currentViaOrder.length) {
+        summaryPayload.currentViaOrder = currentViaOrder;
+      }
+
+      if (typeof console.log === 'function') {
+        console.log(title, summaryPayload);
+      }
+
       if (typeof console.groupCollapsed === 'function') {
-        console.groupCollapsed(title);
+        console.groupCollapsed(`${title} (details)`);
         if (typeof console.table === 'function') {
           console.table(viaSummary);
         } else {
@@ -1736,7 +1745,11 @@ export class DirectionsManager {
         }
         console.groupEnd();
       } else {
-        console.log(title, viaSummary);
+        if (typeof console.table === 'function') {
+          console.table(viaSummary);
+        } else {
+          console.log('Via waypoint summary:', viaSummary);
+        }
         if (currentViaOrder.length) {
           console.log('Current via coordinates (lng, lat):', currentViaOrder);
         }
