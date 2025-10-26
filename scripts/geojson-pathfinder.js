@@ -501,4 +501,71 @@ export class GeoJsonPathFinder {
       endKey
     };
   }
+
+  buildReachableSegments(startKeys, mode) {
+    const allowMode = (edgeModes) => {
+      if (!mode || !(edgeModes instanceof Set) || edgeModes.size === 0) {
+        return true;
+      }
+      return edgeModes.has(mode);
+    };
+
+    const seeds = Array.isArray(startKeys) ? startKeys : [startKeys];
+    const queue = [];
+    const visited = new Set();
+
+    seeds.forEach((key) => {
+      if (typeof key === 'string' && this.nodes.has(key) && !visited.has(key)) {
+        visited.add(key);
+        queue.push(key);
+      }
+    });
+
+    if (!queue.length) {
+      return [];
+    }
+
+    const undirectedEdges = new Set();
+    const segments = [];
+
+    for (let index = 0; index < queue.length; index += 1) {
+      const currentKey = queue[index];
+      const node = this.nodes.get(currentKey);
+      if (!node) {
+        continue;
+      }
+
+      node.edges.forEach((edge, neighborKey) => {
+        if (!neighborKey || !this.nodes.has(neighborKey)) {
+          return;
+        }
+        if (!allowMode(edge?.modes)) {
+          return;
+        }
+
+        const neighbor = this.nodes.get(neighborKey);
+        if (!neighbor) {
+          return;
+        }
+
+        const pairKey = currentKey <= neighborKey
+          ? `${currentKey}|${neighborKey}`
+          : `${neighborKey}|${currentKey}`;
+        if (!undirectedEdges.has(pairKey)) {
+          segments.push({
+            start: cloneCoordinate(node.coord),
+            end: cloneCoordinate(neighbor.coord)
+          });
+          undirectedEdges.add(pairKey);
+        }
+
+        if (!visited.has(neighborKey)) {
+          visited.add(neighborKey);
+          queue.push(neighborKey);
+        }
+      });
+    }
+
+    return segments;
+  }
 }
