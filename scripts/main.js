@@ -183,49 +183,11 @@ async function init() {
   let offlineNetworkCoverage = null;
   let offlineNetworkRefreshPromise = null;
 
-  const recomputeEndpointNetwork = async () => {
-    if (endpointNetworkRefreshPromise) {
-      return endpointNetworkRefreshPromise;
-    }
-
-    const anchor = Array.isArray(endpointNetworkAnchor) ? endpointNetworkAnchor.slice() : null;
-    if (!anchor || anchor.length < 2) {
-      await hideEndpointNetworkOverlay();
-      return null;
-    }
-
-    endpointNetworkRefreshPromise = (async () => {
-      try {
-        const dataset = await offlineRouter.getReachableNetworkGeoJSON(anchor, { mode: endpointNetworkMode });
-        const applied = await applyEndpointNetworkData(dataset, anchor);
-        if (!applied) {
-          await hideEndpointNetworkOverlay();
-        }
-        return applied;
-      } catch (error) {
-        console.warn('Failed to update endpoint network overlay', error);
-        await hideEndpointNetworkOverlay();
-        return null;
-      } finally {
-        endpointNetworkRefreshPromise = null;
-      }
-    })();
-
-    return endpointNetworkRefreshPromise;
-  };
-
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_INTERSECTIONS_LAYER_ID = 'offline-router-network-debug-intersections';
   let debugNetworkVisible = false;
   let debugNetworkData = null;
-  const ENDPOINT_NETWORK_SOURCE_ID = 'offline-router-endpoint-network';
-  const ENDPOINT_NETWORK_LAYER_ID = 'offline-router-endpoint-network';
-  const ENDPOINT_NETWORK_ANCHOR_LAYER_ID = 'offline-router-endpoint-anchor';
-  let endpointNetworkAnchor = null;
-  let endpointNetworkMode = null;
-  let endpointNetworkVisible = false;
-  let endpointNetworkRefreshPromise = null;
   let directionsManager = null;
 
   const bringDebugNetworkToFront = () => {
@@ -516,13 +478,6 @@ async function init() {
           if (debugNetworkVisible) {
             await applyDebugNetworkLayer();
           }
-          if (Array.isArray(endpointNetworkAnchor) && endpointNetworkAnchor.length >= 2) {
-            try {
-              await recomputeEndpointNetwork();
-            } catch (error) {
-              console.warn('Failed to refresh endpoint network overlay', error);
-            }
-          }
         } else {
           console.warn('OpenFreeMap network extraction returned no features for offline routing');
         }
@@ -536,141 +491,6 @@ async function init() {
   };
 
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
-
-  const ensureEndpointNetworkLayers = async () => {
-    await ensureMapStyleReady();
-    if (!map.getSource(ENDPOINT_NETWORK_SOURCE_ID)) {
-      map.addSource(ENDPOINT_NETWORK_SOURCE_ID, { type: 'geojson', data: EMPTY_COLLECTION });
-    }
-    if (!map.getLayer(ENDPOINT_NETWORK_LAYER_ID)) {
-      map.addLayer({
-        id: ENDPOINT_NETWORK_LAYER_ID,
-        type: 'line',
-        source: ENDPOINT_NETWORK_SOURCE_ID,
-        filter: ['==', ['geometry-type'], 'LineString'],
-        paint: {
-          'line-color': '#f1635f',
-          'line-width': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            10,
-            1.4,
-            13,
-            2.4,
-            16,
-            3.4
-          ],
-          'line-opacity': 0.78
-        }
-      });
-    }
-    if (!map.getLayer(ENDPOINT_NETWORK_ANCHOR_LAYER_ID)) {
-      map.addLayer({
-        id: ENDPOINT_NETWORK_ANCHOR_LAYER_ID,
-        type: 'circle',
-        source: ENDPOINT_NETWORK_SOURCE_ID,
-        filter: ['==', ['geometry-type'], 'Point'],
-        paint: {
-          'circle-radius': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            10,
-            4,
-            14,
-            5.5,
-            16,
-            7
-          ],
-          'circle-color': '#d64545',
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1.2,
-          'circle-opacity': 0.95
-        }
-      });
-    }
-  };
-
-  const bringEndpointNetworkToFront = () => {
-    if (!map || typeof map.moveLayer !== 'function') {
-      return;
-    }
-    if (map.getLayer(ENDPOINT_NETWORK_LAYER_ID)) {
-      map.moveLayer(ENDPOINT_NETWORK_LAYER_ID);
-    }
-    if (map.getLayer(ENDPOINT_NETWORK_ANCHOR_LAYER_ID)) {
-      map.moveLayer(ENDPOINT_NETWORK_ANCHOR_LAYER_ID);
-    }
-  };
-
-  const applyEndpointNetworkData = async (dataset, anchor) => {
-    await ensureEndpointNetworkLayers();
-    const features = [];
-    if (dataset && Array.isArray(dataset.features)) {
-      dataset.features.forEach((feature) => {
-        if (!feature || feature.type !== 'Feature') {
-          return;
-        }
-        const geometryType = feature.geometry?.type;
-        if (geometryType === 'LineString' && Array.isArray(feature.geometry.coordinates)) {
-          features.push(feature);
-        }
-      });
-    }
-
-    const anchorCoord = Array.isArray(anchor) && anchor.length >= 2
-      ? anchor.slice(0, 3)
-      : null;
-    if (anchorCoord) {
-      features.push({
-        type: 'Feature',
-        properties: { featureType: 'endpoint-anchor' },
-        geometry: { type: 'Point', coordinates: anchorCoord }
-      });
-    }
-
-    const collection = features.length
-      ? { type: 'FeatureCollection', features }
-      : EMPTY_COLLECTION;
-
-    const source = map.getSource(ENDPOINT_NETWORK_SOURCE_ID);
-    if (source) {
-      source.setData(collection);
-    }
-
-    const hasLineFeatures = features.some((feature) => feature.geometry?.type === 'LineString');
-
-    if (map.getLayer(ENDPOINT_NETWORK_LAYER_ID)) {
-      map.setLayoutProperty(ENDPOINT_NETWORK_LAYER_ID, 'visibility', hasLineFeatures ? 'visible' : 'none');
-    }
-    if (map.getLayer(ENDPOINT_NETWORK_ANCHOR_LAYER_ID)) {
-      map.setLayoutProperty(ENDPOINT_NETWORK_ANCHOR_LAYER_ID, 'visibility', anchorCoord ? 'visible' : 'none');
-    }
-
-    if (hasLineFeatures || anchorCoord) {
-      bringEndpointNetworkToFront();
-    }
-
-    endpointNetworkVisible = hasLineFeatures;
-    return hasLineFeatures;
-  };
-
-  const hideEndpointNetworkOverlay = async () => {
-    if (!map) {
-      return;
-    }
-    if (map.getSource(ENDPOINT_NETWORK_SOURCE_ID)) {
-      map.getSource(ENDPOINT_NETWORK_SOURCE_ID).setData(EMPTY_COLLECTION);
-    }
-    if (map.getLayer(ENDPOINT_NETWORK_LAYER_ID)) {
-      map.setLayoutProperty(ENDPOINT_NETWORK_LAYER_ID, 'visibility', 'none');
-    }
-    if (map.getLayer(ENDPOINT_NETWORK_ANCHOR_LAYER_ID)) {
-      map.setLayoutProperty(ENDPOINT_NETWORK_ANCHOR_LAYER_ID, 'visibility', 'none');
-    }
-    endpointNetworkVisible = false;
-  };
 
   let currentGpxData = EMPTY_COLLECTION;
   let directionsExportData = EMPTY_COLLECTION;
@@ -822,89 +642,6 @@ async function init() {
           await refreshOfflineNetwork({ waypointBounds: bounds });
         }
       });
-
-      directionsManager.setElevationSampler(async (coordinates) => {
-        if (!Array.isArray(coordinates) || !coordinates.length) {
-          return coordinates;
-        }
-
-        await ensureMapStyleReady();
-
-        if (!map.getSource('terrainSource')) {
-          return coordinates;
-        }
-
-        const existingTerrain = typeof map.getTerrain === 'function' ? map.getTerrain() : null;
-        let terrainEnabled = false;
-        try {
-          if (!existingTerrain) {
-            map.setTerrain({ source: 'terrainSource', exaggeration: 1 });
-            terrainEnabled = true;
-          }
-        } catch (error) {
-          console.warn('Failed to enable terrain for elevation sampling', error);
-        }
-
-        let queryFailed = false;
-        const enriched = coordinates.map((coord) => {
-          const base = Array.isArray(coord) ? coord.slice(0, 3) : [];
-          const lng = Number(base[0]);
-          const lat = Number(base[1]);
-          if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-            return base;
-          }
-          let elevation = null;
-          try {
-            const sampled = map.queryTerrainElevation({ lng, lat }, { exaggerated: false });
-            if (Number.isFinite(sampled)) {
-              elevation = sampled;
-            }
-          } catch (error) {
-            if (!queryFailed) {
-              console.warn('Failed to query terrain elevation', error);
-              queryFailed = true;
-            }
-          }
-          if (Number.isFinite(elevation)) {
-            return [lng, lat, elevation];
-          }
-          if (base.length > 2 && Number.isFinite(base[2])) {
-            return [lng, lat, Number(base[2])];
-          }
-          return [lng, lat];
-        });
-
-        if (terrainEnabled) {
-          try {
-            map.setTerrain(null);
-          } catch (error) {
-            console.warn('Failed to restore terrain configuration after sampling', error);
-          }
-        }
-
-        return enriched;
-      });
-
-      directionsManager.setEndpointNetworkCallback(async ({ waypoints, mode }) => {
-        endpointNetworkMode = typeof mode === 'string' ? mode : null;
-        if (!Array.isArray(waypoints) || waypoints.length < 2) {
-          endpointNetworkAnchor = null;
-          await hideEndpointNetworkOverlay();
-          return;
-        }
-        const anchor = waypoints[waypoints.length - 1];
-        if (!Array.isArray(anchor) || anchor.length < 2) {
-          endpointNetworkAnchor = null;
-          await hideEndpointNetworkOverlay();
-          return;
-        }
-        endpointNetworkAnchor = anchor.slice(0, 3);
-        try {
-          await recomputeEndpointNetwork();
-        } catch (error) {
-          console.warn('Failed to update endpoint network overlay', error);
-        }
-      });
     } catch (error) {
       console.error('Failed to initialize directions manager', error);
     }
@@ -914,24 +651,12 @@ async function init() {
     offlineNetworkCoverage = null;
     offlineNetworkRefreshPromise = null;
     debugNetworkData = null;
-    endpointNetworkVisible = false;
-    endpointNetworkRefreshPromise = null;
     if (!debugNetworkVisible) {
-      if (Array.isArray(endpointNetworkAnchor) && endpointNetworkAnchor.length >= 2) {
-        recomputeEndpointNetwork().catch((error) => {
-          console.error('Failed to reapply endpoint network overlay', error);
-        });
-      }
       return;
     }
     applyDebugNetworkLayer().catch((error) => {
       console.error('Failed to reapply routing network debug layer', error);
     });
-    if (Array.isArray(endpointNetworkAnchor) && endpointNetworkAnchor.length >= 2) {
-      recomputeEndpointNetwork().catch((error) => {
-        console.error('Failed to reapply endpoint network overlay', error);
-      });
-    }
   });
 
   if (debugNetworkButton) {
