@@ -276,16 +276,23 @@ function sanitizeCoordinateSequence(coords) {
     return null;
   }
   const sequence = [];
-  coords.forEach((coord) => {
-    const normalized = sanitizeCoordinate(coord);
+  for (let index = 0; index < coords.length; index += 1) {
+    const normalized = sanitizeCoordinate(coords[index]);
     if (!normalized) {
-      return;
+      continue;
     }
-    if (sequence.length && coordinatesAlmostEqual(sequence[sequence.length - 1], normalized)) {
-      return;
+    const isLast = index === coords.length - 1;
+    if (sequence.length) {
+      const previous = sequence[sequence.length - 1];
+      if (coordinatesAlmostEqual(previous, normalized)) {
+        if (isLast && sequence.length === 1) {
+          sequence.push(normalized);
+        }
+        continue;
+      }
     }
     sequence.push(normalized);
-  });
+  }
   return sequence.length >= 2 ? sequence : null;
 }
 
