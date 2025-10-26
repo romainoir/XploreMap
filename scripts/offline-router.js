@@ -55,6 +55,39 @@ function computeSegmentMetrics(source, target) {
   };
 }
 
+function buildSegmentResult(metrics, fallbackStart, fallbackEnd) {
+  if (metrics) {
+    return {
+      distanceKm: metrics.distanceKm,
+      ascent: metrics.ascent,
+      descent: metrics.descent,
+      coordinates: [metrics.start, metrics.end]
+    };
+  }
+  const start = mergeCoordinates(fallbackStart, fallbackEnd);
+  const end = mergeCoordinates(fallbackEnd, fallbackStart);
+  return {
+    distanceKm: 0,
+    ascent: 0,
+    descent: 0,
+    coordinates: [start, end]
+  };
+}
+
+function appendCoordinateSequence(target, sequence) {
+  if (!Array.isArray(target) || !Array.isArray(sequence)) {
+    return;
+  }
+  sequence.forEach((coord) => {
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return;
+    }
+    if (!target.length || !coordinatesAlmostEqual(target[target.length - 1], coord)) {
+      target.push(coord);
+    }
+  });
+}
+
 function buildDirectSegment(startCoord, endCoord) {
   const metrics = computeSegmentMetrics(startCoord, endCoord);
   if (!metrics) {
@@ -226,19 +259,14 @@ export class OfflineRouter {
     if (!this.pathFinder) {
       throw new Error('Offline network is unavailable for routing');
     }
-    const startSnap = this.pathFinder.findNearestNode(startCoord);
-    const endSnap = this.pathFinder.findNearestNode(endCoord);
+    const startSnap = this.pathFinder.findNearestPoint(startCoord);
+    const endSnap = this.pathFinder.findNearestPoint(endCoord);
     if (!startSnap || !endSnap) {
       throw new Error('Offline network is unavailable for routing');
     }
 
     const startTooFar = startSnap.distanceMeters > this.maxSnapDistanceMeters;
     const endTooFar = endSnap.distanceMeters > this.maxSnapDistanceMeters;
-
-    const path = this.pathFinder.buildPath(startSnap.node.key, endSnap.node.key, mode);
-    if (!path || !Array.isArray(path.coordinates) || !path.coordinates.length) {
-      return null;
-    }
 
     const maxBridgeDistanceMeters = Math.max(this.maxSnapDistanceMeters, MIN_BRIDGE_DISTANCE_METERS);
     if ((startTooFar && startSnap.distanceMeters > maxBridgeDistanceMeters)
@@ -250,11 +278,59 @@ export class OfflineRouter {
       throw new Error('Selected points are too far from the offline routing network');
     }
 
-    const pathCoordinates = path.coordinates
-      .map((coord) => (Array.isArray(coord) ? coord.slice(0, 3) : null))
-      .filter((coord) => Array.isArray(coord) && coord.length >= 2);
+    const startPoint = Array.isArray(startSnap.point) ? startSnap.point.slice(0, 3) : null;
+    const endPoint = Array.isArray(endSnap.point) ? endSnap.point.slice(0, 3) : null;
 
-    if (!pathCoordinates.length) {
+    const startConnector = startPoint ? computeSegmentMetrics(startCoord, startPoint) : null;
+    const endConnector = endPoint ? computeSegmentMetrics(endPoint, endCoord) : null;
+
+    const startOptions = [];
+    if (startPoint) {
+      const pushStartOption = (node) => {
+        if (!node) {
+          return;
+        }
+        const metrics = computeSegmentMetrics(startPoint, node.coord);
+        startOptions.push({
+          key: node.key,
+          node,
+          segment: buildSegmentResult(metrics, startPoint, node.coord)
+        });
+      };
+      if (startSnap.type === 'node' && startSnap.node) {
+        pushStartOption(startSnap.node);
+      } else if (startSnap.type === 'edge') {
+        pushStartOption(startSnap.edgeStart);
+        if (startSnap.edgeEnd && (!startSnap.edgeStart || startSnap.edgeEnd.key !== startSnap.edgeStart.key)) {
+          pushStartOption(startSnap.edgeEnd);
+        }
+      }
+    }
+
+    const endOptions = [];
+    if (endPoint) {
+      const pushEndOption = (node) => {
+        if (!node) {
+          return;
+        }
+        const metrics = computeSegmentMetrics(node.coord, endPoint);
+        endOptions.push({
+          key: node.key,
+          node,
+          segment: buildSegmentResult(metrics, node.coord, endPoint)
+        });
+      };
+      if (endSnap.type === 'node' && endSnap.node) {
+        pushEndOption(endSnap.node);
+      } else if (endSnap.type === 'edge') {
+        pushEndOption(endSnap.edgeStart);
+        if (endSnap.edgeEnd && (!endSnap.edgeStart || endSnap.edgeEnd.key !== endSnap.edgeStart.key)) {
+          pushEndOption(endSnap.edgeEnd);
+        }
+      }
+    }
+
+    if (!startOptions.length || !endOptions.length) {
       const direct = buildDirectSegment(startCoord, endCoord);
       if (direct) {
         return direct;
@@ -262,62 +338,93 @@ export class OfflineRouter {
       return null;
     }
 
-    const firstPathCoord = pathCoordinates[0];
-    const lastPathCoord = pathCoordinates[pathCoordinates.length - 1];
+    let bestPlan = null;
 
-    const startMetrics = computeSegmentMetrics(startCoord, firstPathCoord);
-    const endMetrics = computeSegmentMetrics(lastPathCoord, endCoord);
+    startOptions.forEach((startOption) => {
+      endOptions.forEach((endOption) => {
+        const path = this.pathFinder.buildPath(startOption.key, endOption.key, mode);
+        if (!path || !Array.isArray(path.coordinates) || !path.coordinates.length) {
+          return;
+        }
+        const baseDistanceKm = Number(path.distanceKm) || 0;
+        const baseAscent = Number(path.ascent) || 0;
+        const baseDescent = Number(path.descent) || 0;
+        const startSegment = startOption.segment;
+        const endSegment = endOption.segment;
 
-    let distanceKm = Number(path.distanceKm) || 0;
-    let ascent = Number(path.ascent) || 0;
-    let descent = Number(path.descent) || 0;
+        const totalDistanceKm = baseDistanceKm
+          + (startSegment?.distanceKm || 0)
+          + (endSegment?.distanceKm || 0)
+          + (startConnector?.distanceKm || 0)
+          + (endConnector?.distanceKm || 0);
 
-    if (startMetrics) {
-      distanceKm += startMetrics.distanceKm;
-      ascent += startMetrics.ascent;
-      descent += startMetrics.descent;
-      pathCoordinates[0] = startMetrics.end;
-    }
+        if (!bestPlan || totalDistanceKm < bestPlan.totalDistanceKm - 1e-9) {
+          const totalAscent = baseAscent
+            + (startSegment?.ascent || 0)
+            + (endSegment?.ascent || 0)
+            + (startConnector?.ascent || 0)
+            + (endConnector?.ascent || 0);
+          const totalDescent = baseDescent
+            + (startSegment?.descent || 0)
+            + (endSegment?.descent || 0)
+            + (startConnector?.descent || 0)
+            + (endConnector?.descent || 0);
+          bestPlan = {
+            path,
+            startOption,
+            endOption,
+            totalDistanceKm,
+            totalAscent,
+            totalDescent
+          };
+        }
+      });
+    });
 
-    if (endMetrics) {
-      distanceKm += endMetrics.distanceKm;
-      ascent += endMetrics.ascent;
-      descent += endMetrics.descent;
-      pathCoordinates[pathCoordinates.length - 1] = endMetrics.start;
+    if (!bestPlan) {
+      const direct = buildDirectSegment(startCoord, endCoord);
+      if (direct) {
+        return direct;
+      }
+      return null;
     }
 
     const coordinates = [];
 
-    if (startMetrics) {
-      coordinates.push(startMetrics.start);
+    if (startConnector) {
+      appendCoordinateSequence(coordinates, [startConnector.start, startConnector.end]);
     } else if (Array.isArray(startCoord) && startCoord.length >= 2) {
-      coordinates.push(mergeCoordinates(startCoord, firstPathCoord));
+      const fallbackStart = startPoint || endPoint || startCoord;
+      appendCoordinateSequence(coordinates, [mergeCoordinates(startCoord, fallbackStart)]);
     }
 
-    pathCoordinates.forEach((coord) => {
+    appendCoordinateSequence(coordinates, bestPlan.startOption.segment.coordinates);
+
+    const pathCoordinates = bestPlan.path.coordinates
+      .map((coord) => (Array.isArray(coord) ? coord.slice(0, 3) : null))
+      .filter((coord) => Array.isArray(coord) && coord.length >= 2);
+    appendCoordinateSequence(coordinates, pathCoordinates);
+
+    appendCoordinateSequence(coordinates, bestPlan.endOption.segment.coordinates);
+
+    if (endConnector) {
+      appendCoordinateSequence(coordinates, [endConnector.start, endConnector.end]);
+    } else if (Array.isArray(endCoord) && endCoord.length >= 2) {
+      const fallbackEnd = endPoint || coordinates[coordinates.length - 1] || endCoord;
+      appendCoordinateSequence(coordinates, [mergeCoordinates(endCoord, fallbackEnd)]);
+    }
+
+    const uniqueCoordinates = coordinates.filter((coord, index) => {
       if (!Array.isArray(coord) || coord.length < 2) {
-        return;
+        return false;
       }
-      if (!coordinates.length || !coordinatesAlmostEqual(coordinates[coordinates.length - 1], coord)) {
-        coordinates.push(coord);
+      if (index === 0) {
+        return true;
       }
+      return !coordinatesAlmostEqual(coord, coordinates[index - 1]);
     });
 
-    if (endMetrics) {
-      if (!coordinates.length || !coordinatesAlmostEqual(coordinates[coordinates.length - 1], endMetrics.start)) {
-        coordinates.push(endMetrics.start);
-      }
-      if (!coordinatesAlmostEqual(coordinates[coordinates.length - 1], endMetrics.end)) {
-        coordinates.push(endMetrics.end);
-      }
-    } else if (Array.isArray(endCoord) && endCoord.length >= 2) {
-      const mergedEnd = mergeCoordinates(endCoord, lastPathCoord);
-      if (!coordinatesAlmostEqual(coordinates[coordinates.length - 1], mergedEnd)) {
-        coordinates.push(mergedEnd);
-      }
-    }
-
-    if (coordinates.length < 2) {
+    if (uniqueCoordinates.length < 2) {
       const direct = buildDirectSegment(startCoord, endCoord);
       if (direct) {
         return direct;
@@ -326,10 +433,10 @@ export class OfflineRouter {
     }
 
     return {
-      coordinates,
-      distanceKm,
-      ascent,
-      descent
+      coordinates: uniqueCoordinates,
+      distanceKm: bestPlan.totalDistanceKm,
+      ascent: bestPlan.totalAscent,
+      descent: bestPlan.totalDescent
     };
   }
 }
