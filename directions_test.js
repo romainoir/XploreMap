@@ -1626,10 +1626,59 @@ export class DirectionsManager {
     for (let index = 1; index < list.length - 1; index += 1) {
       const normalized = this.normalizeWaypointForLog(list[index]);
       if (normalized) {
-        result.set(index, normalized);
+        result.set(index, { ...normalized, index });
       }
     }
     return result;
+  }
+
+  areLoggedWaypointsEqual(previous, next) {
+    if (!previous || !next) {
+      return false;
+    }
+
+    const prevRaw = Array.isArray(previous.raw) ? previous.raw : null;
+    const nextRaw = Array.isArray(next.raw) ? next.raw : null;
+    if (prevRaw && nextRaw) {
+      const lngDelta = Math.abs(prevRaw[0] - nextRaw[0]);
+      const latDelta = Math.abs(prevRaw[1] - nextRaw[1]);
+      if (Number.isFinite(lngDelta) && Number.isFinite(latDelta) && lngDelta <= COORD_EPSILON && latDelta <= COORD_EPSILON) {
+        return true;
+      }
+    }
+
+    if (Array.isArray(previous.rounded) && Array.isArray(next.rounded)) {
+      if (previous.rounded[0] === next.rounded[0] && previous.rounded[1] === next.rounded[1]) {
+        return true;
+      }
+    }
+
+    if (typeof previous.string === 'string' && typeof next.string === 'string') {
+      return previous.string === next.string;
+    }
+
+    return false;
+  }
+
+  computeWaypointDeltaMeters(previous, next) {
+    if (!previous?.raw || !next?.raw || !turfApi) {
+      return null;
+    }
+
+    try {
+      const distance = turfApi.distance(
+        turfApi.point(previous.raw),
+        turfApi.point(next.raw),
+        { units: 'meters' }
+      );
+      if (Number.isFinite(distance)) {
+        return Math.round(distance * 100) / 100;
+      }
+    } catch (error) {
+      console.warn('Failed to compute waypoint delta distance', error);
+    }
+
+    return null;
   }
 
   logViaWaypointState(context, before = [], after = [], options = {}) {
@@ -1640,53 +1689,111 @@ export class DirectionsManager {
       return;
     }
 
-    const indices = new Set([
-      ...beforeEntries.keys(),
-      ...afterEntries.keys()
-    ]);
+    const beforeList = Array.from(beforeEntries.entries()).map(([index, entry]) => ({ index, entry }));
+    const afterList = Array.from(afterEntries.entries()).map(([index, entry]) => ({ index, entry, used: false }));
+    const afterLookup = new Map();
+    afterList.forEach((item) => {
+      const key = typeof item.entry?.string === 'string' ? item.entry.string : null;
+      if (!key) {
+        return;
+      }
+      if (!afterLookup.has(key)) {
+        afterLookup.set(key, []);
+      }
+      afterLookup.get(key).push(item);
+    });
 
-    const rows = Array.from(indices)
-      .sort((a, b) => a - b)
-      .map((index) => {
-        const prev = beforeEntries.get(index) ?? null;
-        const next = afterEntries.get(index) ?? null;
-        const changed = Boolean(
-          (prev && next && (prev.rounded[0] !== next.rounded[0] || prev.rounded[1] !== next.rounded[1]))
-          || (prev && !next)
-          || (!prev && next)
-        );
-        let deltaMeters = null;
-        if (prev?.raw && next?.raw && turfApi) {
-          try {
-            const distance = turfApi.distance(
-              turfApi.point(prev.raw),
-              turfApi.point(next.raw),
-              { units: 'meters' }
-            );
-            if (Number.isFinite(distance)) {
-              deltaMeters = Math.round(distance * 100) / 100;
-            }
-          } catch (error) {
-            console.warn('Failed to compute waypoint delta distance', error);
-          }
-        }
-        let status = 'unchanged';
-        if (prev && !next) {
-          status = 'removed';
-        } else if (!prev && next) {
-          status = 'added';
-        } else if (changed) {
-          status = 'moved';
-        }
-        return {
-          waypointIndex: index,
-          previous: prev,
-          next,
+    const rows = [];
+    const markUsed = (item) => {
+      item.used = true;
+    };
+
+    beforeList.forEach((beforeItem) => {
+      const { index: previousIndex, entry: previousEntry } = beforeItem;
+      const key = typeof previousEntry?.string === 'string' ? previousEntry.string : null;
+      const candidates = key && afterLookup.has(key) ? afterLookup.get(key) : afterList;
+
+      let match = null;
+      if (Array.isArray(candidates)) {
+        match = candidates.find((candidate) => !candidate.used && this.areLoggedWaypointsEqual(previousEntry, candidate.entry));
+      }
+
+      if (match) {
+        markUsed(match);
+        const status = previousIndex === match.index ? 'unchanged' : 'shifted';
+        const deltaMeters = this.computeWaypointDeltaMeters(previousEntry, match.entry);
+        rows.push({
+          waypointIndex: match.index,
+          previousIndex,
+          nextIndex: match.index,
+          previous: previousEntry,
+          next: match.entry,
           deltaMeters,
           status,
-          changed
-        };
+          changed: status !== 'unchanged'
+        });
+        return;
+      }
+
+      const sameIndexCandidate = afterList.find((candidate) => !candidate.used && candidate.index === previousIndex);
+      if (sameIndexCandidate) {
+        markUsed(sameIndexCandidate);
+        const deltaMeters = this.computeWaypointDeltaMeters(previousEntry, sameIndexCandidate.entry);
+        rows.push({
+          waypointIndex: sameIndexCandidate.index,
+          previousIndex,
+          nextIndex: sameIndexCandidate.index,
+          previous: previousEntry,
+          next: sameIndexCandidate.entry,
+          deltaMeters,
+          status: 'moved',
+          changed: true
+        });
+        return;
+      }
+
+      rows.push({
+        waypointIndex: previousIndex,
+        previousIndex,
+        nextIndex: null,
+        previous: previousEntry,
+        next: null,
+        deltaMeters: null,
+        status: 'removed',
+        changed: true
       });
+    });
+
+    afterList.forEach((afterItem) => {
+      if (afterItem.used) {
+        return;
+      }
+      rows.push({
+        waypointIndex: afterItem.index,
+        previousIndex: null,
+        nextIndex: afterItem.index,
+        previous: null,
+        next: afterItem.entry,
+        deltaMeters: null,
+        status: 'added',
+        changed: true
+      });
+    });
+
+    rows.sort((a, b) => {
+      const aIndex = Number.isFinite(a.nextIndex) ? a.nextIndex : a.previousIndex;
+      const bIndex = Number.isFinite(b.nextIndex) ? b.nextIndex : b.previousIndex;
+      if (Number.isFinite(aIndex) && Number.isFinite(bIndex)) {
+        return aIndex - bIndex;
+      }
+      if (Number.isFinite(aIndex)) {
+        return -1;
+      }
+      if (Number.isFinite(bIndex)) {
+        return 1;
+      }
+      return 0;
+    });
 
     const hasMeaningfulChange = rows.some((row) => row.status !== 'unchanged');
     if (!hasMeaningfulChange && !force) {
@@ -1694,7 +1801,9 @@ export class DirectionsManager {
     }
 
     const viaSummary = rows.map((row) => ({
-      index: row.waypointIndex,
+      index: Number.isFinite(row.nextIndex) ? row.nextIndex : row.previousIndex,
+      previousIndex: row.previousIndex,
+      nextIndex: row.nextIndex,
       beforeLng: row.previous?.rounded?.[0] ?? null,
       beforeLat: row.previous?.rounded?.[1] ?? null,
       afterLng: row.next?.rounded?.[0] ?? null,
@@ -1729,14 +1838,27 @@ export class DirectionsManager {
         rows
           .filter((row) => row.status !== 'unchanged')
           .forEach((row) => {
+            const fromIndex = Number.isFinite(row.previousIndex) ? row.previousIndex : null;
+            const toIndex = Number.isFinite(row.nextIndex) ? row.nextIndex : null;
+            let message = 'Waypoint';
+            if (fromIndex !== null) {
+              message += ` #${fromIndex}`;
+            }
+            if (row.status === 'shifted' && toIndex !== null && toIndex !== fromIndex) {
+              message += ` shifted to #${toIndex}`;
+            } else {
+              message += ` ${row.status}`;
+            }
             console.log(
-              `Waypoint #${row.waypointIndex} ${row.status}`,
+              message,
               {
                 before: row.previous?.raw ?? null,
                 after: row.next?.raw ?? null,
                 roundedBefore: row.previous?.string ?? null,
                 roundedAfter: row.next?.string ?? null,
-                deltaMeters: row.deltaMeters
+                deltaMeters: row.deltaMeters,
+                previousIndex: row.previousIndex,
+                nextIndex: row.nextIndex
               }
             );
           });
