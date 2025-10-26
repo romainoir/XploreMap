@@ -7,12 +7,14 @@ const DEFAULT_SPEEDS = Object.freeze({
 });
 const DEFAULT_SNAP_TOLERANCE_METERS = 500;
 const MIN_BRIDGE_DISTANCE_METERS = 1500;
+const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
 
-function coordinatesAlmostEqual(a, b, epsilon = 1e-7) {
+function coordinatesAlmostEqual(a, b, toleranceMeters = COORDINATE_EQUALITY_TOLERANCE_METERS) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
     return false;
   }
-  return Math.abs(a[0] - b[0]) <= epsilon && Math.abs(a[1] - b[1]) <= epsilon;
+  const distanceKm = haversineDistanceKm(a, b);
+  return distanceKm * 1000 <= toleranceMeters;
 }
 
 function mergeCoordinates(preferred, fallback) {
