@@ -8,6 +8,10 @@ const DEFAULT_SPEEDS = Object.freeze({
 const DEFAULT_SNAP_TOLERANCE_METERS = 500;
 const MIN_BRIDGE_DISTANCE_METERS = 1500;
 const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
+// Use a much tighter tolerance when we deduplicate consecutive coordinates so we only
+// drop points that are effectively identical and preserve the path length when the
+// source geometry contains very short segments.
+const COORDINATE_DUPLICATE_TOLERANCE_METERS = 0.05;
 
 const OFFLINE_ROUTER_DEBUG_PREFIX = '[OfflineRouter]';
 
@@ -310,7 +314,8 @@ function appendCoordinateSequence(target, sequence) {
     if (!Array.isArray(coord) || coord.length < 2) {
       return;
     }
-    if (!target.length || !coordinatesAlmostEqual(target[target.length - 1], coord)) {
+    if (!target.length
+      || !coordinatesAlmostEqual(target[target.length - 1], coord, COORDINATE_DUPLICATE_TOLERANCE_METERS)) {
       target.push(coord);
     }
   });
@@ -356,7 +361,7 @@ function sanitizeCoordinateSequence(coords) {
     const isLast = index === coords.length - 1;
     if (sequence.length) {
       const previous = sequence[sequence.length - 1];
-      if (coordinatesAlmostEqual(previous, normalized)) {
+      if (coordinatesAlmostEqual(previous, normalized, COORDINATE_DUPLICATE_TOLERANCE_METERS)) {
         if (isLast && sequence.length === 1) {
           sequence.push(normalized);
         }
@@ -889,7 +894,11 @@ export class OfflineRouter {
       if (index === 0) {
         return true;
       }
-      return !coordinatesAlmostEqual(coord, coordinates[index - 1]);
+      return !coordinatesAlmostEqual(
+        coord,
+        coordinates[index - 1],
+        COORDINATE_DUPLICATE_TOLERANCE_METERS
+      );
     });
 
     if (uniqueCoordinates.length < 2) {
