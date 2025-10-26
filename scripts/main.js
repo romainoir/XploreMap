@@ -15,7 +15,7 @@ import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from 
 import { DirectionsManager } from '../directions_test.js';
 import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
 import { waitForSWReady } from './service-worker.js';
-import { OfflineRouter } from './offline-router.js';
+import { OfflineRouter, DEFAULT_NODE_CONNECTION_TOLERANCE_METERS } from './offline-router.js';
 import { extractOpenFreeMapNetwork, computeExpandedBounds as expandNetworkBounds } from './openfreemap-network.js';
 
 const PEAK_POINTER_ID = 'peak-pointer';
@@ -173,6 +173,8 @@ async function init() {
   const directionsInfoButton = document.getElementById('directionsInfoButton');
   const directionsHint = document.getElementById('directionsHint');
   const debugNetworkButton = document.getElementById('toggleDebugNetwork');
+  const nodeToleranceSlider = document.getElementById('nodeToleranceSlider');
+  const nodeToleranceValue = document.getElementById('nodeToleranceValue');
 
   const offlineRouter = new OfflineRouter({ networkUrl: './data/offline-network.geojson' });
   offlineRouter.ensureReady().catch((error) => {
@@ -328,6 +330,64 @@ async function init() {
       map.setLayoutProperty(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID, 'visibility', 'none');
     }
   };
+
+  const formatNodeToleranceLabel = (meters) => {
+    const value = Number(meters);
+    if (!Number.isFinite(value) || value < 0) {
+      return 'n/a';
+    }
+    if (value >= 1000) {
+      return `${(value / 1000).toFixed(2)} km`;
+    }
+    if (value >= 10) {
+      return `${value.toFixed(0)} m`;
+    }
+    return `${value.toFixed(1)} m`;
+  };
+
+  const updateNodeToleranceDisplay = (meters) => {
+    const numericValue = Number(meters);
+    if (nodeToleranceValue) {
+      nodeToleranceValue.textContent = formatNodeToleranceLabel(numericValue);
+    }
+    if (nodeToleranceSlider && Number.isFinite(numericValue)) {
+      nodeToleranceSlider.value = String(numericValue);
+    }
+  };
+
+  const applyNodeToleranceMeters = (meters, { reroute = false } = {}) => {
+    const numericValue = Number(meters);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+      return;
+    }
+
+    updateNodeToleranceDisplay(numericValue);
+
+    const changed = typeof offlineRouter.setNodeConnectionToleranceMeters === 'function'
+      ? offlineRouter.setNodeConnectionToleranceMeters(numericValue)
+      : false;
+
+    if (!changed) {
+      return;
+    }
+
+    debugNetworkData = null;
+    if (debugNetworkVisible) {
+      applyDebugNetworkLayer().catch((error) => {
+        console.error('Failed to refresh routing network debug layer after tolerance change', error);
+      });
+    }
+
+    if (reroute && directionsManager && typeof directionsManager.getRoute === 'function') {
+      directionsManager.getRoute();
+    }
+  };
+
+  updateNodeToleranceDisplay(
+    typeof offlineRouter.getNodeConnectionToleranceMeters === 'function'
+      ? offlineRouter.getNodeConnectionToleranceMeters()
+      : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS
+  );
 
   const boundsToPlain = (bounds) => {
     if (!bounds) {
@@ -683,6 +743,21 @@ async function init() {
       } finally {
         debugNetworkButton.disabled = false;
       }
+    });
+  }
+
+  if (nodeToleranceSlider) {
+    nodeToleranceSlider.addEventListener('input', (event) => {
+      const value = Number(event.currentTarget?.value);
+      applyNodeToleranceMeters(Number.isFinite(value) ? value : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS);
+    });
+
+    nodeToleranceSlider.addEventListener('change', (event) => {
+      const value = Number(event.currentTarget?.value);
+      applyNodeToleranceMeters(
+        Number.isFinite(value) ? value : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
+        { reroute: true }
+      );
     });
   }
 
