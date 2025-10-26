@@ -1170,7 +1170,23 @@ export class DirectionsManager {
         return;
       }
       const clone = coord.slice();
-      if (!result.length || !this.coordinatesMatch(result[result.length - 1], clone)) {
+      if (!result.length) {
+        result.push(clone);
+        return;
+      }
+
+      const last = result[result.length - 1];
+      const lngDelta = Math.abs((last?.[0] ?? 0) - (clone?.[0] ?? 0));
+      const latDelta = Math.abs((last?.[1] ?? 0) - (clone?.[1] ?? 0));
+      const withinCoordinateEpsilon = lngDelta <= COORD_EPSILON && latDelta <= COORD_EPSILON;
+
+      let withinDistanceTolerance = false;
+      if (!withinCoordinateEpsilon) {
+        const separationKm = this.computeDistanceKm(last, clone);
+        withinDistanceTolerance = Number.isFinite(separationKm) && separationKm <= 0.0005;
+      }
+
+      if (!withinCoordinateEpsilon && !withinDistanceTolerance) {
         result.push(clone);
       }
     };
