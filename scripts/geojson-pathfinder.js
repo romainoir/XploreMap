@@ -3,6 +3,7 @@ const EARTH_RADIUS_METERS = EARTH_RADIUS_KM * 1000;
 const DEG_TO_RAD = Math.PI / 180;
 const NODE_CONNECTION_TOLERANCE_METERS = 8;
 const NODE_CONNECTION_TOLERANCE_KM = NODE_CONNECTION_TOLERANCE_METERS / 1000;
+const METERS_PER_LATITUDE_DEGREE = 111132;
 
 export function haversineDistanceKm(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
@@ -64,6 +65,17 @@ function interpolateElevation(start, end, fraction) {
   const startElevation = Number.isFinite(start?.[2]) ? start[2] : 0;
   const endElevation = Number.isFinite(end?.[2]) ? end[2] : 0;
   return startElevation + (endElevation - startElevation) * fraction;
+}
+
+function normalizeToleranceToKm({ toleranceDegrees, toleranceMeters }) {
+  if (Number.isFinite(toleranceMeters) && toleranceMeters >= 0) {
+    return toleranceMeters / 1000;
+  }
+  if (Number.isFinite(toleranceDegrees) && toleranceDegrees >= 0) {
+    const approxMeters = toleranceDegrees * METERS_PER_LATITUDE_DEGREE;
+    return Math.max(0, approxMeters / 1000);
+  }
+  return NODE_CONNECTION_TOLERANCE_KM;
 }
 
 function toProjectedMeters(coord, referenceLat) {
@@ -147,7 +159,9 @@ export class GeoJsonPathFinder {
       elevationPrecision,
       modesProperty,
       costProperty,
-      modeSeparator
+      modeSeparator,
+      tolerance,
+      nodeConnectionToleranceMeters
     } = options;
 
     this.precision = Number.isFinite(precision) && precision > 0 ? precision : 1e7;
@@ -163,6 +177,11 @@ export class GeoJsonPathFinder {
     this.modeSeparator = typeof modeSeparator === 'string' && modeSeparator.length
       ? modeSeparator
       : ',';
+
+    this.nodeConnectionToleranceKm = normalizeToleranceToKm({
+      toleranceDegrees: tolerance,
+      toleranceMeters: nodeConnectionToleranceMeters
+    });
 
     this.nodes = new Map();
     this.nodeList = [];
@@ -220,11 +239,12 @@ export class GeoJsonPathFinder {
 
     let nearestNode = null;
     let nearestDistanceKm = Infinity;
+    const toleranceKm = this.nodeConnectionToleranceKm;
 
     for (let index = 0; index < this.nodeList.length; index += 1) {
       const candidate = this.nodeList[index];
       const distanceKm = haversineDistanceKm(candidate.coord, rounded);
-      if (distanceKm < NODE_CONNECTION_TOLERANCE_KM && distanceKm < nearestDistanceKm) {
+      if (distanceKm < toleranceKm && distanceKm < nearestDistanceKm) {
         nearestNode = candidate;
         nearestDistanceKm = distanceKm;
       }

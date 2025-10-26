@@ -411,7 +411,7 @@ export class OfflineRouter {
     this.maxSnapDistanceMeters = Number.isFinite(maxSnapDistanceMeters)
       ? maxSnapDistanceMeters
       : DEFAULT_SNAP_TOLERANCE_METERS;
-    this.pathFinderOptions = { ...(pathFinderOptions || {}) };
+    this.pathFinderOptions = { tolerance: 1e-3, ...(pathFinderOptions || {}) };
 
     this.networkGeoJSON = null;
     this.pathFinder = null;
