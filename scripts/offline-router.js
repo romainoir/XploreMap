@@ -397,6 +397,13 @@ export class OfflineRouter {
     return this.pathFinder.findNearestNode(coord);
   }
 
+  findNearestPoint(coord) {
+    if (!this.pathFinder || typeof this.pathFinder.findNearestPoint !== 'function') {
+      return null;
+    }
+    return this.pathFinder.findNearestPoint(coord);
+  }
+
   async getRoute(waypoints, { mode, preservedSegments } = {}) {
     if (!Array.isArray(waypoints) || waypoints.length < 2) {
       return null;

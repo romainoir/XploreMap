@@ -1627,6 +1627,53 @@ export class DirectionsManager {
     };
   }
 
+  async snapLngLatToNetwork(lngLat) {
+    if (!lngLat || !this.router) {
+      return null;
+    }
+
+    const lng = Number(lngLat.lng);
+    const lat = Number(lngLat.lat);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return null;
+    }
+
+    try {
+      if (typeof this.router.ensureReady === 'function') {
+        await this.router.ensureReady();
+      }
+    } catch (error) {
+      console.warn('Failed to ensure offline router readiness for waypoint snapping', error);
+      return null;
+    }
+
+    const coord = [lng, lat];
+    let snap = null;
+    if (typeof this.router.findNearestPoint === 'function') {
+      snap = this.router.findNearestPoint(coord);
+    } else if (this.router.pathFinder?.findNearestPoint) {
+      snap = this.router.pathFinder.findNearestPoint(coord);
+    }
+
+    if (!snap || !Array.isArray(snap.point) || snap.point.length < 2) {
+      return null;
+    }
+
+    const distanceMeters = Number(snap.distanceMeters);
+    const maxSnapDistance = Number(this.router.maxSnapDistanceMeters);
+    if (Number.isFinite(maxSnapDistance) && Number.isFinite(distanceMeters) && distanceMeters > maxSnapDistance) {
+      return null;
+    }
+
+    const snappedLng = Number(snap.point[0]);
+    const snappedLat = Number(snap.point[1]);
+    if (!Number.isFinite(snappedLng) || !Number.isFinite(snappedLat)) {
+      return null;
+    }
+
+    return [snappedLng, snappedLat];
+  }
+
   snapshotWaypoints() {
     if (!Array.isArray(this.waypoints)) {
       return [];
@@ -2536,7 +2583,7 @@ export class DirectionsManager {
     this.draggedBivouacIndex = null;
   }
 
-  onMapClick(event) {
+  async onMapClick(event) {
     if (!this.isPanelVisible() || this.isDragging) return;
 
     const hitWaypoints = this.map.queryRenderedFeatures(event.point, { layers: ['waypoints-hit-area'] });
@@ -2554,7 +2601,11 @@ export class DirectionsManager {
     }
 
     const before = this.snapshotWaypoints();
-    this.waypoints.push([event.lngLat.lng, event.lngLat.lat]);
+    const snapped = await this.snapLngLatToNetwork(event.lngLat);
+    const targetLngLat = Array.isArray(snapped) && snapped.length >= 2
+      ? [snapped[0], snapped[1]]
+      : [event.lngLat.lng, event.lngLat.lat];
+    this.waypoints.push(targetLngLat);
     this.logViaWaypointState('Added waypoint from map click', before, this.waypoints, { force: true });
     this.updateWaypoints();
     if (this.waypoints.length === 1) {
