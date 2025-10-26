@@ -140,28 +140,6 @@ function projectPointOnSegment(point, start, end) {
   };
 }
 
-function createEdgeMetrics(startCoord, endCoord, multiplier, modes) {
-  if (!Array.isArray(startCoord) || !Array.isArray(endCoord)) {
-    return null;
-  }
-  const distanceKm = haversineDistanceKm(startCoord, endCoord);
-  if (distanceKm <= 0) {
-    return null;
-  }
-  const startElevation = Number.isFinite(startCoord[2]) ? startCoord[2] : 0;
-  const endElevation = Number.isFinite(endCoord[2]) ? endCoord[2] : 0;
-  const ascent = Math.max(0, endElevation - startElevation);
-  const descent = Math.max(0, startElevation - endElevation);
-  const costMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
-  return {
-    weight: distanceKm * costMultiplier,
-    distanceKm,
-    ascent,
-    descent,
-    modes
-  };
-}
-
 export class GeoJsonPathFinder {
   constructor(geojson, options = {}) {
     const {
@@ -207,7 +185,6 @@ export class GeoJsonPathFinder {
     geojson.features.forEach((feature) => {
       this._processFeature(feature);
     });
-    this._ensureIntersectionNodes();
   }
 
   getAllNodes() {
@@ -264,7 +241,6 @@ export class GeoJsonPathFinder {
     };
     this.nodes.set(key, node);
     this.nodeList.push(node);
-    this._connectNodeToExistingEdges(node);
     return node;
   }
 
@@ -284,126 +260,6 @@ export class GeoJsonPathFinder {
       descent: edge.descent,
       modes: edge.modes
     });
-  }
-
-  _computeEdgeMultiplier(edge) {
-    if (!edge || !Number.isFinite(edge.distanceKm) || edge.distanceKm <= 0) {
-      return 1;
-    }
-    const ratio = edge.weight / edge.distanceKm;
-    if (!Number.isFinite(ratio) || ratio < 0) {
-      return 1;
-    }
-    return ratio;
-  }
-
-  _splitEdgeBetween(sourceKey, targetKey, splitNode) {
-    const source = this.nodes.get(sourceKey);
-    const target = this.nodes.get(targetKey);
-    if (!source || !target || !splitNode) {
-      return false;
-    }
-    if (source === splitNode || target === splitNode) {
-      return false;
-    }
-
-    const forward = source.edges.get(target.key);
-    const backward = target.edges.get(source.key);
-    if (!forward || !backward) {
-      return false;
-    }
-
-    const projection = projectPointOnSegment(splitNode.coord, source.coord, target.coord);
-    if (!projection
-      || projection.distanceMeters > NODE_CONNECTION_TOLERANCE_METERS
-      || projection.fraction <= 1e-6
-      || projection.fraction >= 1 - 1e-6) {
-      return false;
-    }
-
-    const forwardMultiplier = this._computeEdgeMultiplier(forward);
-    const backwardMultiplier = this._computeEdgeMultiplier(backward);
-
-    const sourceToSplit = createEdgeMetrics(source.coord, splitNode.coord, forwardMultiplier, forward.modes);
-    const splitToTarget = createEdgeMetrics(splitNode.coord, target.coord, forwardMultiplier, forward.modes);
-    const targetToSplit = createEdgeMetrics(target.coord, splitNode.coord, backwardMultiplier, backward.modes);
-    const splitToSource = createEdgeMetrics(splitNode.coord, source.coord, backwardMultiplier, backward.modes);
-
-    if (!sourceToSplit || !splitToTarget || !targetToSplit || !splitToSource) {
-      return false;
-    }
-
-    source.edges.delete(target.key);
-    target.edges.delete(source.key);
-
-    this._addDirectedEdge(source, splitNode, sourceToSplit);
-    this._addDirectedEdge(splitNode, source, splitToSource);
-    this._addDirectedEdge(splitNode, target, splitToTarget);
-    this._addDirectedEdge(target, splitNode, targetToSplit);
-
-    return true;
-  }
-
-  _connectNodeToExistingEdges(node) {
-    if (!node) {
-      return false;
-    }
-    const candidates = [];
-    const processedPairs = new Set();
-    this.nodes.forEach((source) => {
-      if (!source || source === node) {
-        return;
-      }
-      source.edges.forEach((edge) => {
-        const target = this.nodes.get(edge.key);
-        if (!target || target === node) {
-          return;
-        }
-        const pairKey = source.key <= target.key
-          ? `${source.key}|${target.key}`
-          : `${target.key}|${source.key}`;
-        if (processedPairs.has(pairKey)) {
-          return;
-        }
-        processedPairs.add(pairKey);
-        const projection = projectPointOnSegment(node.coord, source.coord, target.coord);
-        if (!projection
-          || projection.distanceMeters > NODE_CONNECTION_TOLERANCE_METERS
-          || projection.fraction <= 1e-6
-          || projection.fraction >= 1 - 1e-6) {
-          return;
-        }
-        candidates.push({ sourceKey: source.key, targetKey: target.key });
-      });
-    });
-
-    let changed = false;
-    candidates.forEach((candidate) => {
-      if (this._splitEdgeBetween(candidate.sourceKey, candidate.targetKey, node)) {
-        changed = true;
-      }
-    });
-    return changed;
-  }
-
-  _ensureIntersectionNodes() {
-    if (!this.nodeList.length) {
-      return;
-    }
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let index = 0; index < this.nodeList.length; index += 1) {
-        const node = this.nodeList[index];
-        if (!node) {
-          continue;
-        }
-        if (this._connectNodeToExistingEdges(node)) {
-          changed = true;
-        }
-      }
-    }
   }
 
   _processFeature(feature) {
