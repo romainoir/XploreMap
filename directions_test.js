@@ -12,6 +12,7 @@ const MODE_COLORS = {
 const HOVER_PIXEL_TOLERANCE = 12;
 const COORD_EPSILON = 1e-6;
 const WAYPOINT_MATCH_TOLERANCE_METERS = 30;
+const MAX_WAYPOINT_SNAP_DISTANCE_METERS = 400;
 const MAX_ELEVATION_POINTS = 180;
 const MAX_DISTANCE_MARKERS = 60;
 const ELEVATION_TICK_TARGET = 5;
@@ -2323,11 +2324,18 @@ export class DirectionsManager {
     const firstSegment = this.routeSegments[0];
     const lastSegment = this.routeSegments[this.routeSegments.length - 1];
 
-    if (firstSegment && Array.isArray(firstSegment.start)) {
-      updated[0] = [firstSegment.start[0], firstSegment.start[1]];
+    const startCandidate = firstSegment && Array.isArray(firstSegment.start)
+      ? [firstSegment.start[0], firstSegment.start[1]]
+      : null;
+    const endCandidate = lastSegment && Array.isArray(lastSegment.end)
+      ? [lastSegment.end[0], lastSegment.end[1]]
+      : null;
+
+    if (startCandidate) {
+      updated[0] = startCandidate;
     }
-    if (lastSegment && Array.isArray(lastSegment.end)) {
-      updated[lastIndex] = [lastSegment.end[0], lastSegment.end[1]];
+    if (endCandidate) {
+      updated[lastIndex] = endCandidate;
     }
 
     for (let index = 1; index < lastIndex; index += 1) {
@@ -2353,6 +2361,14 @@ export class DirectionsManager {
       const currentWaypoint = Array.isArray(this.waypoints[index]) ? this.waypoints[index] : [];
       const hasElevation = currentWaypoint.length > 2;
       const differs = !this.coordinatesMatch(currentWaypoint, next);
+      const displacementMeters = this.computeCoordinateDistanceMeters(currentWaypoint, next);
+      const withinSnapLimit = displacementMeters == null
+        || displacementMeters <= MAX_WAYPOINT_SNAP_DISTANCE_METERS;
+
+      if (!withinSnapLimit && differs) {
+        return;
+      }
+
       if (force && (differs || hasElevation)) {
         this.waypoints[index] = next;
         changed = true;
@@ -2361,7 +2377,7 @@ export class DirectionsManager {
       if (!force && differs) {
         this.waypoints[index] = next;
         changed = true;
-      } else if (hasElevation) {
+      } else if (hasElevation && withinSnapLimit) {
         this.waypoints[index] = next;
       }
     });
@@ -3887,6 +3903,20 @@ export class DirectionsManager {
     } catch (error) {
       console.warn('Failed to compare waypoint coordinates', error);
       return false;
+    }
+  }
+
+  computeCoordinateDistanceMeters(source, target) {
+    if (!Array.isArray(source) || !Array.isArray(target) || !turfApi) {
+      return null;
+    }
+
+    try {
+      const distance = turfApi.distance(turfApi.point(source), turfApi.point(target), { units: 'meters' });
+      return Number.isFinite(distance) ? distance : null;
+    } catch (error) {
+      console.warn('Failed to compute waypoint snap distance', error);
+      return null;
     }
   }
 
