@@ -16,6 +16,7 @@ import { DirectionsManager } from '../directions_test.js';
 import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
 import { waitForSWReady } from './service-worker.js';
 import { OfflineRouter } from './offline-router.js';
+import { extractOpenFreeMapNetwork, computeExpandedBounds as expandNetworkBounds } from './openfreemap-network.js';
 
 const PEAK_POINTER_ID = 'peak-pointer';
 
@@ -177,6 +178,12 @@ async function init() {
     console.error('Failed to preload offline routing network', error);
   });
 
+  const OFFLINE_NETWORK_COVERAGE_PADDING_RATIO = 0.35;
+  const OFFLINE_NETWORK_REFRESH_DEBOUNCE_MS = 1200;
+  let offlineNetworkCoverage = null;
+  let offlineNetworkRefreshTimeout = null;
+  let offlineNetworkRefreshPromise = null;
+
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
   let debugNetworkVisible = false;
@@ -282,6 +289,103 @@ async function init() {
     }
   };
 
+  const boundsToPlain = (bounds) => {
+    if (!bounds) {
+      return null;
+    }
+    if (typeof bounds.getWest === 'function') {
+      return {
+        west: bounds.getWest(),
+        east: bounds.getEast(),
+        south: bounds.getSouth(),
+        north: bounds.getNorth()
+      };
+    }
+    const west = Number(bounds.west);
+    const east = Number(bounds.east);
+    const south = Number(bounds.south);
+    const north = Number(bounds.north);
+    if ([west, east, south, north].some((value) => !Number.isFinite(value))) {
+      return null;
+    }
+    return { west, east, south, north };
+  };
+
+  const boundsContains = (outer, inner, epsilon = 1e-6) => {
+    if (!outer || !inner) {
+      return false;
+    }
+    return inner.west >= outer.west - epsilon
+      && inner.east <= outer.east + epsilon
+      && inner.south >= outer.south - epsilon
+      && inner.north <= outer.north + epsilon;
+  };
+
+  const shouldRefreshOfflineNetwork = () => {
+    if (!map || typeof map.getBounds !== 'function') {
+      return false;
+    }
+    const current = boundsToPlain(map.getBounds());
+    if (!current) {
+      return false;
+    }
+    if (!offlineNetworkCoverage) {
+      return true;
+    }
+    return !boundsContains(offlineNetworkCoverage, current);
+  };
+
+  const refreshOfflineNetwork = async () => {
+    if (!map) {
+      return null;
+    }
+    if (offlineNetworkRefreshPromise) {
+      return offlineNetworkRefreshPromise;
+    }
+    offlineNetworkRefreshPromise = (async () => {
+      try {
+        const network = await extractOpenFreeMapNetwork(map, {
+          boundsPaddingRatio: OFFLINE_NETWORK_COVERAGE_PADDING_RATIO
+        });
+        if (network && Array.isArray(network.features) && network.features.length) {
+          offlineRouter.setNetworkGeoJSON(network);
+          debugNetworkData = network;
+          if (typeof map.getBounds === 'function') {
+            offlineNetworkCoverage = expandNetworkBounds(
+              map.getBounds(),
+              OFFLINE_NETWORK_COVERAGE_PADDING_RATIO * 1.5
+            );
+          } else {
+            offlineNetworkCoverage = null;
+          }
+          if (debugNetworkVisible) {
+            await applyDebugNetworkLayer();
+          }
+        } else {
+          console.warn('OpenFreeMap network extraction returned no features for offline routing');
+        }
+      } catch (error) {
+        console.error('Failed to rebuild offline routing network from OpenFreeMap data', error);
+      } finally {
+        offlineNetworkRefreshPromise = null;
+      }
+    })();
+    return offlineNetworkRefreshPromise;
+  };
+
+  const scheduleOfflineNetworkRefresh = () => {
+    if (!shouldRefreshOfflineNetwork()) {
+      return;
+    }
+    if (offlineNetworkRefreshTimeout) {
+      window.clearTimeout(offlineNetworkRefreshTimeout);
+    }
+    offlineNetworkRefreshTimeout = window.setTimeout(() => {
+      offlineNetworkRefreshTimeout = null;
+      refreshOfflineNetwork();
+    }, OFFLINE_NETWORK_REFRESH_DEBOUNCE_MS);
+  };
+
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
   let currentGpxData = EMPTY_COLLECTION;
@@ -355,7 +459,13 @@ async function init() {
 
   applyGpxData(EMPTY_COLLECTION);
 
-  map.on('load', () => {
+  map.on('load', async () => {
+    try {
+      await refreshOfflineNetwork();
+    } catch (error) {
+      console.warn('Initial offline routing network build failed', error);
+    }
+
     try {
       const directionsManager = new DirectionsManager(map, [
         directionsToggle,
@@ -396,7 +506,12 @@ async function init() {
     }
   });
 
+  map.on('moveend', () => {
+    scheduleOfflineNetworkRefresh();
+  });
+
   map.on('style.load', () => {
+    scheduleOfflineNetworkRefresh();
     if (!debugNetworkVisible) {
       return;
     }
@@ -412,6 +527,7 @@ async function init() {
       debugNetworkButton.disabled = true;
       try {
         if (targetState) {
+          await refreshOfflineNetwork();
           const applied = await applyDebugNetworkLayer();
           if (!applied) {
             window.alert('Unable to display the routing network. Check the console for details.');
@@ -423,6 +539,8 @@ async function init() {
           debugNetworkVisible = false;
           updateDebugNetworkButton(false);
         }
+      } catch (error) {
+        console.error('Failed to toggle routing network overlay', error);
       } finally {
         debugNetworkButton.disabled = false;
       }

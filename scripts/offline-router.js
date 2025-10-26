@@ -122,8 +122,26 @@ export class OfflineRouter {
       throw new Error(`Failed to load offline network (${response.status})`);
     }
     const data = await response.json();
-    this.networkGeoJSON = data && typeof data === 'object' ? data : null;
+    if (!data || typeof data !== 'object') {
+      throw new Error('Offline network payload is not valid GeoJSON data');
+    }
+    this.setNetworkGeoJSON(data);
+  }
+
+  setNetworkGeoJSON(geojson) {
+    if (!geojson || typeof geojson !== 'object') {
+      throw new Error('OfflineRouter requires a valid GeoJSON FeatureCollection');
+    }
+
+    if (geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
+      throw new Error('OfflineRouter network data must be a GeoJSON FeatureCollection');
+    }
+
+    const isSameObject = this.networkGeoJSON === geojson;
+    this.networkGeoJSON = geojson;
     this.pathFinder = new GeoJsonPathFinder(this.networkGeoJSON, this.pathFinderOptions);
+    this.readyPromise = Promise.resolve();
+    return !isSameObject;
   }
 
   findNearestNode(coord) {
