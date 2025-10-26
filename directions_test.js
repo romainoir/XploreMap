@@ -418,6 +418,7 @@ export class DirectionsManager {
     this.hoveredWaypointIndex = null;
     this.hoveredSegmentIndex = null;
     this.hoveredLegIndex = null;
+    this.dragStartWaypointSnapshot = null;
 
     this.routeGeojson = null;
     this.routeSegments = [];
@@ -736,7 +737,9 @@ export class DirectionsManager {
 
     this.swapButton?.addEventListener('click', () => {
       if (this.waypoints.length < 2) return;
+      const before = this.snapshotWaypoints();
       this.waypoints.reverse();
+      this.logViaWaypointState('Swapped start/end waypoints', before, this.waypoints);
       this.updateWaypoints();
       this.getRoute();
     });
@@ -1590,6 +1593,157 @@ export class DirectionsManager {
     };
   }
 
+  snapshotWaypoints() {
+    if (!Array.isArray(this.waypoints)) {
+      return [];
+    }
+    return this.waypoints.map((coord) => (Array.isArray(coord) ? coord.slice() : coord));
+  }
+
+  normalizeWaypointForLog(coord) {
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return null;
+    }
+    const lng = Number(coord[0]);
+    const lat = Number(coord[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return null;
+    }
+    const roundedLng = Math.round(lng * 1e6) / 1e6;
+    const roundedLat = Math.round(lat * 1e6) / 1e6;
+    return {
+      raw: [lng, lat],
+      rounded: [roundedLng, roundedLat],
+      string: `[${roundedLng.toFixed(6)}, ${roundedLat.toFixed(6)}]`
+    };
+  }
+
+  collectViaWaypointEntries(list) {
+    const result = new Map();
+    if (!Array.isArray(list) || list.length < 3) {
+      return result;
+    }
+    for (let index = 1; index < list.length - 1; index += 1) {
+      const normalized = this.normalizeWaypointForLog(list[index]);
+      if (normalized) {
+        result.set(index, normalized);
+      }
+    }
+    return result;
+  }
+
+  logViaWaypointState(context, before = [], after = [], options = {}) {
+    const { force = false } = options ?? {};
+    const beforeEntries = this.collectViaWaypointEntries(before);
+    const afterEntries = this.collectViaWaypointEntries(after);
+    if (!beforeEntries.size && !afterEntries.size) {
+      return;
+    }
+
+    const indices = new Set([
+      ...beforeEntries.keys(),
+      ...afterEntries.keys()
+    ]);
+
+    const rows = Array.from(indices)
+      .sort((a, b) => a - b)
+      .map((index) => {
+        const prev = beforeEntries.get(index) ?? null;
+        const next = afterEntries.get(index) ?? null;
+        const changed = Boolean(
+          (prev && next && (prev.rounded[0] !== next.rounded[0] || prev.rounded[1] !== next.rounded[1]))
+          || (prev && !next)
+          || (!prev && next)
+        );
+        let deltaMeters = null;
+        if (prev?.raw && next?.raw && turfApi) {
+          try {
+            const distance = turfApi.distance(
+              turfApi.point(prev.raw),
+              turfApi.point(next.raw),
+              { units: 'meters' }
+            );
+            if (Number.isFinite(distance)) {
+              deltaMeters = Math.round(distance * 100) / 100;
+            }
+          } catch (error) {
+            console.warn('Failed to compute waypoint delta distance', error);
+          }
+        }
+        let status = 'unchanged';
+        if (prev && !next) {
+          status = 'removed';
+        } else if (!prev && next) {
+          status = 'added';
+        } else if (changed) {
+          status = 'moved';
+        }
+        return {
+          waypointIndex: index,
+          previous: prev,
+          next,
+          deltaMeters,
+          status,
+          changed
+        };
+      });
+
+    const hasMeaningfulChange = rows.some((row) => row.status !== 'unchanged');
+    if (!hasMeaningfulChange && !force) {
+      return;
+    }
+
+    const viaSummary = rows.map((row) => ({
+      index: row.waypointIndex,
+      beforeLng: row.previous?.rounded?.[0] ?? null,
+      beforeLat: row.previous?.rounded?.[1] ?? null,
+      afterLng: row.next?.rounded?.[0] ?? null,
+      afterLat: row.next?.rounded?.[1] ?? null,
+      status: row.status,
+      deltaMeters: row.deltaMeters
+    }));
+
+    const currentViaOrder = Array.from(afterEntries.keys())
+      .sort((a, b) => a - b)
+      .map((index) => afterEntries.get(index)?.string)
+      .filter(Boolean);
+
+    const title = `[DirectionsManager] ${context}`;
+    if (typeof console !== 'undefined' && console) {
+      if (typeof console.groupCollapsed === 'function') {
+        console.groupCollapsed(title);
+        if (typeof console.table === 'function') {
+          console.table(viaSummary);
+        } else {
+          console.log('Via waypoint summary:', viaSummary);
+        }
+        rows
+          .filter((row) => row.status !== 'unchanged')
+          .forEach((row) => {
+            console.log(
+              `Waypoint #${row.waypointIndex} ${row.status}`,
+              {
+                before: row.previous?.raw ?? null,
+                after: row.next?.raw ?? null,
+                roundedBefore: row.previous?.string ?? null,
+                roundedAfter: row.next?.string ?? null,
+                deltaMeters: row.deltaMeters
+              }
+            );
+          });
+        if (currentViaOrder.length) {
+          console.log('Current via coordinates (lng, lat):', currentViaOrder);
+        }
+        console.groupEnd();
+      } else {
+        console.log(title, viaSummary);
+        if (currentViaOrder.length) {
+          console.log('Current via coordinates (lng, lat):', currentViaOrder);
+        }
+      }
+    }
+  }
+
   snapWaypointsToRoute() {
     if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
       return false;
@@ -1598,6 +1752,7 @@ export class DirectionsManager {
       return false;
     }
 
+    const before = this.snapshotWaypoints();
     const lastIndex = this.waypoints.length - 1;
     const updated = this.waypoints.map((coord) => (Array.isArray(coord) ? coord.slice() : coord));
     const firstSegment = this.routeSegments[0];
@@ -1645,6 +1800,10 @@ export class DirectionsManager {
         this.waypoints[index] = next;
       }
     });
+
+    if (changed) {
+      this.logViaWaypointState('Snapped via waypoints to route', before, this.waypoints);
+    }
 
     return changed;
   }
@@ -1805,6 +1964,7 @@ export class DirectionsManager {
     this.isDragging = true;
     this.draggedWaypointIndex = Number(feature.properties.index);
     this.setHoveredWaypointIndex(this.draggedWaypointIndex);
+    this.dragStartWaypointSnapshot = this.snapshotWaypoints();
     this.map.dragPan?.disable();
   }
 
@@ -1883,6 +2043,15 @@ export class DirectionsManager {
     this.draggedWaypointIndex = null;
     this.map.dragPan?.enable();
     this.setHoveredWaypointIndex(null);
+    if (movedWaypoint) {
+      this.logViaWaypointState(
+        'Waypoint drag ended',
+        Array.isArray(this.dragStartWaypointSnapshot) ? this.dragStartWaypointSnapshot : [],
+        this.waypoints,
+        { force: true }
+      );
+    }
+    this.dragStartWaypointSnapshot = null;
     if (movedWaypoint && this.waypoints.length >= 2) {
       this.getRoute();
     }
@@ -1922,7 +2091,9 @@ export class DirectionsManager {
     if (!this.isPanelVisible()) return;
     const index = Number(event.features?.[0]?.properties.index);
     if (!Number.isFinite(index) || index <= 0 || index >= this.waypoints.length - 1) return;
+    const before = this.snapshotWaypoints();
     this.waypoints.splice(index, 1);
+    this.logViaWaypointState('Removed via waypoint', before, this.waypoints, { force: true });
     this.updateWaypoints();
     if (this.waypoints.length >= 2) {
       this.getRoute();
@@ -2058,7 +2229,9 @@ export class DirectionsManager {
 
     insertIndex = Math.max(1, insertIndex);
 
+    const before = this.snapshotWaypoints();
     this.waypoints.splice(insertIndex, 0, snapped);
+    this.logViaWaypointState('Inserted via waypoint', before, this.waypoints, { force: true });
     this.updateWaypoints();
     this.resetSegmentHover();
     this.getRoute();
