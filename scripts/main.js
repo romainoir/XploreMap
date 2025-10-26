@@ -187,6 +187,7 @@ async function init() {
 
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
+  const DEBUG_NETWORK_INTERSECTIONS_LAYER_ID = 'offline-router-network-debug-intersections';
   let debugNetworkVisible = false;
   let debugNetworkData = null;
 
@@ -194,10 +195,12 @@ async function init() {
     if (!map || typeof map.moveLayer !== 'function') {
       return;
     }
-    if (!map.getLayer(DEBUG_NETWORK_LAYER_ID)) {
-      return;
+    if (map.getLayer(DEBUG_NETWORK_LAYER_ID)) {
+      map.moveLayer(DEBUG_NETWORK_LAYER_ID);
     }
-    map.moveLayer(DEBUG_NETWORK_LAYER_ID);
+    if (map.getLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID)) {
+      map.moveLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID);
+    }
   };
 
   const ensureMapStyleReady = () => {
@@ -225,7 +228,9 @@ async function init() {
     }
     try {
       await offlineRouter.ensureReady();
-      const dataset = offlineRouter.getNetworkGeoJSON();
+      const dataset = typeof offlineRouter.getNetworkDebugGeoJSON === 'function'
+        ? offlineRouter.getNetworkDebugGeoJSON({ intersectionsOnly: true })
+        : offlineRouter.getNetworkGeoJSON();
       if (dataset && typeof dataset === 'object') {
         debugNetworkData = dataset;
         return debugNetworkData;
@@ -280,6 +285,38 @@ async function init() {
       });
     }
     map.setLayoutProperty(DEBUG_NETWORK_LAYER_ID, 'visibility', 'visible');
+    if (!map.getLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID)) {
+      map.addLayer({
+        id: DEBUG_NETWORK_INTERSECTIONS_LAYER_ID,
+        type: 'circle',
+        source: DEBUG_NETWORK_SOURCE_ID,
+        filter: [
+          'all',
+          ['==', ['geometry-type'], 'Point'],
+          ['>=', ['coalesce', ['get', 'nodeDegree'], 0], 3]
+        ],
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            10,
+            3,
+            14,
+            5.2,
+            16,
+            6.5
+          ],
+          'circle-color': '#2ca25f',
+          'circle-stroke-color': '#0b4222',
+          'circle-stroke-width': 1.2,
+          'circle-opacity': 0.9
+        }
+      });
+    }
+    if (map.getLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID)) {
+      map.setLayoutProperty(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID, 'visibility', 'visible');
+    }
     bringDebugNetworkToFront();
     return true;
   };
@@ -287,6 +324,9 @@ async function init() {
   const hideDebugNetworkLayer = () => {
     if (map.getLayer(DEBUG_NETWORK_LAYER_ID)) {
       map.setLayoutProperty(DEBUG_NETWORK_LAYER_ID, 'visibility', 'none');
+    }
+    if (map.getLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID)) {
+      map.setLayoutProperty(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID, 'visibility', 'none');
     }
   };
 
@@ -350,7 +390,10 @@ async function init() {
         });
         if (network && Array.isArray(network.features) && network.features.length) {
           offlineRouter.setNetworkGeoJSON(network);
-          debugNetworkData = network;
+          const debugDataset = typeof offlineRouter.getNetworkDebugGeoJSON === 'function'
+            ? offlineRouter.getNetworkDebugGeoJSON({ intersectionsOnly: true })
+            : network;
+          debugNetworkData = debugDataset || network;
           if (typeof map.getBounds === 'function') {
             offlineNetworkCoverage = expandNetworkBounds(
               map.getBounds(),
