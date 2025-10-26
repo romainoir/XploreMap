@@ -187,6 +187,14 @@ export class GeoJsonPathFinder {
     });
   }
 
+  getAllNodes() {
+    return this.nodeList.map((node) => ({
+      key: node.key,
+      coord: node.coord.slice(),
+      degree: node.edges.size
+    }));
+  }
+
   _roundCoord(coord) {
     if (!Array.isArray(coord) || coord.length < 2) {
       return null;

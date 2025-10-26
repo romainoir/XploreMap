@@ -102,6 +102,56 @@ function buildDirectSegment(startCoord, endCoord) {
   };
 }
 
+function sanitizeCoordinate(coord) {
+  if (!Array.isArray(coord) || coord.length < 2) {
+    return null;
+  }
+  const lng = Number(coord[0]);
+  const lat = Number(coord[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return null;
+  }
+  const elevation = coord.length > 2 && Number.isFinite(coord[2]) ? Number(coord[2]) : 0;
+  return [lng, lat, elevation];
+}
+
+function sanitizeCoordinateSequence(coords) {
+  if (!Array.isArray(coords)) {
+    return null;
+  }
+  const sequence = [];
+  coords.forEach((coord) => {
+    const normalized = sanitizeCoordinate(coord);
+    if (!normalized) {
+      return;
+    }
+    if (sequence.length && coordinatesAlmostEqual(sequence[sequence.length - 1], normalized)) {
+      return;
+    }
+    sequence.push(normalized);
+  });
+  return sequence.length >= 2 ? sequence : null;
+}
+
+function accumulateSequenceMetrics(coords) {
+  if (!Array.isArray(coords) || coords.length < 2) {
+    return { distanceKm: 0, ascent: 0, descent: 0 };
+  }
+  let distanceKm = 0;
+  let ascent = 0;
+  let descent = 0;
+  for (let index = 0; index < coords.length - 1; index += 1) {
+    const metrics = computeSegmentMetrics(coords[index], coords[index + 1]);
+    if (!metrics) {
+      continue;
+    }
+    distanceKm += metrics.distanceKm;
+    ascent += metrics.ascent;
+    descent += metrics.descent;
+  }
+  return { distanceKm, ascent, descent };
+}
+
 export class OfflineRouter {
   constructor(options = {}) {
     const {
@@ -184,7 +234,7 @@ export class OfflineRouter {
     return this.pathFinder.findNearestNode(coord);
   }
 
-  async getRoute(waypoints, { mode } = {}) {
+  async getRoute(waypoints, { mode, preservedSegments } = {}) {
     if (!Array.isArray(waypoints) || waypoints.length < 2) {
       return null;
     }
@@ -193,6 +243,22 @@ export class OfflineRouter {
       : Array.from(this.supportedModes)[0];
 
     await this.ensureReady();
+
+    const preservedMap = new Map();
+    if (Array.isArray(preservedSegments)) {
+      preservedSegments.forEach((segment) => {
+        if (!segment) {
+          return;
+        }
+        const startIndex = Number(segment.startIndex);
+        const endIndex = Number(segment.endIndex);
+        const coords = sanitizeCoordinateSequence(segment.coordinates);
+        if (!Number.isInteger(startIndex) || endIndex !== startIndex + 1 || !coords) {
+          return;
+        }
+        preservedMap.set(startIndex, { endIndex, coordinates: coords });
+      });
+    }
 
     const coordinates = [];
     const segments = [];
@@ -203,6 +269,34 @@ export class OfflineRouter {
     for (let index = 0; index < waypoints.length - 1; index += 1) {
       const start = waypoints[index];
       const end = waypoints[index + 1];
+      const preserved = preservedMap.get(index);
+      if (preserved && preserved.endIndex === index + 1) {
+        const preservedCoords = preserved.coordinates.map((coord) => coord.slice());
+        if (preservedCoords.length >= 2) {
+          const first = preservedCoords[0];
+          const last = preservedCoords[preservedCoords.length - 1];
+          const normalizedStart = sanitizeCoordinate(start) || first;
+          const normalizedEnd = sanitizeCoordinate(end) || last;
+          if (coordinatesAlmostEqual(first, normalizedStart) && coordinatesAlmostEqual(last, normalizedEnd)) {
+            preservedCoords[0] = mergeCoordinates(start, preservedCoords[0]);
+            preservedCoords[preservedCoords.length - 1] = mergeCoordinates(end, preservedCoords[preservedCoords.length - 1]);
+            const metrics = accumulateSequenceMetrics(preservedCoords);
+            appendCoordinateSequence(coordinates, preservedCoords);
+            totalDistanceKm += metrics.distanceKm;
+            totalAscent += metrics.ascent;
+            totalDescent += metrics.descent;
+            segments.push({
+              distance: metrics.distanceKm * 1000,
+              duration: this.estimateDurationSeconds(metrics.distanceKm, travelMode),
+              ascent: metrics.ascent,
+              descent: metrics.descent,
+              start_index: index,
+              end_index: index + 1
+            });
+            continue;
+          }
+        }
+      }
       const segment = this.findPathBetween(start, end, travelMode);
       if (!segment || !Array.isArray(segment.coordinates) || segment.coordinates.length < 2) {
         throw new Error('No offline route found between the selected points');
@@ -244,6 +338,50 @@ export class OfflineRouter {
         coordinates
       }
     };
+  }
+
+  getNetworkDebugGeoJSON(options = {}) {
+    const base = this.getNetworkGeoJSON();
+    if (!base) {
+      return null;
+    }
+    const { intersectionsOnly = true } = options;
+    const features = [];
+    if (Array.isArray(base.features)) {
+      base.features.forEach((feature) => {
+        if (feature) {
+          features.push(feature);
+        }
+      });
+    }
+    if (this.pathFinder && typeof this.pathFinder.getAllNodes === 'function') {
+      const nodes = this.pathFinder.getAllNodes();
+      nodes.forEach((node) => {
+        if (!node || !Array.isArray(node.coord)) {
+          return;
+        }
+        const degree = Number(node.degree) || 0;
+        if (intersectionsOnly && degree < 3) {
+          return;
+        }
+        const coordinates = sanitizeCoordinate(node.coord);
+        if (!coordinates) {
+          return;
+        }
+        features.push({
+          type: 'Feature',
+          properties: {
+            featureType: 'network-node',
+            nodeDegree: degree
+          },
+          geometry: {
+            type: 'Point',
+            coordinates
+          }
+        });
+      });
+    }
+    return { type: 'FeatureCollection', features };
   }
 
   estimateDurationSeconds(distanceKm, mode) {
