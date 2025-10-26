@@ -307,6 +307,55 @@ function buildSegmentResult(metrics, fallbackStart, fallbackEnd) {
   };
 }
 
+function createNodeOption({ node, fromCoord, toCoord }) {
+  if (!node || !Array.isArray(fromCoord) || !Array.isArray(toCoord)) {
+    return null;
+  }
+  if (!Array.isArray(node.coord)) {
+    return null;
+  }
+  const metrics = computeSegmentMetrics(fromCoord, toCoord);
+  return {
+    key: node.key,
+    node,
+    segment: buildSegmentResult(metrics, fromCoord, toCoord)
+  };
+}
+
+function collectSnapOptions(snap, optionFactory) {
+  if (!snap || typeof optionFactory !== 'function') {
+    return [];
+  }
+  const options = [];
+  const seenKeys = new Set();
+  const pushOption = (node) => {
+    if (!node) {
+      return;
+    }
+    const option = optionFactory(node);
+    if (!option) {
+      return;
+    }
+    const key = option.key;
+    if (key && seenKeys.has(key)) {
+      return;
+    }
+    if (key) {
+      seenKeys.add(key);
+    }
+    options.push(option);
+  };
+  if (snap.type === 'node') {
+    pushOption(snap.node);
+  } else if (snap.type === 'edge') {
+    pushOption(snap.edgeStart);
+    if (snap.edgeEnd && (!snap.edgeStart || snap.edgeEnd.key !== snap.edgeStart.key)) {
+      pushOption(snap.edgeEnd);
+    }
+  }
+  return options;
+}
+
 function appendCoordinateSequence(target, sequence) {
   if (!Array.isArray(target) || !Array.isArray(sequence)) {
     return;
@@ -683,6 +732,26 @@ export class OfflineRouter {
       return result.segment;
     };
 
+    const returnDirectOrFailure = (reason, errorMessage) => {
+      const direct = buildDirectSegment(startCoord, endCoord);
+      if (direct) {
+        return returnWithDebug({
+          type: 'direct',
+          segment: direct,
+          reason
+        });
+      }
+      returnWithDebug({
+        type: 'failed',
+        segment: null,
+        reason
+      });
+      if (errorMessage) {
+        throw new Error(errorMessage);
+      }
+      return null;
+    };
+
     const startSnap = this.pathFinder.findNearestPoint(startCoord);
     const endSnap = this.pathFinder.findNearestPoint(endCoord);
     if (!startSnap || !endSnap) {
@@ -700,23 +769,7 @@ export class OfflineRouter {
     const maxBridgeDistanceMeters = Math.max(this.maxSnapDistanceMeters, MIN_BRIDGE_DISTANCE_METERS);
     if ((startTooFar && startSnap.distanceMeters > maxBridgeDistanceMeters)
       || (endTooFar && endSnap.distanceMeters > maxBridgeDistanceMeters)) {
-      const direct = buildDirectSegment(startCoord, endCoord);
-      if (direct) {
-        return returnWithDebug({
-          type: 'direct',
-          segment: direct,
-          reason: 'snap-distance'
-        });
-      }
-      logSegmentDebug({
-        ...debugInfo,
-        result: {
-          type: 'failed',
-          segment: null,
-          reason: 'snap-distance'
-        }
-      });
-      throw new Error('Selected points are too far from the offline routing network');
+      return returnDirectOrFailure('snap-distance', 'Selected points are too far from the offline routing network');
     }
 
     const startPoint = Array.isArray(startSnap.point) ? startSnap.point.slice(0, 3) : null;
@@ -725,53 +778,23 @@ export class OfflineRouter {
     const startConnector = startPoint ? computeSegmentMetrics(startCoord, startPoint) : null;
     const endConnector = endPoint ? computeSegmentMetrics(endPoint, endCoord) : null;
 
-    const startOptions = [];
-    if (startPoint) {
-      const pushStartOption = (node) => {
-        if (!node) {
-          return;
-        }
-        const metrics = computeSegmentMetrics(startPoint, node.coord);
-        startOptions.push({
-          key: node.key,
-          node,
-          segment: buildSegmentResult(metrics, startPoint, node.coord)
-        });
-      };
-      if (startSnap.type === 'node' && startSnap.node) {
-        pushStartOption(startSnap.node);
-      } else if (startSnap.type === 'edge') {
-        pushStartOption(startSnap.edgeStart);
-        if (startSnap.edgeEnd && (!startSnap.edgeStart || startSnap.edgeEnd.key !== startSnap.edgeStart.key)) {
-          pushStartOption(startSnap.edgeEnd);
-        }
-      }
-    }
+    const startOptions = startPoint
+      ? collectSnapOptions(startSnap, (node) => createNodeOption({
+        node,
+        fromCoord: startPoint,
+        toCoord: node.coord
+      }))
+      : [];
 
     debugInfo.startOptionsCount = startOptions.length;
 
-    const endOptions = [];
-    if (endPoint) {
-      const pushEndOption = (node) => {
-        if (!node) {
-          return;
-        }
-        const metrics = computeSegmentMetrics(node.coord, endPoint);
-        endOptions.push({
-          key: node.key,
-          node,
-          segment: buildSegmentResult(metrics, node.coord, endPoint)
-        });
-      };
-      if (endSnap.type === 'node' && endSnap.node) {
-        pushEndOption(endSnap.node);
-      } else if (endSnap.type === 'edge') {
-        pushEndOption(endSnap.edgeStart);
-        if (endSnap.edgeEnd && (!endSnap.edgeStart || endSnap.edgeEnd.key !== endSnap.edgeStart.key)) {
-          pushEndOption(endSnap.edgeEnd);
-        }
-      }
-    }
+    const endOptions = endPoint
+      ? collectSnapOptions(endSnap, (node) => createNodeOption({
+        node,
+        fromCoord: node.coord,
+        toCoord: endPoint
+      }))
+      : [];
 
     debugInfo.endOptionsCount = endOptions.length;
 
@@ -842,19 +865,11 @@ export class OfflineRouter {
     });
 
     if (!bestPlan) {
-      const direct = buildDirectSegment(startCoord, endCoord);
-      if (direct) {
-        return returnWithDebug({
-          type: 'direct',
-          segment: direct,
-          reason: 'no-path'
-        });
+      const fallback = returnDirectOrFailure('no-path');
+      if (fallback) {
+        return fallback;
       }
-      return returnWithDebug({
-        type: 'failed',
-        segment: null,
-        reason: 'no-path'
-      });
+      return null;
     }
 
     const coordinates = [];
@@ -907,19 +922,11 @@ export class OfflineRouter {
     });
 
     if (uniqueCoordinates.length < 2) {
-      const direct = buildDirectSegment(startCoord, endCoord);
-      if (direct) {
-        return returnWithDebug({
-          type: 'direct',
-          segment: direct,
-          reason: 'insufficient-coordinates'
-        });
+      const fallback = returnDirectOrFailure('insufficient-coordinates');
+      if (fallback) {
+        return fallback;
       }
-      return returnWithDebug({
-        type: 'failed',
-        segment: null,
-        reason: 'insufficient-coordinates'
-      });
+      return null;
     }
 
     const result = {
