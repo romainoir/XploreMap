@@ -2929,15 +2929,12 @@ export class DirectionsManager {
         continue;
       }
 
-      let startIndex = findWaypointIndex(startWaypoint, searchStart);
+      const startIndex = findWaypointIndex(startWaypoint, searchStart);
       if (startIndex === -1) {
-        startIndex = searchStart;
+        continue;
       }
-      let endIndex = findWaypointIndex(endWaypoint, Math.max(startIndex, searchStart));
-      if (endIndex === -1) {
-        endIndex = coords.length - 1;
-      }
-      if (endIndex <= startIndex) {
+      const endIndex = findWaypointIndex(endWaypoint, Math.max(startIndex, searchStart));
+      if (endIndex === -1 || endIndex <= startIndex) {
         continue;
       }
 
