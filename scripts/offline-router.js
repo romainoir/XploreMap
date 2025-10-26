@@ -1,37 +1,11 @@
-const EARTH_RADIUS_KM = 6371;
+import { GeoJsonPathFinder, haversineDistanceKm } from './geojson-pathfinder.js';
+
 const DEFAULT_SPEEDS = Object.freeze({
   'foot-hiking': 4.5,
   'cycling-regular': 15,
   'driving-car': 40
 });
 const DEFAULT_SNAP_TOLERANCE_METERS = 500;
-
-function haversineDistanceKm(a, b) {
-  if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
-    return 0;
-  }
-  const toRad = (value) => (value * Math.PI) / 180;
-  const lat1 = toRad(a[1]);
-  const lat2 = toRad(b[1]);
-  const dLat = lat2 - lat1;
-  const dLng = toRad(b[0] - a[0]);
-  const sinLat = Math.sin(dLat / 2);
-  const sinLng = Math.sin(dLng / 2);
-  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
-  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
-  return EARTH_RADIUS_KM * c;
-}
-
-function normalizeModes(value) {
-  if (!value) return null;
-  if (Array.isArray(value)) {
-    return new Set(value.filter((mode) => typeof mode === 'string'));
-  }
-  if (typeof value === 'string') {
-    return new Set(value.split(',').map((mode) => mode.trim()).filter(Boolean));
-  }
-  return null;
-}
 
 function mergeCoordinates(preferred, fallback) {
   const target = Array.isArray(preferred) ? preferred.slice(0, 3) : [];
@@ -76,7 +50,8 @@ export class OfflineRouter {
       networkUrl,
       supportedModes,
       averageSpeeds,
-      maxSnapDistanceMeters
+      maxSnapDistanceMeters,
+      pathFinderOptions
     } = options;
 
     this.networkUrl = networkUrl || './data/offline-network.geojson';
@@ -88,10 +63,10 @@ export class OfflineRouter {
     this.maxSnapDistanceMeters = Number.isFinite(maxSnapDistanceMeters)
       ? maxSnapDistanceMeters
       : DEFAULT_SNAP_TOLERANCE_METERS;
+    this.pathFinderOptions = { ...(pathFinderOptions || {}) };
 
-    this.nodes = new Map();
-    this.nodeList = [];
     this.networkGeoJSON = null;
+    this.pathFinder = null;
     this.readyPromise = null;
   }
 
@@ -104,7 +79,7 @@ export class OfflineRouter {
   }
 
   async ensureReady() {
-    if (this.nodes.size) {
+    if (this.pathFinder) {
       return;
     }
     if (!this.readyPromise) {
@@ -123,100 +98,14 @@ export class OfflineRouter {
     }
     const data = await response.json();
     this.networkGeoJSON = data && typeof data === 'object' ? data : null;
-    this.buildGraph(this.networkGeoJSON);
-  }
-
-  buildGraph(geojson) {
-    this.nodes.clear();
-    this.nodeList = [];
-
-    if (!geojson || !Array.isArray(geojson.features)) {
-      return;
-    }
-
-    const addNode = (coord) => {
-      if (!Array.isArray(coord) || coord.length < 2) return null;
-      const roundedLng = Number(coord[0].toFixed(6));
-      const roundedLat = Number(coord[1].toFixed(6));
-      const roundedEle = Number.isFinite(coord[2]) ? Number(coord[2].toFixed(2)) : 0;
-      const key = `${roundedLng},${roundedLat},${roundedEle}`;
-      if (!this.nodes.has(key)) {
-        const node = {
-          key,
-          coord: [roundedLng, roundedLat, roundedEle],
-          edges: new Map()
-        };
-        this.nodes.set(key, node);
-        this.nodeList.push(node);
-      }
-      return this.nodes.get(key);
-    };
-
-    geojson.features.forEach((feature) => {
-      const geometry = feature?.geometry;
-      if (!geometry) return;
-      const coords = geometry.type === 'LineString'
-        ? geometry.coordinates
-        : geometry.type === 'MultiLineString'
-          ? geometry.coordinates.flat()
-          : null;
-      if (!Array.isArray(coords) || coords.length < 2) return;
-      const modes = normalizeModes(feature?.properties?.modes);
-      const multiplier = Number(feature?.properties?.costMultiplier);
-      const costMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
-
-      for (let index = 0; index < coords.length - 1; index += 1) {
-        const start = addNode(coords[index]);
-        const end = addNode(coords[index + 1]);
-        if (!start || !end) continue;
-
-        const distanceKm = haversineDistanceKm(start.coord, end.coord);
-        const ascent = Math.max(0, (end.coord[2] ?? 0) - (start.coord[2] ?? 0));
-        const descent = Math.max(0, (start.coord[2] ?? 0) - (end.coord[2] ?? 0));
-        const weight = distanceKm * costMultiplier;
-
-        const edge = {
-          key: end.key,
-          weight,
-          distanceKm,
-          ascent,
-          descent,
-          modes
-        };
-        const reverse = {
-          key: start.key,
-          weight,
-          distanceKm,
-          ascent: descent,
-          descent: ascent,
-          modes
-        };
-        start.edges.set(end.key, edge);
-        end.edges.set(start.key, reverse);
-      }
-    });
+    this.pathFinder = new GeoJsonPathFinder(this.networkGeoJSON, this.pathFinderOptions);
   }
 
   findNearestNode(coord) {
-    if (!Array.isArray(coord) || coord.length < 2 || !this.nodeList.length) {
+    if (!this.pathFinder) {
       return null;
     }
-    let best = null;
-    let bestDistance = Infinity;
-    this.nodeList.forEach((node) => {
-      const distanceKm = haversineDistanceKm(node.coord, coord);
-      if (distanceKm < bestDistance) {
-        bestDistance = distanceKm;
-        best = node;
-      }
-    });
-    if (!best) {
-      return null;
-    }
-    return {
-      node: best,
-      distanceMeters: bestDistance * 1000
-    };
+    return this.pathFinder.findNearestNode(coord);
   }
 
   async getRoute(waypoints, { mode } = {}) {
@@ -291,11 +180,15 @@ export class OfflineRouter {
   }
 
   findPathBetween(startCoord, endCoord, mode) {
-    const startSnap = this.findNearestNode(startCoord);
-    const endSnap = this.findNearestNode(endCoord);
+    if (!this.pathFinder) {
+      throw new Error('Offline network is unavailable for routing');
+    }
+    const startSnap = this.pathFinder.findNearestNode(startCoord);
+    const endSnap = this.pathFinder.findNearestNode(endCoord);
     if (!startSnap || !endSnap) {
       throw new Error('Offline network is unavailable for routing');
     }
+
     const startTooFar = startSnap.distanceMeters > this.maxSnapDistanceMeters;
     const endTooFar = endSnap.distanceMeters > this.maxSnapDistanceMeters;
 
@@ -307,105 +200,34 @@ export class OfflineRouter {
       throw new Error('Selected points are too far from the offline routing network');
     }
 
-    const startKey = startSnap.node.key;
-    const endKey = endSnap.node.key;
-    const distances = new Map();
-    const previous = new Map();
-    const queue = new Set();
-
-    this.nodeList.forEach((node) => {
-      distances.set(node.key, Infinity);
-    });
-    distances.set(startKey, 0);
-    queue.add(startKey);
-
-    while (queue.size) {
-      let currentKey = null;
-      let currentDistance = Infinity;
-      queue.forEach((key) => {
-        const value = distances.get(key);
-        if (value < currentDistance) {
-          currentDistance = value;
-          currentKey = key;
-        }
-      });
-      if (currentKey === null) {
-        break;
-      }
-      queue.delete(currentKey);
-      if (currentKey === endKey) {
-        break;
-      }
-      const node = this.nodes.get(currentKey);
-      if (!node) continue;
-      node.edges.forEach((edge) => {
-        if (edge.modes && !edge.modes.has(mode)) {
-          return;
-        }
-        const alt = currentDistance + edge.weight;
-        if (alt < distances.get(edge.key)) {
-          distances.set(edge.key, alt);
-          previous.set(edge.key, currentKey);
-          queue.add(edge.key);
-        }
-      });
-    }
-
-    if (!previous.has(endKey) && startKey !== endKey) {
+    const path = this.pathFinder.buildPath(startSnap.node.key, endSnap.node.key, mode);
+    if (!path || !Array.isArray(path.coordinates) || !path.coordinates.length) {
       return null;
     }
 
-    const pathKeys = [];
-    let cursor = endKey;
-    pathKeys.push(cursor);
-    while (previous.has(cursor)) {
-      cursor = previous.get(cursor);
-      pathKeys.push(cursor);
-    }
-    pathKeys.reverse();
-
-    const coordinates = [];
-    let totalDistanceKm = 0;
-    let totalAscent = 0;
-    let totalDescent = 0;
-
-    for (let index = 0; index < pathKeys.length; index += 1) {
-      const key = pathKeys[index];
-      const node = this.nodes.get(key);
-      if (!node) continue;
-      const source = index === 0
-        ? mergeCoordinates(startCoord, node.coord)
-        : node.coord.slice();
-      if (!coordinates.length || !this.coordinatesEqual(coordinates[coordinates.length - 1], source)) {
-        coordinates.push(source);
+    const coordinates = path.coordinates.map((coord, index, array) => {
+      if (index === 0) {
+        return mergeCoordinates(startCoord, coord);
       }
-      if (index < pathKeys.length - 1) {
-        const nextKey = pathKeys[index + 1];
-        const edge = node.edges.get(nextKey);
-        if (edge) {
-          totalDistanceKm += edge.distanceKm;
-          totalAscent += edge.ascent;
-          totalDescent += edge.descent;
-        }
+      if (index === array.length - 1) {
+        return mergeCoordinates(endCoord, coord);
       }
-    }
+      return coord.slice();
+    });
 
-    if (coordinates.length) {
-      const last = coordinates[coordinates.length - 1];
-      const merged = mergeCoordinates(endCoord, last);
-      coordinates[coordinates.length - 1] = merged;
+    if (coordinates.length === 1) {
+      const startMerged = mergeCoordinates(startCoord, coordinates[0]);
+      const endMerged = mergeCoordinates(endCoord, coordinates[0]);
+      if (startMerged.length && endMerged.length) {
+        coordinates.splice(0, 1, startMerged, endMerged);
+      }
     }
 
     return {
       coordinates,
-      distanceKm: totalDistanceKm,
-      ascent: totalAscent,
-      descent: totalDescent
+      distanceKm: path.distanceKm,
+      ascent: path.ascent,
+      descent: path.descent
     };
-  }
-
-  coordinatesEqual(a, b) {
-    if (!Array.isArray(a) || !Array.isArray(b)) return false;
-    return Math.abs(a[0] - b[0]) <= 1e-6 && Math.abs(a[1] - b[1]) <= 1e-6;
   }
 }
