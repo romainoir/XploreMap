@@ -8,7 +8,7 @@ const DEFAULT_SPEEDS = Object.freeze({
 const DEFAULT_SNAP_TOLERANCE_METERS = 500;
 const MIN_BRIDGE_DISTANCE_METERS = 1500;
 
-function coordinatesAlmostEqual(a, b, epsilon = 1e-6) {
+function coordinatesAlmostEqual(a, b, epsilon = 1e-7) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
     return false;
   }

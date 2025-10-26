@@ -7,8 +7,9 @@ const DEFAULT_OPTIONS = Object.freeze({
   sourceId: 'openmaptiles',
   sourceLayer: 'transportation',
   boundsPaddingRatio: 0.2,
-  coordinatePrecision: 6
+  coordinatePrecision: 7
 });
+const COORD_DUPLICATE_EPSILON = 1e-9;
 const ALLOWED_VALUES = new Set(['yes', 'designated', 'permissive', 'official', 'destination', 'unknown']);
 const FORBIDDEN_VALUES = new Set(['no', 'private']);
 
@@ -161,7 +162,7 @@ function waitForMapIdle(map) {
   });
 }
 
-function sanitizeLineCoordinates(coords, precision = 6) {
+function sanitizeLineCoordinates(coords, precision = 7) {
   if (!Array.isArray(coords)) {
     return null;
   }
@@ -179,7 +180,9 @@ function sanitizeLineCoordinates(coords, precision = 6) {
     const roundedLng = Math.round(lng * factor) / factor;
     const roundedLat = Math.round(lat * factor) / factor;
     const previous = sanitized[sanitized.length - 1];
-    if (previous && Math.abs(previous[0] - roundedLng) <= 1e-6 && Math.abs(previous[1] - roundedLat) <= 1e-6) {
+    if (previous
+      && Math.abs(previous[0] - roundedLng) <= COORD_DUPLICATE_EPSILON
+      && Math.abs(previous[1] - roundedLat) <= COORD_DUPLICATE_EPSILON) {
       return;
     }
     const elevation = coord.length > 2 && Number.isFinite(coord[2]) ? Number(coord[2]) : 0;
