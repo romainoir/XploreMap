@@ -1,12 +1,13 @@
 import { GeoJsonPathFinder, haversineDistanceKm } from './geojson-pathfinder.js';
 
+export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 8;
+
 const DEFAULT_SPEEDS = Object.freeze({
   'foot-hiking': 4.5,
   'cycling-regular': 15,
   'driving-car': 40
 });
 const DEFAULT_SNAP_TOLERANCE_METERS = 500;
-const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 8;
 const MIN_BRIDGE_DISTANCE_METERS = 1500;
 const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
 // Use a much tighter tolerance when we deduplicate consecutive coordinates so we only
@@ -519,6 +520,37 @@ export class OfflineRouter {
     this.pathFinder = new GeoJsonPathFinder(this.networkGeoJSON, this.pathFinderOptions);
     this.readyPromise = Promise.resolve();
     return !isSameObject;
+  }
+
+  getNodeConnectionToleranceMeters() {
+    const tolerance = Number(this.pathFinderOptions?.nodeConnectionToleranceMeters);
+    return Number.isFinite(tolerance) && tolerance >= 0
+      ? tolerance
+      : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS;
+  }
+
+  setNodeConnectionToleranceMeters(toleranceMeters) {
+    const meters = Number(toleranceMeters);
+    if (!Number.isFinite(meters) || meters < 0) {
+      return false;
+    }
+
+    const current = Number(this.pathFinderOptions?.nodeConnectionToleranceMeters);
+    if (Number.isFinite(current) && Math.abs(current - meters) < 1e-9) {
+      return false;
+    }
+
+    this.pathFinderOptions = {
+      ...this.pathFinderOptions,
+      nodeConnectionToleranceMeters: meters
+    };
+
+    if (this.networkGeoJSON) {
+      this.pathFinder = new GeoJsonPathFinder(this.networkGeoJSON, this.pathFinderOptions);
+      this.readyPromise = Promise.resolve();
+    }
+
+    return true;
   }
 
   findNearestNode(coord) {
