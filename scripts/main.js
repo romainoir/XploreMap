@@ -149,6 +149,7 @@ async function init() {
     style: versaStyle,
     maxZoom: 18,
     maxPitch: 85,
+    antialias: true,
     fadeDuration: TILE_FADE_DURATION
   });
 
