@@ -1,6 +1,7 @@
 import { GeoJsonPathFinder, haversineDistanceKm } from './geojson-pathfinder.js';
 
 export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 8;
+export const MAX_NODE_CONNECTION_TOLERANCE_METERS = 100;
 
 const DEFAULT_SPEEDS = Object.freeze({
   'foot-hiking': 4.5,
@@ -525,7 +526,7 @@ export class OfflineRouter {
   getNodeConnectionToleranceMeters() {
     const tolerance = Number(this.pathFinderOptions?.nodeConnectionToleranceMeters);
     return Number.isFinite(tolerance) && tolerance >= 0
-      ? tolerance
+      ? Math.min(tolerance, MAX_NODE_CONNECTION_TOLERANCE_METERS)
       : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS;
   }
 
@@ -535,14 +536,16 @@ export class OfflineRouter {
       return false;
     }
 
+    const clampedMeters = Math.min(meters, MAX_NODE_CONNECTION_TOLERANCE_METERS);
+
     const current = Number(this.pathFinderOptions?.nodeConnectionToleranceMeters);
-    if (Number.isFinite(current) && Math.abs(current - meters) < 1e-9) {
+    if (Number.isFinite(current) && Math.abs(current - clampedMeters) < 1e-9) {
       return false;
     }
 
     this.pathFinderOptions = {
       ...this.pathFinderOptions,
-      nodeConnectionToleranceMeters: meters
+      nodeConnectionToleranceMeters: clampedMeters
     };
 
     if (this.networkGeoJSON) {

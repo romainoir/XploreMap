@@ -12,7 +12,6 @@ const MODE_COLORS = {
 const HOVER_PIXEL_TOLERANCE = 12;
 const COORD_EPSILON = 1e-6;
 const WAYPOINT_MATCH_TOLERANCE_METERS = 30;
-const MAX_WAYPOINT_SNAP_DISTANCE_METERS = 400;
 const MAX_ELEVATION_POINTS = 180;
 const MAX_DISTANCE_MARKERS = 60;
 const ELEVATION_TICK_TARGET = 5;
@@ -2314,79 +2313,45 @@ export class DirectionsManager {
     if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
       return false;
     }
-    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
-      return false;
-    }
 
-    const before = this.snapshotWaypoints();
-    const lastIndex = this.waypoints.length - 1;
-    const updated = this.waypoints.map((coord) => (Array.isArray(coord) ? coord.slice() : coord));
-    const firstSegment = this.routeSegments[0];
-    const lastSegment = this.routeSegments[this.routeSegments.length - 1];
-
-    const startCandidate = firstSegment && Array.isArray(firstSegment.start)
-      ? [firstSegment.start[0], firstSegment.start[1]]
-      : null;
-    const endCandidate = lastSegment && Array.isArray(lastSegment.end)
-      ? [lastSegment.end[0], lastSegment.end[1]]
-      : null;
-
-    if (startCandidate) {
-      updated[0] = startCandidate;
-    }
-    if (endCandidate) {
-      updated[lastIndex] = endCandidate;
-    }
-
-    for (let index = 1; index < lastIndex; index += 1) {
-      const current = updated[index];
-      if (!Array.isArray(current) || current.length < 2) {
-        continue;
+    const normalizedWaypoints = this.waypoints.map((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) {
+        return coord;
       }
-      const lngLat = toLngLat(current);
-      const projection = this.projectOntoRoute(lngLat, Number.MAX_SAFE_INTEGER);
-      if (projection?.projection?.coordinates) {
-        const [lng, lat] = projection.projection.coordinates;
-        updated[index] = [lng, lat];
+      const lng = Number(coord[0]);
+      const lat = Number(coord[1]);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        return coord;
       }
-    }
+      if (coord.length > 2 && Number.isFinite(coord[2])) {
+        return [lng, lat, coord[2]];
+      }
+      return [lng, lat];
+    });
 
-    let changed = false;
-    updated.forEach((coord, index) => {
+    let before = null;
+    normalizedWaypoints.forEach((coord, index) => {
       if (!Array.isArray(coord) || coord.length < 2) {
         return;
       }
-      const next = [coord[0], coord[1]];
-      const force = index === 0 || index === lastIndex;
-      const currentWaypoint = Array.isArray(this.waypoints[index]) ? this.waypoints[index] : [];
-      const hasElevation = currentWaypoint.length > 2;
-      const differs = !this.coordinatesMatch(currentWaypoint, next);
-      const displacementMeters = this.computeCoordinateDistanceMeters(currentWaypoint, next);
-      const withinSnapLimit = displacementMeters == null
-        || displacementMeters <= MAX_WAYPOINT_SNAP_DISTANCE_METERS;
-
-      if (!withinSnapLimit && differs) {
-        return;
-      }
-
-      if (force && (differs || hasElevation)) {
-        this.waypoints[index] = next;
-        changed = true;
-        return;
-      }
-      if (!force && differs) {
-        this.waypoints[index] = next;
-        changed = true;
-      } else if (hasElevation && withinSnapLimit) {
-        this.waypoints[index] = next;
+      const current = this.waypoints[index];
+      const hasComparableCurrent = Array.isArray(current) && current.length >= 2;
+      const lengthChanged = !Array.isArray(current) || current.length !== coord.length;
+      const differs = hasComparableCurrent ? !this.coordinatesMatch(current, coord) : true;
+      if (lengthChanged || differs) {
+        if (!before) {
+          before = this.snapshotWaypoints();
+        }
+        this.waypoints[index] = coord.slice();
       }
     });
 
-    if (changed) {
-      this.logViaWaypointState('Snapped via waypoints to route', before, this.waypoints);
+    if (before) {
+      this.logViaWaypointState('Normalized waypoint coordinates', before, this.waypoints);
+      return true;
     }
 
-    return changed;
+    return false;
   }
 
   addRouteCut(distanceKm) {
