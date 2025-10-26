@@ -418,6 +418,7 @@ export class DirectionsManager {
     this.isDragging = false;
     this.draggedWaypointIndex = null;
     this.draggedBivouacIndex = null;
+    this.draggedBivouacStartCuts = null;
     this.draggedBivouacLngLat = null;
     this.hoveredWaypointIndex = null;
     this.hoveredSegmentIndex = null;
@@ -1665,6 +1666,209 @@ export class DirectionsManager {
     return result;
   }
 
+  buildWaypointLogSummary(list) {
+    if (!Array.isArray(list) || !list.length) {
+      return [];
+    }
+
+    const total = list.length;
+    let viaOrder = 0;
+    const roundPixel = (value) => (Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null);
+
+    return list
+      .map((coord, index) => {
+        const normalized = this.normalizeWaypointForLog(coord);
+        if (!normalized) {
+          return null;
+        }
+
+        const [rawLng, rawLat] = normalized.raw;
+        let role = 'via';
+        let label = '';
+        let id = '';
+        let order = 0;
+
+        if (index === 0) {
+          role = 'start';
+          label = 'Départ';
+          id = 'start';
+        } else if (index === total - 1) {
+          role = 'end';
+          label = 'Arrivée';
+          id = 'end';
+        } else {
+          viaOrder += 1;
+          role = 'via';
+          order = viaOrder;
+          label = `Via ${viaOrder}`;
+          id = `via-${viaOrder}`;
+        }
+
+        const projected =
+          this.map && typeof this.map.project === 'function'
+            ? this.map.project(new maplibregl.LngLat(rawLng, rawLat))
+            : null;
+
+        return {
+          index,
+          role,
+          id,
+          label,
+          order,
+          lng: normalized.rounded[0],
+          lat: normalized.rounded[1],
+          rawLng,
+          rawLat,
+          x: roundPixel(projected?.x),
+          y: roundPixel(projected?.y)
+        };
+      })
+      .filter(Boolean);
+  }
+
+  haveWaypointSummariesChanged(previous = [], next = []) {
+    if (!Array.isArray(previous) || !Array.isArray(next)) {
+      return true;
+    }
+
+    if (previous.length !== next.length) {
+      return true;
+    }
+
+    for (let index = 0; index < previous.length; index += 1) {
+      const prev = previous[index];
+      const nextItem = next[index];
+      if (!prev || !nextItem) {
+        return true;
+      }
+
+      if (prev.id !== nextItem.id || prev.role !== nextItem.role) {
+        return true;
+      }
+
+      const lngDelta = Math.abs((prev.rawLng ?? 0) - (nextItem.rawLng ?? 0));
+      const latDelta = Math.abs((prev.rawLat ?? 0) - (nextItem.rawLat ?? 0));
+      if (Number.isFinite(lngDelta) && Number.isFinite(latDelta)) {
+        if (lngDelta > COORD_EPSILON || latDelta > COORD_EPSILON) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  buildBivouacLogSummary(distances) {
+    if (!Array.isArray(distances) || !distances.length) {
+      return [];
+    }
+
+    if (!turfApi) {
+      return [];
+    }
+
+    const geometry = this.routeGeojson?.geometry;
+    const coordinates = Array.isArray(geometry?.coordinates) ? geometry.coordinates : null;
+    if (!coordinates || coordinates.length < 2) {
+      return [];
+    }
+
+    const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+    if (!Number.isFinite(totalDistance) || totalDistance <= ROUTE_CUT_EPSILON_KM) {
+      return [];
+    }
+
+    const roundPixel = (value) => (Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null);
+
+    return distances
+      .map((value, index) => {
+        const distanceKm = Number(value);
+        if (!Number.isFinite(distanceKm)) {
+          return null;
+        }
+
+        const clamped = Math.max(0, Math.min(distanceKm, totalDistance));
+        let coords = null;
+
+        try {
+          const point = turfApi.along(geometry, clamped, { units: 'kilometers' });
+          coords = Array.isArray(point?.geometry?.coordinates) ? point.geometry.coordinates : null;
+        } catch (error) {
+          console.warn('Failed to compute bivouac position', error);
+          return null;
+        }
+
+        if (!coords || coords.length < 2) {
+          return null;
+        }
+
+        const lng = Number(coords[0]);
+        const lat = Number(coords[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+          return null;
+        }
+
+        const roundedLng = Math.round(lng * 1e6) / 1e6;
+        const roundedLat = Math.round(lat * 1e6) / 1e6;
+        const projected =
+          this.map && typeof this.map.project === 'function'
+            ? this.map.project(new maplibregl.LngLat(lng, lat))
+            : null;
+
+        return {
+          order: index + 1,
+          id: `bivouac-${index + 1}`,
+          label: `Bivouac ${index + 1}`,
+          distanceKm: Math.round(clamped * 1000) / 1000,
+          originalDistanceKm: Math.round(distanceKm * 1000) / 1000,
+          lng: roundedLng,
+          lat: roundedLat,
+          rawLng: lng,
+          rawLat: lat,
+          x: roundPixel(projected?.x),
+          y: roundPixel(projected?.y)
+        };
+      })
+      .filter(Boolean);
+  }
+
+  haveBivouacSummariesChanged(previous = [], next = []) {
+    if (!Array.isArray(previous) || !Array.isArray(next)) {
+      return true;
+    }
+
+    if (previous.length !== next.length) {
+      return true;
+    }
+
+    for (let index = 0; index < previous.length; index += 1) {
+      const prev = previous[index];
+      const nextItem = next[index];
+      if (!prev || !nextItem) {
+        return true;
+      }
+
+      if (prev.id !== nextItem.id) {
+        return true;
+      }
+
+      const lngDelta = Math.abs((prev.rawLng ?? 0) - (nextItem.rawLng ?? 0));
+      const latDelta = Math.abs((prev.rawLat ?? 0) - (nextItem.rawLat ?? 0));
+      if (Number.isFinite(lngDelta) && Number.isFinite(latDelta)) {
+        if (lngDelta > COORD_EPSILON || latDelta > COORD_EPSILON) {
+          return true;
+        }
+      }
+
+      const distanceDelta = Math.abs((prev.distanceKm ?? 0) - (nextItem.distanceKm ?? 0));
+      if (Number.isFinite(distanceDelta) && distanceDelta > ROUTE_CUT_EPSILON_KM / 10) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   areLoggedWaypointsEqual(previous, next) {
     if (!previous || !next) {
       return false;
@@ -1719,12 +1923,14 @@ export class DirectionsManager {
       return;
     }
 
-    const { force = false } = options ?? {};
+    const {
+      force = false,
+      bivouacBefore = null,
+      bivouacAfter = null
+    } = options ?? {};
+
     const beforeEntries = this.collectViaWaypointEntries(before);
     const afterEntries = this.collectViaWaypointEntries(after);
-    if (!beforeEntries.size && !afterEntries.size) {
-      return;
-    }
 
     const beforeList = Array.from(beforeEntries.entries()).map(([index, entry]) => ({ index, entry }));
     const afterList = Array.from(afterEntries.entries()).map(([index, entry]) => ({ index, entry, used: false }));
@@ -1833,9 +2039,6 @@ export class DirectionsManager {
     });
 
     const hasMeaningfulChange = rows.some((row) => row.status !== 'unchanged');
-    if (!hasMeaningfulChange && !force) {
-      return;
-    }
 
     const viaSummary = rows.map((row) => ({
       index: Number.isFinite(row.nextIndex) ? row.nextIndex : row.previousIndex,
@@ -1849,14 +2052,42 @@ export class DirectionsManager {
       deltaMeters: row.deltaMeters
     }));
 
-    const currentViaOrder = Array.from(afterEntries.keys())
-      .sort((a, b) => a - b)
-      .map((index) => afterEntries.get(index)?.string)
+    const beforeWaypointSummary = this.buildWaypointLogSummary(before);
+    const afterWaypointSummary = this.buildWaypointLogSummary(after);
+    const beforeBivouacSummary = this.buildBivouacLogSummary(Array.isArray(bivouacBefore) ? bivouacBefore : []);
+    const afterBivouacSummary = this.buildBivouacLogSummary(
+      Array.isArray(bivouacAfter) ? bivouacAfter : this.routeCutDistances
+    );
+
+    const waypointSummaryChanged = this.haveWaypointSummariesChanged(beforeWaypointSummary, afterWaypointSummary);
+    const bivouacSummaryChanged = this.haveBivouacSummariesChanged(beforeBivouacSummary, afterBivouacSummary);
+
+    if (!force && !hasMeaningfulChange && !waypointSummaryChanged && !bivouacSummaryChanged) {
+      return;
+    }
+
+    const currentViaOrder = afterWaypointSummary
+      .filter((item) => item.role === 'via')
+      .map((item) => {
+        if (!Number.isFinite(item.lng) || !Number.isFinite(item.lat)) {
+          return null;
+        }
+        return `[${item.lng.toFixed(6)}, ${item.lat.toFixed(6)}]`;
+      })
       .filter(Boolean);
 
     const title = `[DirectionsManager] ${context}`;
     if (typeof console !== 'undefined' && console) {
-      const summaryPayload = { waypoints: viaSummary };
+      const summaryPayload = {};
+      if (viaSummary.length) {
+        summaryPayload.viaChanges = viaSummary;
+      }
+      if (afterWaypointSummary.length) {
+        summaryPayload.currentWaypoints = afterWaypointSummary;
+      }
+      if (afterBivouacSummary.length) {
+        summaryPayload.currentBivouacs = afterBivouacSummary;
+      }
       if (currentViaOrder.length) {
         summaryPayload.currentViaOrder = currentViaOrder;
       }
@@ -1868,9 +2099,45 @@ export class DirectionsManager {
       if (typeof console.groupCollapsed === 'function') {
         console.groupCollapsed(`${title} (details)`);
         if (typeof console.table === 'function') {
-          console.table(viaSummary);
+          if (viaSummary.length) {
+            console.table(viaSummary);
+          } else {
+            console.log('Via waypoint summary: none');
+          }
+          if (beforeWaypointSummary.length) {
+            console.log('Waypoint positions (before):');
+            console.table(beforeWaypointSummary);
+          }
+          if (afterWaypointSummary.length) {
+            console.log('Waypoint positions (after):');
+            console.table(afterWaypointSummary);
+          }
+          if (beforeBivouacSummary.length) {
+            console.log('Bivouac positions (before):');
+            console.table(beforeBivouacSummary);
+          }
+          if (afterBivouacSummary.length) {
+            console.log('Bivouac positions (after):');
+            console.table(afterBivouacSummary);
+          }
         } else {
-          console.log('Via waypoint summary:', viaSummary);
+          if (viaSummary.length) {
+            console.log('Via waypoint summary:', viaSummary);
+          } else {
+            console.log('Via waypoint summary: none');
+          }
+          if (beforeWaypointSummary.length) {
+            console.log('Waypoint positions (before):', beforeWaypointSummary);
+          }
+          if (afterWaypointSummary.length) {
+            console.log('Waypoint positions (after):', afterWaypointSummary);
+          }
+          if (beforeBivouacSummary.length) {
+            console.log('Bivouac positions (before):', beforeBivouacSummary);
+          }
+          if (afterBivouacSummary.length) {
+            console.log('Bivouac positions (after):', afterBivouacSummary);
+          }
         }
         rows
           .filter((row) => row.status !== 'unchanged')
@@ -1905,9 +2172,25 @@ export class DirectionsManager {
         console.groupEnd();
       } else {
         if (typeof console.table === 'function') {
-          console.table(viaSummary);
+          if (viaSummary.length) {
+            console.table(viaSummary);
+          }
+          if (afterWaypointSummary.length) {
+            console.table(afterWaypointSummary);
+          }
+          if (afterBivouacSummary.length) {
+            console.table(afterBivouacSummary);
+          }
         } else {
-          console.log('Via waypoint summary:', viaSummary);
+          if (viaSummary.length) {
+            console.log('Via waypoint summary:', viaSummary);
+          }
+          if (afterWaypointSummary.length) {
+            console.log('Waypoint positions (after):', afterWaypointSummary);
+          }
+          if (afterBivouacSummary.length) {
+            console.log('Bivouac positions (after):', afterBivouacSummary);
+          }
         }
         if (currentViaOrder.length) {
           console.log('Current via coordinates (lng, lat):', currentViaOrder);
@@ -1995,6 +2278,7 @@ export class DirectionsManager {
       return;
     }
 
+    const previousCuts = Array.isArray(this.routeCutDistances) ? this.routeCutDistances.slice() : [];
     const exists = this.routeCutDistances.some((cut) => Math.abs(cut - clamped) <= ROUTE_CUT_EPSILON_KM / 2);
     if (exists) {
       return;
@@ -2003,6 +2287,11 @@ export class DirectionsManager {
     this.routeCutDistances.push(clamped);
     this.routeCutDistances.sort((a, b) => a - b);
     this.updateCutDisplays();
+    this.logViaWaypointState('Added bivouac marker', this.waypoints, this.waypoints, {
+      force: true,
+      bivouacBefore: previousCuts,
+      bivouacAfter: this.routeCutDistances.slice()
+    });
   }
 
   updateDraggedBivouac(distanceKm) {
@@ -2074,6 +2363,16 @@ export class DirectionsManager {
 
     this.draggedBivouacLngLat = null;
     this.updateSegmentMarkers();
+    if (Array.isArray(this.draggedBivouacStartCuts)) {
+      const beforeCuts = this.draggedBivouacStartCuts;
+      const afterCuts = Array.isArray(this.routeCutDistances) ? this.routeCutDistances.slice() : [];
+      this.logViaWaypointState('Updated bivouac marker', this.waypoints, this.waypoints, {
+        force: true,
+        bivouacBefore: beforeCuts,
+        bivouacAfter: afterCuts
+      });
+    }
+    this.draggedBivouacStartCuts = null;
   }
 
   onRouteContextMenu(event) {
@@ -2161,6 +2460,9 @@ export class DirectionsManager {
     this.isDragging = true;
     this.draggedWaypointIndex = null;
     this.draggedBivouacIndex = cutIndex;
+    this.draggedBivouacStartCuts = Array.isArray(this.routeCutDistances)
+      ? this.routeCutDistances.slice()
+      : [];
     if (event?.lngLat && Number.isFinite(event.lngLat.lng) && Number.isFinite(event.lngLat.lat)) {
       this.draggedBivouacLngLat = [event.lngLat.lng, event.lngLat.lat];
       this.updateSegmentMarkers();
@@ -2251,7 +2553,9 @@ export class DirectionsManager {
       return;
     }
 
+    const before = this.snapshotWaypoints();
     this.waypoints.push([event.lngLat.lng, event.lngLat.lat]);
+    this.logViaWaypointState('Added waypoint from map click', before, this.waypoints, { force: true });
     this.updateWaypoints();
     if (this.waypoints.length === 1) {
       this.prepareNetwork({ reason: 'first-waypoint' });
@@ -3176,6 +3480,7 @@ export class DirectionsManager {
     this.lastElevationHoverDistance = null;
     this.draggedBivouacIndex = null;
     this.draggedBivouacLngLat = null;
+    this.draggedBivouacStartCuts = null;
 
     this.updateRouteLineSource();
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
