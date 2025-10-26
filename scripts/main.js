@@ -180,9 +180,7 @@ async function init() {
   });
 
   const OFFLINE_NETWORK_COVERAGE_PADDING_RATIO = 0.35;
-  const OFFLINE_NETWORK_REFRESH_DEBOUNCE_MS = 1200;
   let offlineNetworkCoverage = null;
-  let offlineNetworkRefreshTimeout = null;
   let offlineNetworkRefreshPromise = null;
 
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
@@ -190,6 +188,7 @@ async function init() {
   const DEBUG_NETWORK_INTERSECTIONS_LAYER_ID = 'offline-router-network-debug-intersections';
   let debugNetworkVisible = false;
   let debugNetworkData = null;
+  let directionsManager = null;
 
   const bringDebugNetworkToFront = () => {
     if (!map || typeof map.moveLayer !== 'function') {
@@ -362,6 +361,54 @@ async function init() {
       && inner.north <= outer.north + epsilon;
   };
 
+  const computeCoordinateBounds = (coordinates) => {
+    if (!Array.isArray(coordinates) || !coordinates.length) {
+      return null;
+    }
+
+    let west = Infinity;
+    let east = -Infinity;
+    let south = Infinity;
+    let north = -Infinity;
+
+    coordinates.forEach((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) {
+        return;
+      }
+      const lng = Number(coord[0]);
+      const lat = Number(coord[1]);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        return;
+      }
+      if (lng < west) west = lng;
+      if (lng > east) east = lng;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+    });
+
+    if (!Number.isFinite(west) || !Number.isFinite(east) || !Number.isFinite(south) || !Number.isFinite(north)) {
+      return null;
+    }
+
+    const expandIfZeroSpan = (min, max) => {
+      if (min === max) {
+        const delta = 1e-6;
+        return [min - delta, max + delta];
+      }
+      return [min, max];
+    };
+
+    const [normWest, normEast] = expandIfZeroSpan(west, east);
+    const [normSouth, normNorth] = expandIfZeroSpan(south, north);
+
+    return {
+      west: normWest,
+      east: normEast,
+      south: normSouth,
+      north: normNorth
+    };
+  };
+
   const shouldRefreshOfflineNetwork = () => {
     if (!map || typeof map.getBounds !== 'function') {
       return false;
@@ -415,19 +462,6 @@ async function init() {
       }
     })();
     return offlineNetworkRefreshPromise;
-  };
-
-  const scheduleOfflineNetworkRefresh = () => {
-    if (!shouldRefreshOfflineNetwork()) {
-      return;
-    }
-    if (offlineNetworkRefreshTimeout) {
-      window.clearTimeout(offlineNetworkRefreshTimeout);
-    }
-    offlineNetworkRefreshTimeout = window.setTimeout(() => {
-      offlineNetworkRefreshTimeout = null;
-      refreshOfflineNetwork();
-    }, OFFLINE_NETWORK_REFRESH_DEBOUNCE_MS);
   };
 
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
@@ -513,7 +547,7 @@ async function init() {
     try {
       const params = new URLSearchParams(window.location.search);
       const enableWaypointLogging = params.has('directionsDebug');
-      const directionsManager = new DirectionsManager(map, [
+      directionsManager = new DirectionsManager(map, [
         directionsToggle,
         directionsDock,
         directionsControl,
@@ -550,17 +584,47 @@ async function init() {
           })
           .filter(Boolean);
       });
+
+      directionsManager.setNetworkPreparationCallback(async ({ waypoints }) => {
+        const coords = Array.isArray(waypoints) ? waypoints : [];
+        const bounds = computeCoordinateBounds(coords);
+
+        const lacksWaypointCoverage = () => {
+          if (!coords.length) {
+            return false;
+          }
+          if (!offlineNetworkCoverage) {
+            return true;
+          }
+          if (!bounds) {
+            return !offlineNetworkCoverage;
+          }
+          return !boundsContains(offlineNetworkCoverage, bounds, 1e-5);
+        };
+
+        const lacksMapCoverage = () => {
+          if (coords.length) {
+            return false;
+          }
+          if (!offlineNetworkCoverage) {
+            return true;
+          }
+          return shouldRefreshOfflineNetwork();
+        };
+
+        if (lacksWaypointCoverage() || lacksMapCoverage()) {
+          await refreshOfflineNetwork();
+        }
+      });
     } catch (error) {
       console.error('Failed to initialize directions manager', error);
     }
   });
 
-  map.on('moveend', () => {
-    scheduleOfflineNetworkRefresh();
-  });
-
   map.on('style.load', () => {
-    scheduleOfflineNetworkRefresh();
+    offlineNetworkCoverage = null;
+    offlineNetworkRefreshPromise = null;
+    debugNetworkData = null;
     if (!debugNetworkVisible) {
       return;
     }

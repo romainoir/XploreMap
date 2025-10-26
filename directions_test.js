@@ -463,6 +463,7 @@ export class DirectionsManager {
     this.routeCutDistances = [];
     this.cutSegments = [];
     this.routeSegmentsListener = null;
+    this.networkPreparationCallback = null;
     this.elevationResizeObserver = null;
 
     this.setupRouteLayers();
@@ -824,6 +825,30 @@ export class DirectionsManager {
       this.routeSegmentsListener(payload);
     } catch (error) {
       console.error('Route segment listener failed', error);
+    }
+  }
+
+  setNetworkPreparationCallback(callback) {
+    this.networkPreparationCallback = typeof callback === 'function' ? callback : null;
+  }
+
+  async prepareNetwork(context = {}) {
+    if (typeof this.networkPreparationCallback !== 'function') {
+      return;
+    }
+
+    const reason = typeof context.reason === 'string' && context.reason
+      ? context.reason
+      : 'route-request';
+
+    try {
+      await this.networkPreparationCallback({
+        waypoints: this.snapshotWaypoints(),
+        mode: this.currentMode,
+        reason
+      });
+    } catch (error) {
+      console.warn('Failed to prepare routing network', error);
     }
   }
 
@@ -2228,7 +2253,9 @@ export class DirectionsManager {
 
     this.waypoints.push([event.lngLat.lng, event.lngLat.lat]);
     this.updateWaypoints();
-    if (this.waypoints.length >= 2) {
+    if (this.waypoints.length === 1) {
+      this.prepareNetwork({ reason: 'first-waypoint' });
+    } else if (this.waypoints.length >= 2) {
       this.getRoute();
     }
     this.updateModeAvailability();
@@ -2317,7 +2344,7 @@ export class DirectionsManager {
     this.clearHover(source);
   }
 
-  addViaWaypoint(lngLat, projectionOverride = null) {
+  async addViaWaypoint(lngLat, projectionOverride = null) {
     if (!lngLat || this.waypoints.length < 2) {
       return;
     }
@@ -2381,6 +2408,7 @@ export class DirectionsManager {
     this.logViaWaypointState('Inserted via waypoint', before, this.waypoints, { force: true });
     this.updateWaypoints();
     this.resetSegmentHover();
+    await this.prepareNetwork({ reason: 'via-inserted' });
     this.getRoute();
   }
 
@@ -4025,6 +4053,7 @@ export class DirectionsManager {
       if (!this.router || typeof this.router.getRoute !== 'function') {
         throw new Error('No routing engine is configured');
       }
+      await this.prepareNetwork({ reason: 'route-request' });
       const preservedSegments = this.buildPreservedSegments();
       const route = await this.router.getRoute(this.waypoints, {
         mode: this.currentMode,
