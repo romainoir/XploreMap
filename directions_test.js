@@ -3313,24 +3313,19 @@ export class DirectionsManager {
         rawSegment.push([...endWaypoint]);
       }
 
-      const sanitized = [];
-      rawSegment.forEach((coord) => {
-        if (!sanitized.length || !this.coordinatesMatch(sanitized[sanitized.length - 1], coord)) {
-          sanitized.push(coord);
-        }
-      });
+      const segmentCoordinates = rawSegment;
 
-      if (sanitized.length < 2) {
+      if (segmentCoordinates.length < 2) {
         continue;
       }
 
-      sanitized[0] = [...startWaypoint];
-      sanitized[sanitized.length - 1] = [...endWaypoint];
+      segmentCoordinates[0] = [...startWaypoint];
+      segmentCoordinates[segmentCoordinates.length - 1] = [...endWaypoint];
 
       segments.push({
         startIndex: waypointIndex,
         endIndex: waypointIndex + 1,
-        coordinates: sanitized
+        coordinates: segmentCoordinates
       });
 
       searchStart = endIndex;
