@@ -1,6 +1,6 @@
 import { GeoJsonPathFinder, haversineDistanceKm } from './geojson-pathfinder.js';
 
-export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 8;
+export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 2;
 export const MAX_NODE_CONNECTION_TOLERANCE_METERS = 100;
 
 const DEFAULT_SPEEDS = Object.freeze({
@@ -465,7 +465,8 @@ export class OfflineRouter {
       supportedModes,
       averageSpeeds,
       maxSnapDistanceMeters,
-      pathFinderOptions
+      pathFinderOptions,
+      debugLogging
     } = options;
 
     this.networkUrl = networkUrl || './data/offline-network.geojson';
@@ -484,9 +485,15 @@ export class OfflineRouter {
       ...(pathFinderOptions || {})
     };
 
+    this.debugLoggingEnabled = !!debugLogging;
+
     this.networkGeoJSON = null;
     this.pathFinder = null;
     this.readyPromise = null;
+  }
+
+  setDebugLoggingEnabled(enabled) {
+    this.debugLoggingEnabled = !!enabled;
   }
 
   supportsMode(mode) {
@@ -650,14 +657,16 @@ export class OfflineRouter {
               start_index: index,
               end_index: index + 1
             });
-            logPreservedSegmentDebug({
-              segmentIndex: index,
-              mode: travelMode,
-              startWaypoint: start,
-              endWaypoint: end,
-              metrics,
-              coordinateCount: preservedCoords.length
-            });
+            if (this.debugLoggingEnabled) {
+              logPreservedSegmentDebug({
+                segmentIndex: index,
+                mode: travelMode,
+                startWaypoint: start,
+                endWaypoint: end,
+                metrics,
+                coordinateCount: preservedCoords.length
+              });
+            }
             continue;
           }
         }
@@ -687,14 +696,16 @@ export class OfflineRouter {
       descent: totalDescent
     };
 
-    logRouteSummaryDebug({
-      segmentCount: segments.length,
-      totalDistanceKm,
-      totalAscent,
-      totalDescent,
-      coordinateCount: coordinates.length,
-      mode: travelMode
-    });
+    if (this.debugLoggingEnabled) {
+      logRouteSummaryDebug({
+        segmentCount: segments.length,
+        totalDistanceKm,
+        totalAscent,
+        totalDescent,
+        coordinateCount: coordinates.length,
+        mode: travelMode
+      });
+    }
 
     return {
       type: 'Feature',
@@ -778,7 +789,9 @@ export class OfflineRouter {
     };
 
     const returnWithDebug = (result) => {
-      logSegmentDebug({ ...debugInfo, result });
+      if (this.debugLoggingEnabled) {
+        logSegmentDebug({ ...debugInfo, result });
+      }
       return result.segment;
     };
 
