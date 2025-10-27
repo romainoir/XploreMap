@@ -902,7 +902,7 @@ async function init() {
   const demSource = new mlcontour.DemSource({
     url: MAPTERHORN_TILE_URL,
     encoding: 'terrarium',
-    maxzoom: 12,
+    maxzoom: 18,
     worker: true,
     tileSize: 512
   });
