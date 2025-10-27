@@ -14,6 +14,78 @@ const EDGE_SNAP_ENDPOINT_TOLERANCE_METERS = 0.1;
 const METERS_PER_LATITUDE_DEGREE = 111132;
 const RECENT_NODE_HISTORY_LIMIT = 16;
 
+class MinPriorityQueue {
+  constructor() {
+    this.heap = [];
+  }
+
+  size() {
+    return this.heap.length;
+  }
+
+  push(key, priority) {
+    if (!key) {
+      return;
+    }
+    const value = { key, priority: Number.isFinite(priority) ? priority : Infinity };
+    this.heap.push(value);
+    this._bubbleUp(this.heap.length - 1);
+  }
+
+  pop() {
+    if (this.heap.length === 0) {
+      return null;
+    }
+    const root = this.heap[0];
+    const last = this.heap.pop();
+    if (this.heap.length > 0 && last) {
+      this.heap[0] = last;
+      this._bubbleDown(0);
+    }
+    return root;
+  }
+
+  _bubbleUp(index) {
+    let currentIndex = index;
+    while (currentIndex > 0) {
+      const parentIndex = Math.floor((currentIndex - 1) / 2);
+      if (this.heap[parentIndex].priority <= this.heap[currentIndex].priority) {
+        break;
+      }
+      this._swap(parentIndex, currentIndex);
+      currentIndex = parentIndex;
+    }
+  }
+
+  _bubbleDown(index) {
+    let currentIndex = index;
+    const length = this.heap.length;
+    while (true) {
+      const leftIndex = currentIndex * 2 + 1;
+      const rightIndex = currentIndex * 2 + 2;
+      let smallestIndex = currentIndex;
+
+      if (leftIndex < length && this.heap[leftIndex].priority < this.heap[smallestIndex].priority) {
+        smallestIndex = leftIndex;
+      }
+      if (rightIndex < length && this.heap[rightIndex].priority < this.heap[smallestIndex].priority) {
+        smallestIndex = rightIndex;
+      }
+      if (smallestIndex === currentIndex) {
+        break;
+      }
+      this._swap(currentIndex, smallestIndex);
+      currentIndex = smallestIndex;
+    }
+  }
+
+  _swap(a, b) {
+    const temp = this.heap[a];
+    this.heap[a] = this.heap[b];
+    this.heap[b] = temp;
+  }
+}
+
 export function haversineDistanceKm(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
     return 0;
@@ -567,27 +639,24 @@ export class GeoJsonPathFinder {
     }
     const distances = new Map();
     const previous = new Map();
-    const queue = new Map();
+    const queue = new MinPriorityQueue();
 
     this.nodes.forEach((_, key) => {
       distances.set(key, Infinity);
     });
     distances.set(startKey, 0);
-    queue.set(startKey, 0);
+    queue.push(startKey, 0);
 
-    while (queue.size) {
-      let currentKey = null;
-      let currentDistance = Infinity;
-      queue.forEach((value, key) => {
-        if (value < currentDistance) {
-          currentDistance = value;
-          currentKey = key;
-        }
-      });
-      if (currentKey === null) {
+    while (queue.size()) {
+      const current = queue.pop();
+      if (!current) {
         break;
       }
-      queue.delete(currentKey);
+      const currentKey = current.key;
+      const currentDistance = current.priority;
+      if (currentDistance !== distances.get(currentKey)) {
+        continue;
+      }
       if (currentKey === endKey) {
         break;
       }
@@ -603,7 +672,7 @@ export class GeoJsonPathFinder {
         if (alt < distances.get(edge.key)) {
           distances.set(edge.key, alt);
           previous.set(edge.key, currentKey);
-          queue.set(edge.key, alt);
+          queue.push(edge.key, alt);
         }
       });
     }
