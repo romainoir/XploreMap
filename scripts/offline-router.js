@@ -466,6 +466,7 @@ export class OfflineRouter {
     this.pathFinderOptions = {
       tolerance: 1e-3,
       nodeConnectionToleranceMeters: DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
+      nodeBucketSizeDegrees: 0.002,
       ...(pathFinderOptions || {})
     };
 
