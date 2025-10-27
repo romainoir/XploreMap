@@ -205,7 +205,23 @@ async function init() {
   const debugNetworkCheckbox = document.getElementById('debugNetworkCheckbox');
   const debugNetworkControl = document.getElementById('debugNetworkControl');
 
-  const offlineRouter = new OfflineRouter({ networkUrl: './data/offline-network.geojson' });
+  const routerParam = searchParams.get('router');
+  const preferRouteSnapper = routerParam !== 'legacy';
+  const routeSnapperModuleParam = searchParams.get('routeSnapperModule');
+  const routeSnapperWasmParam = searchParams.get('routeSnapperWasm');
+  const routeSnapperOptions = {};
+  if (routeSnapperModuleParam) {
+    routeSnapperOptions.moduleUrl = routeSnapperModuleParam;
+  }
+  if (routeSnapperWasmParam) {
+    routeSnapperOptions.wasmUrl = routeSnapperWasmParam;
+  }
+
+  const offlineRouter = new OfflineRouter({
+    networkUrl: './data/offline-network.geojson',
+    preferRouteSnapper,
+    routeSnapperOptions: Object.keys(routeSnapperOptions).length ? routeSnapperOptions : undefined
+  });
   if (typeof offlineRouter.setNodeConnectionToleranceMeters === 'function') {
     offlineRouter.setNodeConnectionToleranceMeters(DEFAULT_NODE_CONNECTION_TOLERANCE_METERS);
   }
@@ -634,7 +650,7 @@ async function init() {
         const { network } = networkResult;
         let { coverageBounds } = networkResult;
         if (network && Array.isArray(network.features) && network.features.length) {
-          offlineRouter.setNetworkGeoJSON(network);
+          await offlineRouter.setNetworkGeoJSON(network);
           const debugDataset = typeof offlineRouter.getNetworkDebugGeoJSON === 'function'
             ? offlineRouter.getNetworkDebugGeoJSON({ intersectionsOnly: true })
             : network;

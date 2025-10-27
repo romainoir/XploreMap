@@ -1,4 +1,5 @@
 import { GeoJsonPathFinder, haversineDistanceKm } from './geojson-pathfinder.js';
+import { createRouteSnapperPathFinder, ROUTE_SNAPPER_DEFAULTS } from './route-snapper-loader.js';
 
 export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 2;
 export const MAX_NODE_CONNECTION_TOLERANCE_METERS = 100;
@@ -466,7 +467,9 @@ export class OfflineRouter {
       averageSpeeds,
       maxSnapDistanceMeters,
       pathFinderOptions,
-      debugLogging
+      debugLogging,
+      preferRouteSnapper,
+      routeSnapperOptions
     } = options;
 
     this.networkUrl = networkUrl || './data/offline-network.geojson';
@@ -485,11 +488,30 @@ export class OfflineRouter {
       ...(pathFinderOptions || {})
     };
 
+    this.preferRouteSnapper = preferRouteSnapper !== false;
+    this.routeSnapperOptions = {
+      ...ROUTE_SNAPPER_DEFAULTS,
+      ...(routeSnapperOptions || {})
+    };
+
     this.debugLoggingEnabled = !!debugLogging;
 
     this.networkGeoJSON = null;
     this.pathFinder = null;
+    this.pathFinderSource = null;
     this.readyPromise = null;
+  }
+
+  disposePathFinder() {
+    if (this.pathFinder && typeof this.pathFinder.dispose === 'function') {
+      try {
+        this.pathFinder.dispose();
+      } catch (error) {
+        console.warn(`${OFFLINE_ROUTER_DEBUG_PREFIX} Failed to dispose current pathfinder`, error);
+      }
+    }
+    this.pathFinder = null;
+    this.pathFinderSource = null;
   }
 
   setDebugLoggingEnabled(enabled) {
@@ -498,6 +520,14 @@ export class OfflineRouter {
 
   supportsMode(mode) {
     return this.supportedModes.has(mode);
+  }
+
+  isUsingRouteSnapper() {
+    return this.pathFinderSource === 'route-snapper';
+  }
+
+  getPathFinderSource() {
+    return this.pathFinderSource || 'unknown';
   }
 
   getNetworkGeoJSON() {
@@ -526,7 +556,7 @@ export class OfflineRouter {
     if (!data || typeof data !== 'object') {
       throw new Error('Offline network payload is not valid GeoJSON data');
     }
-    this.setNetworkGeoJSON(data);
+    await this.setNetworkGeoJSON(data);
   }
 
   setNetworkGeoJSON(geojson) {
@@ -540,9 +570,35 @@ export class OfflineRouter {
 
     const isSameObject = this.networkGeoJSON === geojson;
     this.networkGeoJSON = geojson;
-    this.pathFinder = new GeoJsonPathFinder(this.networkGeoJSON, this.pathFinderOptions);
-    this.readyPromise = Promise.resolve();
-    return !isSameObject;
+    this.readyPromise = this.initializePathFinder(this.networkGeoJSON);
+    return this.readyPromise.then(() => !isSameObject);
+  }
+
+  async initializePathFinder(geojson) {
+    this.disposePathFinder();
+
+    if (this.preferRouteSnapper) {
+      try {
+        const pathFinder = await createRouteSnapperPathFinder(geojson, {
+          ...this.routeSnapperOptions,
+          fallbackPathFinderOptions: this.pathFinderOptions
+        });
+        if (pathFinder) {
+          this.pathFinder = pathFinder;
+          this.pathFinderSource = 'route-snapper';
+          console.info(`${OFFLINE_ROUTER_DEBUG_PREFIX} Using RouteSnapper pathfinder`);
+          return;
+        }
+      } catch (error) {
+        console.warn(`${OFFLINE_ROUTER_DEBUG_PREFIX} RouteSnapper initialization failed`, error);
+      }
+    }
+
+    this.pathFinder = new GeoJsonPathFinder(geojson, this.pathFinderOptions);
+    this.pathFinderSource = 'geojson';
+    if (this.preferRouteSnapper) {
+      console.info(`${OFFLINE_ROUTER_DEBUG_PREFIX} Falling back to GeoJsonPathFinder`);
+    }
   }
 
   getNodeConnectionToleranceMeters() {
@@ -571,8 +627,7 @@ export class OfflineRouter {
     };
 
     if (this.networkGeoJSON) {
-      this.pathFinder = new GeoJsonPathFinder(this.networkGeoJSON, this.pathFinderOptions);
-      this.readyPromise = Promise.resolve();
+      this.readyPromise = this.initializePathFinder(this.networkGeoJSON);
     }
 
     return true;
