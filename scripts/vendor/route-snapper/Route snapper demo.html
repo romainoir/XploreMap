@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<!-- saved from url=(0065)https://dabreegster.github.io/route_snapper/#13/51.48882/-0.09856 -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <title>Route snapper demo</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    <script src="./Route snapper demo_files/maplibre-gl.js.téléchargement"></script>
+    <link href="./Route snapper demo_files/maplibre-gl.css" rel="stylesheet">
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+      }
+      #snap-tool {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        padding: 10px;
+
+        background-color: white;
+      }
+      #top-left {
+        position: absolute;
+        z-index: 5;
+        padding: 20px;
+        background-color: white;
+        max-width: 400px;
+      }
+      .row {
+        margin: 16px 0px;
+      }
+      #status {
+        border: 4px solid;
+        padding: 6px;
+      }
+    </style>
+  </head>
+  <body data-new-gr-c-s-check-loaded="14.1259.0" data-gr-ext-installed="">
+    <div id="top-left">
+      <div class="row">
+        <a href="https://dabreegster.github.io/route_snapper/import.html">Create your own graph files</a>
+      </div>
+      <div class="row">
+        <label>Change graph file:
+          <input type="file" id="fileInput">
+        </label>
+      </div>
+      <div class="row">
+        <button type="button" id="clear">Clear routes</button>
+      </div>
+      <div class="row">
+        <button type="button" id="start">
+          Start (not part of the main control)
+        </button>
+      </div>
+      <div class="row">
+        <button type="button" id="stop">
+          Stop (not part of the main control)
+        </button>
+      </div>
+      <div class="row">
+        <button type="button" id="debugGraph">
+          Download debug graph as GeoJSON
+        </button>
+      </div>
+      <div class="row">Click an existing route to edit</div>
+      <div id="status">Inactive</div>
+      <div class="row">
+        <button type="button" id="download">
+          Download drawn routes as GeoJSON
+        </button>
+      </div>
+    </div>
+    <div id="map" class="maplibregl-map mapboxgl-map"><div class="maplibregl-canvas-container mapboxgl-canvas-container maplibregl-interactive mapboxgl-interactive maplibregl-touch-drag-pan mapboxgl-touch-drag-pan maplibregl-touch-zoom-rotate mapboxgl-touch-zoom-rotate"><canvas class="maplibregl-canvas mapboxgl-canvas" tabindex="0" aria-label="Map" role="region" width="1127" height="1312" style="width: 1127px; height: 1312px; cursor: inherit;"></canvas></div><div class="maplibregl-control-container mapboxgl-control-container"><div class="maplibregl-ctrl-top-left mapboxgl-ctrl-top-left"></div><div class="maplibregl-ctrl-top-right mapboxgl-ctrl-top-right"></div><div class="maplibregl-ctrl-bottom-left mapboxgl-ctrl-bottom-left"></div><div class="maplibregl-ctrl-bottom-right mapboxgl-ctrl-bottom-right"><details class="maplibregl-ctrl maplibregl-ctrl-attrib mapboxgl-ctrl mapboxgl-ctrl-attrib" open=""><summary class="maplibregl-ctrl-attrib-button mapboxgl-ctrl-attrib-button" title="Toggle attribution" aria-label="Toggle attribution"></summary><div class="maplibregl-ctrl-attrib-inner mapboxgl-ctrl-attrib-inner"><a href="https://www.maptiler.com/copyright/" target="_blank">© MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a></div></details></div></div></div>
+    <div id="snap-tool"><button type="button" id="start-button">Route tool</button></div>
+    <script type="module">
+      // Use the locally built version
+      import { init, RouteSnapper } from "./route-snapper/pkg/lib.js";
+
+      // Comment the above and use the published NPM version instead:
+      //import { init, RouteSnapper } from "https://unpkg.com/route-snapper/lib.js";
+
+      let map = new maplibregl.Map({
+        container: "map",
+        style:
+          "https://api.maptiler.com/maps/streets/style.json?key=MZEJTanw3WpxRvt7qDfo",
+        center: [-0.0961, 51.4922],
+        zoom: 13,
+        boxZoom: false,
+        doubleClickZoom: false,
+        hash: true,
+      });
+
+      let routeSnapper;
+
+      map.on("load", function () {
+        map.addSource("boundary", {
+          type: "geojson",
+          data: {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [-0.113371, 51.474014],
+                  [-0.113371, 51.500307],
+                  [-0.071072, 51.500307],
+                  [-0.071072, 51.474014],
+                  [-0.113371, 51.474014],
+                ],
+              ],
+            },
+          },
+        });
+        map.addLayer({
+          id: "boundary",
+          source: "boundary",
+          type: "line",
+          paint: {
+            "line-color": "black",
+            "line-width": 5,
+          },
+        });
+
+        var completedRoutes = {
+          type: "FeatureCollection",
+          features: [],
+        };
+        map.addSource("finished-routes", {
+          type: "geojson",
+          data: completedRoutes,
+        });
+        map.addLayer({
+          id: "finished-routes",
+          source: "finished-routes",
+          filter: ["in", "$type", "LineString"],
+          type: "line",
+          paint: {
+            "line-color": "green",
+            "line-width": 5,
+          },
+        });
+        map.addLayer({
+          id: "finished-areas",
+          source: "finished-routes",
+          filter: ["in", "$type", "Polygon"],
+          type: "fill",
+          paint: {
+            "fill-color": "green",
+            "fill-opacity": 0.2,
+          },
+        });
+        let idCounter = 0;
+        let snapTool = document.getElementById("snap-tool");
+        snapTool.addEventListener("new-route", (e) => {
+          // Assign a unique ID, so we can later delete it
+          e.detail.properties.uid = idCounter++;
+          completedRoutes.features.push(e.detail);
+          map.getSource("finished-routes").setData(completedRoutes);
+          if (e.detail.geometry.type == "LineString") {
+            document.getElementById("status").innerText =
+              `Added new route of length ${e.detail.properties.length_meters} meters and name ${e.detail.properties.route_name}`;
+          } else {
+            document.getElementById("status").innerText = `Added new area`;
+          }
+        });
+        snapTool.addEventListener("activate", (e) => {
+          document.getElementById("status").innerText = "Activated";
+        });
+        snapTool.addEventListener("no-new-route", (e) => {
+          document.getElementById("status").innerText =
+            "Inactive, no route last attempt";
+        });
+
+        document.getElementById("clear").onclick = () => {
+          completedRoutes.features = [];
+          map.getSource("finished-routes").setData(completedRoutes);
+        };
+
+        document.getElementById("start").onclick = () => {
+          routeSnapper?.start();
+        };
+        document.getElementById("stop").onclick = () => {
+          routeSnapper?.stop();
+        };
+        document.getElementById("debugGraph").onclick = () => {
+          let gj = routeSnapper?.debugRenderGraph();
+          downloadGeneratedFile("route-snapper-graph.geojson", gj);
+        };
+        document.getElementById("download").onclick = () => {
+          downloadGeneratedFile(
+            "route-snapper-results.geojson",
+            JSON.stringify(completedRoutes),
+          );
+        };
+
+        map.on("click", (e) => {
+          if (!routeSnapper || !routeSnapper.isActive()) {
+            let features = map.queryRenderedFeatures(e.point, {
+              layers: ["finished-routes", "finished-areas"],
+            });
+            if (features.length > 0) {
+              // If multiple routes overlap, arbitrarily edit one of them
+              let editUid = features[0].properties.uid;
+
+              // First remove the route from the completed set, so we don't
+              // have duplicates. Be careful with the comparison;
+              // queryRenderedFeatures doesn't have back a regular GeoJSON
+              // feature. We need to retrieve the full feature for this reason.
+              let editFeature;
+              completedRoutes.features = completedRoutes.features.filter(
+                (f) => {
+                  if (f.properties.uid == editUid) {
+                    editFeature = f;
+                    return false;
+                  } else {
+                    return true;
+                  }
+                },
+              );
+              map.getSource("finished-routes").setData(completedRoutes);
+
+              let roadName = routeSnapper.routeNameForWaypoints(
+                editFeature.properties.waypoints,
+              );
+              console.log(`Editing route. Re-calculated name is ${roadName}`);
+
+              routeSnapper.editExisting(editFeature);
+            }
+          }
+        });
+      });
+
+      await init();
+
+      const url = `southwark.bin`;
+      try {
+        let resp = await fetch(url);
+        let graphBytes = await resp.arrayBuffer();
+        routeSnapper = new RouteSnapper(
+          map,
+          new Uint8Array(graphBytes),
+          document.getElementById("snap-tool"),
+        );
+      } catch (err) {
+        console.log(`Route tool broke: ${err}`);
+        document.getElementById("snap-tool").innerHTML = "Failed to load";
+      }
+
+      function downloadGeneratedFile(filename, contents) {
+        // Download to a file
+        var element = document.createElement("a");
+        element.setAttribute(
+          "href",
+          "data:text/plain;charset=utf-8, " + encodeURIComponent(contents),
+        );
+        element.setAttribute("download", filename);
+        document.body.appendChild(element);
+        element.click();
+        document.body.removeChild(element);
+      }
+
+      document
+        .getElementById("fileInput")
+        .addEventListener("change", function (event) {
+          let file = event.target.files[0];
+          let reader = new FileReader();
+          reader.onload = function (event) {
+            let graphBytes = new Uint8Array(event.target.result);
+            routeSnapper?.changeGraph(graphBytes);
+
+            // For convenience, warp somewhere near that graph
+            try {
+              let gj = JSON.parse(routeSnapper?.debugRenderGraph());
+              // Assume nodes (Points) are last.
+              map.jumpTo({
+                center:
+                  gj.features[gj.features.length - 1].geometry.coordinates,
+              });
+            } catch (err) {
+              console.log(`Couldn't warp to new graph: ${err}`);
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        });
+    </script>
+  
+
+</body><grammarly-desktop-integration data-grammarly-shadow-root="true"><template shadowrootmode="open"><style>
+      div.grammarly-desktop-integration {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+        -moz-user-select: none;
+        -webkit-user-select: none;
+        -ms-user-select:none;
+        user-select:none;
+      }
+
+      div.grammarly-desktop-integration:before {
+        content: attr(data-content);
+      }
+    </style><div aria-label="grammarly-integration" role="group" tabindex="-1" class="grammarly-desktop-integration" data-content="{&quot;mode&quot;:&quot;full&quot;,&quot;isActive&quot;:true,&quot;isUserDisabled&quot;:false}"></div></template></grammarly-desktop-integration></html>
