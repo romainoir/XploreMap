@@ -20,7 +20,7 @@ import {
   DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
   MAX_NODE_CONNECTION_TOLERANCE_METERS
 } from './offline-router.js';
-import { extractOpenFreeMapNetwork, computeExpandedBounds as expandNetworkBounds } from './openfreemap-network.js';
+import { extractOverpassNetwork } from './overpass-network.js';
 
 const PEAK_POINTER_ID = 'peak-pointer';
 
@@ -185,7 +185,6 @@ async function init() {
     console.error('Failed to preload offline routing network', error);
   });
 
-  const OFFLINE_NETWORK_COVERAGE_PADDING_RATIO = 0.35;
   let offlineNetworkCoverage = null;
   let offlineNetworkRefreshPromise = null;
 
@@ -456,6 +455,19 @@ async function init() {
     return { west, east, south, north };
   };
 
+  const deriveOverpassCenter = (bounds) => {
+    const plain = boundsToPlain(bounds);
+    if (!plain) {
+      return null;
+    }
+    const lat = (plain.north + plain.south) / 2;
+    const lon = (plain.east + plain.west) / 2;
+    if (![lat, lon].every((value) => Number.isFinite(value))) {
+      return null;
+    }
+    return { lat, lon };
+  };
+
   const computeCoordinateBounds = (coordinates) => {
     if (!Array.isArray(coordinates) || !coordinates.length) {
       return null;
@@ -532,28 +544,38 @@ async function init() {
         const combinedBounds = mergeBounds(mapBounds, waypointBounds);
         const fallbackBounds = boundsToPlain(mapBounds) ?? boundsToPlain(waypointBounds);
         const targetBounds = combinedBounds ?? fallbackBounds;
-        const network = await extractOpenFreeMapNetwork(map, {
-          boundsPaddingRatio: OFFLINE_NETWORK_COVERAGE_PADDING_RATIO,
-          targetBounds
-        });
+        const mapCenter = typeof map.getCenter === 'function' ? map.getCenter() : null;
+        const centerLat = Number(mapCenter?.lat ?? mapCenter?.latitude ?? mapCenter?.[1]);
+        const centerLon = Number(mapCenter?.lng ?? mapCenter?.lon ?? mapCenter?.longitude ?? mapCenter?.[0]);
+        let overpassCenter = Number.isFinite(centerLat) && Number.isFinite(centerLon)
+          ? { lat: centerLat, lon: centerLon }
+          : null;
+        if (!overpassCenter) {
+          const fallbackCenter = deriveOverpassCenter(targetBounds ?? fallbackBounds);
+          if (fallbackCenter) {
+            overpassCenter = fallbackCenter;
+          }
+        }
+        if (!overpassCenter) {
+          throw new Error('Unable to determine center coordinate for Overpass network extraction');
+        }
+        const { network, coverageBounds } = await extractOverpassNetwork(overpassCenter);
         if (network && Array.isArray(network.features) && network.features.length) {
           offlineRouter.setNetworkGeoJSON(network);
           const debugDataset = typeof offlineRouter.getNetworkDebugGeoJSON === 'function'
             ? offlineRouter.getNetworkDebugGeoJSON({ intersectionsOnly: true })
             : network;
           debugNetworkData = debugDataset || network;
-          const coverageSource = targetBounds ?? fallbackBounds;
-          offlineNetworkCoverage = coverageSource
-            ? expandNetworkBounds(coverageSource, OFFLINE_NETWORK_COVERAGE_PADDING_RATIO * 1.5)
-            : null;
+          const fallbackCoverage = boundsToPlain(targetBounds ?? fallbackBounds);
+          offlineNetworkCoverage = coverageBounds ?? fallbackCoverage;
           if (debugNetworkVisible) {
             await applyDebugNetworkLayer();
           }
         } else {
-          console.warn('OpenFreeMap network extraction returned no features for offline routing');
+          console.warn('Overpass network extraction returned no features for offline routing');
         }
       } catch (error) {
-        console.error('Failed to rebuild offline routing network from OpenFreeMap data', error);
+        console.error('Failed to rebuild offline routing network from Overpass data', error);
       } finally {
         offlineNetworkRefreshPromise = null;
       }
