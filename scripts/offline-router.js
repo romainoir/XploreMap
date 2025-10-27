@@ -1,6 +1,6 @@
 import { GeoJsonPathFinder, haversineDistanceKm } from './geojson-pathfinder.js';
 
-export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 8;
+export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 2;
 export const MAX_NODE_CONNECTION_TOLERANCE_METERS = 100;
 
 const DEFAULT_SPEEDS = Object.freeze({
@@ -479,7 +479,9 @@ export class OfflineRouter {
       ? maxSnapDistanceMeters
       : DEFAULT_SNAP_TOLERANCE_METERS;
     this.pathFinderOptions = {
+      tolerance: 1e-3,
       nodeConnectionToleranceMeters: DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
+      nodeBucketSizeDegrees: 0.002,
       ...(pathFinderOptions || {})
     };
 
