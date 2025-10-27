@@ -9,17 +9,66 @@ const DEFAULT_WASM_URL = new URL(
 
 let routeSnapperModulePromise = null;
 
+function getInitializationAttempts(wasmUrl) {
+  const attempts = [];
+  if (wasmUrl != null) {
+    const normalized = typeof wasmUrl === 'string'
+      ? wasmUrl
+      : (typeof wasmUrl.href === 'string' ? wasmUrl.href : String(wasmUrl));
+    const sharedOptions = { module_or_path: normalized, wasmUrl: normalized };
+    attempts.push([sharedOptions]);
+    attempts.push([{ module_or_path: normalized }]);
+    attempts.push([{ wasmUrl: normalized }]);
+    attempts.push([normalized]);
+  }
+  attempts.push([]);
+  attempts.push([{}]);
+  return attempts;
+}
+
+async function tryInitialize(fn, context, wasmUrl) {
+  const attempts = getInitializationAttempts(wasmUrl);
+  let lastError = null;
+
+  for (const args of attempts) {
+    try {
+      const result = fn.apply(context, args);
+      if (result && typeof result.then === 'function') {
+        await result;
+      }
+      return true;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return false;
+}
+
 async function initializeModule(module, { wasmUrl = DEFAULT_WASM_URL } = {}) {
   if (!module || typeof module !== 'object') {
     return module;
   }
 
-  if (typeof module.init === 'function') {
-    await module.init({ wasmUrl });
-  } else if (typeof module.default === 'function') {
-    await module.default(wasmUrl);
-  } else if (typeof module.initialize === 'function') {
-    await module.initialize({ wasmUrl });
+  const candidates = [
+    module.init,
+    module.default,
+    module.initialize
+  ].filter((candidate) => typeof candidate === 'function');
+
+  for (const candidate of candidates) {
+    try {
+      const initialized = await tryInitialize(candidate, module, wasmUrl);
+      if (initialized) {
+        return module;
+      }
+    } catch (error) {
+      console.warn('[RouteSnapperLoader] RouteSnapper init function failed', error);
+    }
   }
 
   return module;
