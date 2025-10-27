@@ -349,14 +349,44 @@ html, body { margin:0; height:100%; }
 }
 
 .elevation-bar {
-  flex: 1 1 0;
-  min-width: 0;
+  flex-grow: var(--bar-flex-grow, 1);
+  flex-shrink: 0;
+  flex-basis: 0;
+  min-width: 1px;
   background: linear-gradient(180deg,
     var(--bar-color, rgba(58, 183, 198, 0.85)) 0%,
     var(--bar-color-dark, rgba(17, 98, 128, 0.85)) 100%);
   border-radius: 3px 3px 0 0;
   cursor: crosshair;
   transition: box-shadow 120ms ease, filter 120ms ease;
+}
+
+.elevation-hover-readout {
+  align-self: flex-end;
+  font-size: 12px;
+  color: #133540;
+  display: flex;
+  gap: 10px;
+  padding: 2px 6px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  min-height: 1.5em;
+}
+
+.elevation-hover-readout span {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.elevation-hover-readout[aria-hidden="true"] {
+  opacity: 0;
+}
+
+.elevation-hover-readout[aria-hidden="false"] {
+  opacity: 1;
+  transition: opacity 120ms ease;
 }
 
 .elevation-bar.highlighted {

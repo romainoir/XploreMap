@@ -13,7 +13,13 @@ import {
   MAPTERHORN_TILE_URL,
   MAPTERHORN_ATTRIBUTION
 } from './constants.js';
-import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from './gpx.js';
+import {
+  ensureGpxLayers,
+  geojsonToGpx,
+  parseGpxToGeoJson,
+  zoomToGeojson,
+  computeGeojsonBounds
+} from './gpx.js';
 import { DirectionsManager } from '../directions_test.js';
 import './pmtiles.js';
 import {
@@ -258,7 +264,8 @@ async function init() {
       const dataset = typeof offlineRouter.getNetworkDebugGeoJSON === 'function'
         ? offlineRouter.getNetworkDebugGeoJSON({ intersectionsOnly: true })
         : offlineRouter.getNetworkGeoJSON();
-      if (dataset && typeof dataset === 'object') {
+      const hasFeatures = Array.isArray(dataset?.features) && dataset.features.length > 0;
+      if (dataset && typeof dataset === 'object' && hasFeatures) {
         debugNetworkData = dataset;
         return debugNetworkData;
       }
@@ -270,7 +277,13 @@ async function init() {
       if (!response.ok) {
         throw new Error(`Debug network request failed (${response.status})`);
       }
-      debugNetworkData = await response.json();
+      const fallback = await response.json();
+      const hasFallbackFeatures = Array.isArray(fallback?.features) && fallback.features.length > 0;
+      if (!hasFallbackFeatures) {
+        console.warn('Offline routing network debug dataset is empty');
+        return null;
+      }
+      debugNetworkData = fallback;
       return debugNetworkData;
     } catch (error) {
       console.error('Failed to load offline routing network for debugging', error);
@@ -798,6 +811,22 @@ async function init() {
           const applied = await applyDebugNetworkLayer();
           if (!applied) {
             window.alert('Unable to display the routing network. Check the console for details.');
+          }
+          if (applied && debugNetworkData) {
+            const boundsArray = computeGeojsonBounds(debugNetworkData);
+            if (Array.isArray(boundsArray) && boundsArray.length === 2) {
+              const [[west, south], [east, north]] = boundsArray;
+              const networkBounds = { west, east, south, north };
+              const currentBounds = boundsToPlain(map.getBounds());
+              const alreadyCovers = currentBounds && boundsContains(currentBounds, networkBounds, 1e-4);
+              if (!alreadyCovers && typeof map.fitBounds === 'function') {
+                map.fitBounds(boundsArray, {
+                  padding: { top: 80, bottom: 80, left: 80, right: 80 },
+                  maxZoom: 15,
+                  duration: 900
+                });
+              }
+            }
           }
           debugNetworkVisible = applied;
           updateDebugNetworkButton(applied);
