@@ -4682,13 +4682,11 @@ export class DirectionsManager {
 
     const areaPaths = this.buildElevationAreaPaths(samples, yAxis, totalDistance);
     const areaFillColor = adjustHexColor(fallbackColor, 0.08);
-    const areaStrokeColor = adjustHexColor(fallbackColor, -0.25);
-    const areaSvg = areaPaths.stroke
+    const areaSvg = areaPaths.fill
       ? `
         <svg class="elevation-area" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           ${gradientMarkup}
           <path class="elevation-area-fill" d="${areaPaths.fill}" fill="${gradientMarkup ? `url(#${gradientId})` : areaFillColor}"/>
-          <path class="elevation-area-outline" d="${areaPaths.stroke}" stroke="${areaStrokeColor}" stroke-width="1.4" fill="none" stroke-linecap="round"/>
         </svg>
       `
       : '';

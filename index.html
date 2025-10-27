@@ -27,48 +27,63 @@
 
 <!-- UI: View mode toggle -->
 <div class="ui">
-  <button id="toggle3D" class="toggle-3d" type="button" aria-pressed="true" aria-label="Switch to 2D" title="Switch to 2D">
-    <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
-      <path d="M3.2 18.5h17.6c.7 0 1.2-.6 1.2-1.3a1.2 1.2 0 0 0-.5-.9l-6.9-4.7a1.6 1.6 0 0 0-1.8 0L9.1 14l-6-4a1.2 1.2 0 0 0-1.8.9v6.3c0 .7.5 1.3 1.2 1.3Z"/>
-      <path d="M10.2 11.1 7.5 9.3a1.6 1.6 0 0 0-1.8 0L1 12a1.2 1.2 0 0 0 .2 2c.4.2.9.2 1.2 0l4.4-2.9 3.3 2.2 3.5-2.3c.6-.4 1.4-.4 2 0l7.7 5a1.2 1.2 0 0 0 1.8-.9v-.2c0-.4-.2-.8-.6-1L15.3 8a1.6 1.6 0 0 0-1.8 0l-3.3 2.2Z"/>
-    </svg>
-  </button>
-  <input id="gpxFileInput" class="sr-only" type="file" accept=".gpx,application/gpx+xml">
-  <div class="gpx-tools">
-    <button id="gpxImportButton" class="btn" type="button">Import GPX</button>
-    <button id="gpxExportButton" class="btn" type="button">Export GPX</button>
+  <div class="ui__row ui__row--actions">
+    <button id="toggle3D" class="btn toggle-3d" type="button" aria-pressed="true" aria-label="Switch to 2D" title="Switch to 2D">
+      <img data-icon-id="view-toggle" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+      <span class="sr-only">Toggle 2D/3D view</span>
+    </button>
+    <button id="gpxImportButton" class="btn btn--icon" type="button">
+      <img data-icon-id="gpx-import" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+      <span>Import GPX</span>
+    </button>
+    <button id="gpxExportButton" class="btn btn--icon" type="button">
+      <img data-icon-id="gpx-export" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+      <span>Export GPX</span>
+    </button>
   </div>
-  <div class="directions-ui">
-    <div class="directions-toggle-group">
-      <button id="directionsToggle" class="btn directions-toggle" type="button" aria-controls="directionsControl">Directions</button>
-      <div class="directions-mode-controls">
-        <button
-          id="routingModeToggle"
-          class="btn routing-mode-toggle"
-          type="button"
-          data-mode="offline"
-          aria-pressed="true"
-          title="Switch to online routing"
-        >Offline routing</button>
-        <label
-          id="debugNetworkControl"
-          class="debug-network-control"
-          hidden
-          aria-hidden="true"
-        >
-          <input id="debugNetworkCheckbox" type="checkbox" aria-label="Toggle offline routing network debug" />
-          <span>Debug network</span>
-        </label>
-      </div>
-      <button id="directionsInfoButton" class="icon-button has-tooltip" type="button" aria-label="Directions information" aria-describedby="directionsHint" title="How to use directions">
-        <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
-          <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z"/>
-        </svg>
-        <span id="directionsHint" class="directions-hint" role="tooltip" aria-hidden="true">
-          Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
-        </span>
-      </button>
-    </div>
+  <input id="gpxFileInput" class="sr-only" type="file" accept=".gpx,application/gpx+xml">
+  <div class="ui__row ui__row--routing">
+    <button
+      id="routingModeToggle"
+      class="btn btn--icon routing-mode-toggle"
+      type="button"
+      data-mode="offline"
+      aria-pressed="true"
+      title="Switch to online routing"
+    >
+      <img
+        class="routing-mode-toggle__icon"
+        data-icon-id="routing-offline"
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        decoding="async"
+      />
+      <span class="routing-mode-toggle__text">Offline routing</span>
+    </button>
+    <label
+      id="debugNetworkControl"
+      class="debug-network-control"
+      hidden
+      aria-hidden="true"
+    >
+      <input id="debugNetworkCheckbox" type="checkbox" aria-label="Toggle offline routing network debug" />
+      <img data-icon-id="debug-network" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+      <span>Debug network</span>
+    </label>
+  </div>
+  <div class="ui__row ui__row--directions">
+    <button id="directionsToggle" class="btn btn--primary directions-toggle" type="button" aria-controls="directionsControl">
+      <span>Directions</span>
+    </button>
+    <button id="directionsInfoButton" class="icon-button has-tooltip" type="button" aria-label="Directions information" aria-describedby="directionsHint" title="How to use directions">
+      <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+        <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z"/>
+      </svg>
+      <span id="directionsHint" class="directions-hint" role="tooltip" aria-hidden="true">
+        Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
+      </span>
+    </button>
   </div>
 </div>
 
