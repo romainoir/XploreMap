@@ -90,10 +90,9 @@ const SUMMARY_ICONS = {
   descent: DESCENT_ICON
 };
 
-// Inline the bivouac marker PNG as a data URL so the asset can be used without
-// introducing a binary diff that breaks the automated PR tooling.
-const BIVOUAC_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAACDklEQVR42u2Yu1MTURhHqazosHGgSGUXxETU8BZm6Kh84P8CRoMP3g+lQwH/qhgwJCQ41hZWNp97x0lhRmTD3t3v7t1zZk693/5OsTPb1wcAAAAAAAAAAAAAAADwP/JLVWEFxfE7skbCDC9XpVtWSYg7L77IZbJO3OOXg6GvkJViYqRck7CylmXuvqxJr7KarfFfnch1Zb0IFConYkvW7JFi5VRsy6ohubdyKnHJuleN/zoYKmZZ+RJG33yVpGTtLu4HoyQtq3fGf1sXLTM9/IN3dXHFzI3/cPVMXJPxiRA/pbWGuK6344+tNyQtejf++EZT0ibjEyEaE5tN8cXUjT+5dS6+mZ7xt4ODPdX58ae2W+K7zo4/vdOSrOje+LttyZrOjD+z15asqjr8o/cXgn9MfPzZ4KH4t8mN/yF4IP7T2Mef2/8mYRx6/tk7w767Ex/mwcVj8c1U/YogAAEIQADVAEfimwQgAAEIQICQAZ4FR3tmygIcim8SgAAEIAABkg/w4+ev79c1wwE+iS2jBbB3BwEI0EOAp8HRlowUwOIdBCAAAVIU4KPYMloAe3cQgAAEIAABCJCOAE8OxJaRAli8gwAEIEAmA7giAQgAAAA+cTNXuIF6mgD9qKcJMIB6mgC3UE8TIId6mgC3UU8TII96mgBF1NMEKKGeJsAM6mkCzKOeJsAC6mkCPEY9fwMw+dC4Nzq2wQAAAABJRU5ErkJggg==';
-const BIVOUAC_ELEVATION_ICON = `<img src="${BIVOUAC_ICON_DATA_URL}" alt="" loading="lazy" decoding="async" />`;
+// Use the shared bivouac marker PNG so the UI references the canonical asset.
+const BIVOUAC_ICON_URL = new URL('./data/bivouac.png', import.meta.url).href;
+const BIVOUAC_ELEVATION_ICON = `<img src="${BIVOUAC_ICON_URL}" alt="" loading="lazy" decoding="async" />`;
 
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
 const DEFAULT_DISTANCE_MARKER_COLOR = '#f38b1c';
