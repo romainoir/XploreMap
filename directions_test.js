@@ -750,6 +750,7 @@ export class DirectionsManager {
       if (this.waypoints.length < 2) return;
       const before = this.snapshotWaypoints();
       this.waypoints.reverse();
+      this.invalidateCachedLegSegments();
       this.logViaWaypointState('Swapped start/end waypoints', before, this.waypoints);
       this.updateWaypoints();
       this.getRoute();
@@ -2619,6 +2620,7 @@ export class DirectionsManager {
     }
     this.dragStartWaypointSnapshot = null;
     if (movedWaypoint && this.waypoints.length >= 2) {
+      this.invalidateCachedLegSegments();
       this.getRoute();
     }
     if (movedBivouac) {
@@ -2651,6 +2653,7 @@ export class DirectionsManager {
       ? [snapped[0], snapped[1]]
       : [event.lngLat.lng, event.lngLat.lat];
     this.waypoints.push(targetLngLat);
+    this.invalidateCachedLegSegments();
     this.logViaWaypointState('Added waypoint from map click', before, this.waypoints, { force: true });
     this.updateWaypoints();
     if (this.waypoints.length === 1) {
@@ -2667,6 +2670,7 @@ export class DirectionsManager {
     if (!Number.isFinite(index) || index <= 0 || index >= this.waypoints.length - 1) return;
     const before = this.snapshotWaypoints();
     this.waypoints.splice(index, 1);
+    this.invalidateCachedLegSegments();
     this.logViaWaypointState('Removed via waypoint', before, this.waypoints, { force: true });
     this.updateWaypoints();
     if (this.waypoints.length >= 2) {
@@ -2805,6 +2809,7 @@ export class DirectionsManager {
 
     const before = this.snapshotWaypoints();
     this.waypoints.splice(insertIndex, 0, snapped);
+    this.invalidateCachedLegSegments();
     this.logViaWaypointState('Inserted via waypoint', before, this.waypoints, { force: true });
     this.updateWaypoints();
     this.resetSegmentHover();
@@ -3741,6 +3746,10 @@ export class DirectionsManager {
     }
 
     this.cachedLegSegments = segments;
+  }
+
+  invalidateCachedLegSegments() {
+    this.cachedLegSegments = [];
   }
 
   buildPreservedSegments() {
