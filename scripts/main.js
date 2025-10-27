@@ -17,8 +17,7 @@ import {
   ensureGpxLayers,
   geojsonToGpx,
   parseGpxToGeoJson,
-  zoomToGeojson,
-  computeGeojsonBounds
+  zoomToGeojson
 } from './gpx.js';
 import { DirectionsManager } from '../directions_test.js';
 import './pmtiles.js';
@@ -814,22 +813,6 @@ async function init() {
           }
           if (!applied) {
             window.alert('Unable to display the routing network. Check the console for details.');
-          }
-          if (applied && debugNetworkData) {
-            const boundsArray = computeGeojsonBounds(debugNetworkData);
-            if (Array.isArray(boundsArray) && boundsArray.length === 2) {
-              const [[west, south], [east, north]] = boundsArray;
-              const networkBounds = { west, east, south, north };
-              const currentBounds = boundsToPlain(map.getBounds());
-              const alreadyCovers = currentBounds && boundsContains(currentBounds, networkBounds, 1e-4);
-              if (!alreadyCovers && typeof map.fitBounds === 'function') {
-                map.fitBounds(boundsArray, {
-                  padding: { top: 80, bottom: 80, left: 80, right: 80 },
-                  maxZoom: 15,
-                  duration: 900
-                });
-              }
-            }
           }
           debugNetworkVisible = applied;
           updateDebugNetworkButton(applied);

@@ -358,6 +358,20 @@ function collectSnapOptions(snap, optionFactory) {
   return options;
 }
 
+function snapsShareEdge(a, b) {
+  if (!a || !b || a.type !== 'edge' || b.type !== 'edge') {
+    return false;
+  }
+  const aStart = a.edgeStart?.key;
+  const aEnd = a.edgeEnd?.key;
+  const bStart = b.edgeStart?.key;
+  const bEnd = b.edgeEnd?.key;
+  if (!aStart || !aEnd || !bStart || !bEnd) {
+    return false;
+  }
+  return (aStart === bStart && aEnd === bEnd) || (aStart === bEnd && aEnd === bStart);
+}
+
 function appendCoordinateSequence(target, sequence) {
   if (!Array.isArray(target) || !Array.isArray(sequence)) {
     return;
@@ -813,6 +827,75 @@ export class OfflineRouter {
 
     const startConnector = startPoint ? computeSegmentMetrics(startCoord, startPoint) : null;
     const endConnector = endPoint ? computeSegmentMetrics(endPoint, endCoord) : null;
+
+    const shareSameEdge = snapsShareEdge(startSnap, endSnap);
+    if (shareSameEdge && startPoint && endPoint) {
+      const baseMetrics = computeSegmentMetrics(startPoint, endPoint);
+      if (baseMetrics && Number.isFinite(baseMetrics.distanceKm)) {
+        debugInfo.plan = {
+          baseDistanceKm: baseMetrics.distanceKm,
+          startConnector,
+          endConnector,
+          startApproach: null,
+          endApproach: null,
+          sharedEdge: true
+        };
+
+        const totalDistanceKm = baseMetrics.distanceKm
+          + (startConnector?.distanceKm || 0)
+          + (endConnector?.distanceKm || 0);
+        const totalAscent = baseMetrics.ascent
+          + (startConnector?.ascent || 0)
+          + (endConnector?.ascent || 0);
+        const totalDescent = baseMetrics.descent
+          + (startConnector?.descent || 0)
+          + (endConnector?.descent || 0);
+
+        const coordinates = [];
+        if (startConnector) {
+          appendCoordinateSequence(coordinates, [startConnector.start, startConnector.end]);
+        } else if (Array.isArray(startCoord) && startCoord.length >= 2) {
+          const fallbackStart = startPoint || endPoint || startCoord;
+          appendCoordinateSequence(coordinates, [mergeCoordinates(startCoord, fallbackStart)]);
+        }
+
+        appendCoordinateSequence(coordinates, [baseMetrics.start, baseMetrics.end]);
+
+        if (endConnector) {
+          appendCoordinateSequence(coordinates, [endConnector.start, endConnector.end]);
+        } else if (Array.isArray(endCoord) && endCoord.length >= 2) {
+          const fallbackEnd = endPoint || coordinates[coordinates.length - 1] || endCoord;
+          appendCoordinateSequence(coordinates, [mergeCoordinates(endCoord, fallbackEnd)]);
+        }
+
+        const uniqueCoordinates = coordinates.filter((coord, index) => {
+          if (!Array.isArray(coord) || coord.length < 2) {
+            return false;
+          }
+          if (index === 0) {
+            return true;
+          }
+          return !coordinatesAlmostEqual(
+            coord,
+            coordinates[index - 1],
+            COORDINATE_DUPLICATE_TOLERANCE_METERS
+          );
+        });
+
+        if (uniqueCoordinates.length >= 2) {
+          const segment = {
+            coordinates: uniqueCoordinates,
+            distanceKm: totalDistanceKm,
+            ascent: totalAscent,
+            descent: totalDescent
+          };
+          return returnWithDebug({
+            type: 'shared-edge',
+            segment
+          });
+        }
+      }
+    }
 
     const startOptions = startPoint
       ? collectSnapOptions(startSnap, (node) => createNodeOption({
