@@ -715,7 +715,11 @@ export class DirectionsManager {
         'icon-image': ['get', 'icon'],
         'icon-anchor': 'bottom',
         'icon-offset': [0, 0],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.55, 12, 0.75, 16, 0.95],
+        'icon-size': [
+          '*',
+          ['interpolate', ['linear'], ['zoom'], 8, 0.55, 12, 0.75, 16, 0.95],
+          ['case', ['==', ['get', 'type'], 'bivouac'], 0.2, 1]
+        ],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'text-field': ['get', 'title'],
@@ -4527,7 +4531,9 @@ export class DirectionsManager {
 
     const elevations = samples.map((sample) => sample.elevation);
     const maxElevation = Math.max(...elevations);
-    const minElevation = Math.min(...elevations);
+    const startElevation = Number.isFinite(samples[0]?.elevation) ? samples[0].elevation : null;
+    const rawMinElevation = Math.min(...elevations);
+    const minElevation = Number.isFinite(startElevation) ? startElevation : rawMinElevation;
     const yAxis = this.computeAxisTicks(minElevation, maxElevation, ELEVATION_TICK_TARGET);
     const range = Math.max(1, yAxis.max - yAxis.min);
 
@@ -4552,9 +4558,7 @@ export class DirectionsManager {
       .map((sample) => {
         const midDistance = (sample.startDistanceKm + sample.endDistanceKm) / 2;
         const segment = this.getCutSegmentForDistance(midDistance);
-        const baseColor = typeof segment?.color === 'string' && segment.color.trim()
-          ? segment.color.trim()
-          : fallbackColor;
+        const baseColor = fallbackColor;
         addGradientStop(sample.startDistanceKm, baseColor);
         addGradientStop(sample.endDistanceKm, baseColor);
         const accentColor = adjustHexColor(baseColor, 0.18);
