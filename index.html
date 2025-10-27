@@ -27,62 +27,9 @@
 
 <!-- UI: View mode toggle -->
 <div class="ui">
-  <div class="ui__row ui__row--actions">
-    <button id="toggle3D" class="btn toggle-3d" type="button" aria-pressed="true" aria-label="Switch to 2D" title="Switch to 2D">
-      <img data-icon-id="view-toggle" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-      <span class="sr-only">Toggle 2D/3D view</span>
-    </button>
-    <button id="gpxImportButton" class="btn btn--icon" type="button">
-      <img data-icon-id="gpx-import" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-      <span>Import GPX</span>
-    </button>
-    <button id="gpxExportButton" class="btn btn--icon" type="button">
-      <img data-icon-id="gpx-export" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-      <span>Export GPX</span>
-    </button>
-  </div>
-  <input id="gpxFileInput" class="sr-only" type="file" accept=".gpx,application/gpx+xml">
-  <div class="ui__row ui__row--routing">
-    <button
-      id="routingModeToggle"
-      class="btn btn--icon routing-mode-toggle"
-      type="button"
-      data-mode="offline"
-      aria-pressed="true"
-      title="Switch to online routing"
-    >
-      <img
-        class="routing-mode-toggle__icon"
-        data-icon-id="routing-offline"
-        alt=""
-        aria-hidden="true"
-        loading="lazy"
-        decoding="async"
-      />
-      <span class="routing-mode-toggle__text">Offline routing</span>
-    </button>
-    <label
-      id="debugNetworkControl"
-      class="debug-network-control"
-      hidden
-      aria-hidden="true"
-    >
-      <input id="debugNetworkCheckbox" type="checkbox" aria-label="Toggle offline routing network debug" />
-      <img data-icon-id="debug-network" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-      <span>Debug network</span>
-    </label>
-  </div>
   <div class="ui__row ui__row--directions">
     <button id="directionsToggle" class="btn btn--primary directions-toggle" type="button" aria-controls="directionsControl">
       <span>Directions</span>
-    </button>
-    <button id="directionsInfoButton" class="icon-button has-tooltip" type="button" aria-label="Directions information" aria-describedby="directionsHint" title="How to use directions">
-      <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
-        <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z"/>
-      </svg>
-      <span id="directionsHint" class="directions-hint" role="tooltip" aria-hidden="true">
-        Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
-      </span>
     </button>
   </div>
 </div>
@@ -165,6 +112,53 @@
           <img src="./data/clear.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
           <span class="sr-only">Clear</span>
         </button>
+        <button id="gpxImportButton" class="btn btn--icon btn--icon-only" type="button">
+          <img data-icon-id="gpx-import" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span class="sr-only">Import GPX</span>
+        </button>
+        <input id="gpxFileInput" class="sr-only" type="file" accept=".gpx,application/gpx+xml">
+        <button id="gpxExportButton" class="btn btn--icon btn--icon-only" type="button">
+          <img data-icon-id="gpx-export" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span class="sr-only">Export GPX</span>
+        </button>
+        <button
+          id="routingModeToggle"
+          class="btn btn--icon btn--icon-only routing-mode-toggle"
+          type="button"
+          data-mode="offline"
+          aria-pressed="true"
+          title="Switch to online routing"
+        >
+          <img
+            class="routing-mode-toggle__icon"
+            data-icon-id="routing-offline"
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            decoding="async"
+          />
+          <span class="routing-mode-toggle__text sr-only">Offline routing</span>
+        </button>
+        <label
+          id="debugNetworkControl"
+          class="debug-network-control"
+          hidden
+          aria-hidden="true"
+          role="button"
+          aria-pressed="false"
+        >
+          <input id="debugNetworkCheckbox" class="sr-only" type="checkbox" aria-label="Toggle offline routing network debug" />
+          <img data-icon-id="debug-network" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span class="sr-only">Debug network</span>
+        </label>
+        <button id="directionsInfoButton" class="icon-button has-tooltip" type="button" aria-label="Directions information" aria-describedby="directionsHint" title="How to use directions">
+          <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+            <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z"/>
+          </svg>
+          <span id="directionsHint" class="directions-hint" role="tooltip" aria-hidden="true">
+            Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
+          </span>
+        </button>
       </div>
     </div>
     <div class="directions-body">
@@ -184,10 +178,16 @@
 
 <!-- Hillshade method switcher -->
 <div class="hs-panel">
-  <div class="hs-title">Hillshade method</div>
-  <div class="btns">
-    <button class="btn active" data-method="igor">Igor</button>
-    <button class="btn" data-method="combined">Combined</button>
+  <div class="hs-title">Terrain</div>
+  <div class="terrain-controls">
+    <div class="btns">
+      <button class="btn active" data-method="igor">Igor</button>
+      <button class="btn" data-method="combined">Combined</button>
+    </div>
+    <button id="toggle3D" class="btn btn--icon-only toggle-3d" type="button" aria-pressed="true" aria-label="Switch to 2D" title="Switch to 2D">
+      <img data-icon-id="view-toggle" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+      <span class="sr-only">Toggle 2D/3D view</span>
+    </button>
   </div>
 </div>
 
