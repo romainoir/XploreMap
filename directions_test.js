@@ -432,6 +432,7 @@ export class DirectionsManager {
     this.routeProfile = null;
     this.elevationSamples = [];
     this.elevationChartContainer = null;
+    this.elevationHoverReadout = null;
     this.highlightedElevationBar = null;
     this.activeHoverSource = null;
     this.lastElevationHoverDistance = null;
@@ -3203,18 +3204,21 @@ export class DirectionsManager {
   showRouteHoverAtDistance(distanceKm, { source = null } = {}) {
     if (!Number.isFinite(distanceKm)) {
       this.resetSegmentHover(source ?? undefined);
+      this.updateElevationHoverReadout(null);
       return;
     }
 
     const segmentIndex = this.findSegmentIndexByDistance(distanceKm);
     if (!Number.isInteger(segmentIndex)) {
       this.resetSegmentHover(source ?? undefined);
+      this.updateElevationHoverReadout(null);
       return;
     }
 
     const segment = this.routeSegments?.[segmentIndex];
     if (!segment) {
       this.resetSegmentHover(source ?? undefined);
+      this.updateElevationHoverReadout(null);
       return;
     }
 
@@ -3227,6 +3231,7 @@ export class DirectionsManager {
     relativeDistance = Math.max(0, Math.min(segmentDistance, relativeDistance));
     const t = segmentDistance > 0 ? relativeDistance / segmentDistance : 0;
 
+    this.updateElevationHoverReadout(distanceKm);
     this.showRouteHoverOnSegment(segmentIndex, { t, distanceKm }, { source });
   }
 
@@ -3447,12 +3452,14 @@ export class DirectionsManager {
     }
 
     this.lastElevationHoverDistance = distanceKm;
+    this.updateElevationHoverReadout(distanceKm);
     this.showRouteHoverAtDistance(distanceKm, { source: 'chart' });
   }
 
   onElevationPointerLeave() {
     this.lastElevationHoverDistance = null;
     this.resetSegmentHover('chart');
+    this.updateElevationHoverReadout(null);
   }
 
   hideRouteHover() {
@@ -3468,6 +3475,7 @@ export class DirectionsManager {
       canvas.style.cursor = '';
     }
     this.highlightElevationAt(null);
+    this.updateElevationHoverReadout(null);
   }
 
   updateRouteHoverDisplay(mousePoint, segment, projection) {
@@ -3571,6 +3579,7 @@ export class DirectionsManager {
     this.resetRouteCuts();
     this.detachElevationChartEvents();
     this.elevationChartContainer = null;
+    this.elevationHoverReadout = null;
     this.highlightedElevationBar = null;
     this.lastElevationHoverDistance = null;
     this.draggedBivouacIndex = null;
@@ -4092,6 +4101,7 @@ export class DirectionsManager {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
       this.elevationChartContainer = null;
+      this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
       return;
     }
@@ -4102,6 +4112,7 @@ export class DirectionsManager {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
       this.elevationChartContainer = null;
+      this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
       this.lastElevationHoverDistance = null;
       return;
@@ -4131,6 +4142,11 @@ export class DirectionsManager {
         const topColor = adjustHexColor(baseColor, 0.25);
         const bottomColor = adjustHexColor(baseColor, -0.25);
         const accentColor = adjustHexColor(baseColor, 0.15);
+        const spanKm = Math.max(0, sample.endDistanceKm - sample.startDistanceKm);
+        const fallbackSpan = samples.length
+          ? Math.max(totalDistance / (samples.length * 2), 0.0005)
+          : 0.0005;
+        const flexGrow = spanKm > 0 ? spanKm : fallbackSpan;
         const titleParts = [];
         if (Number.isFinite(sample.elevation)) {
           titleParts.push(`${Math.round(sample.elevation)} m`);
@@ -4141,6 +4157,7 @@ export class DirectionsManager {
         const title = titleParts.join(' · ');
         const style = [
           `height:${height.toFixed(2)}%`,
+          `--bar-flex-grow:${flexGrow.toFixed(6)}`,
           `--bar-color:${topColor}`,
           `--bar-color-dark:${bottomColor}`,
           `--bar-accent:${accentColor}`
@@ -4257,12 +4274,14 @@ export class DirectionsManager {
         <div class="elevation-y-axis">${yAxisLabels}</div>
         <div class="elevation-plot-area">
           <div class="elevation-chart-container" role="presentation">${chartHtml}${markerOverlay}</div>
+          <div class="elevation-hover-readout" aria-live="polite" aria-hidden="true"></div>
           <div class="elevation-x-axis">${xAxisLabels}</div>
         </div>
       </div>
     `;
 
     this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
+    this.elevationHoverReadout = this.elevationChart.querySelector('.elevation-hover-readout');
     this.highlightedElevationBar = null;
     this.attachElevationChartEvents();
     this.updateElevationMarkerPositions();
@@ -4275,6 +4294,7 @@ export class DirectionsManager {
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(() => this.updateElevationMarkerPositions());
     }
+    this.updateElevationHoverReadout(null);
   }
 
   updateElevationMarkerPositions() {
@@ -4338,6 +4358,28 @@ export class DirectionsManager {
       const percent = Math.max(0, Math.min(100, (offset / containerWidth) * 100));
       marker.style.left = `${percent.toFixed(4)}%`;
     });
+  }
+
+  updateElevationHoverReadout(distanceKm) {
+    if (!this.elevationHoverReadout) {
+      return;
+    }
+
+    if (!Number.isFinite(distanceKm)) {
+      this.elevationHoverReadout.textContent = '';
+      this.elevationHoverReadout.setAttribute('aria-hidden', 'true');
+      return;
+    }
+
+    const distanceLabel = this.formatDistance(distanceKm);
+    const elevation = this.getElevationAtDistance(distanceKm);
+    const altitudeLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : 'N/A';
+
+    this.elevationHoverReadout.innerHTML = `
+      <span class="distance">${distanceLabel} km</span>
+      <span class="altitude">${altitudeLabel}</span>
+    `;
+    this.elevationHoverReadout.setAttribute('aria-hidden', 'false');
   }
 
   updateDistanceMarkers(route) {
