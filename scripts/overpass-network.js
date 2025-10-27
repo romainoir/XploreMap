@@ -1,6 +1,7 @@
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
-export const PATH_RADIUS_METERS = 3000;
-export const POI_RADIUS_METERS = 4000;
+const DEFAULT_NETWORK_RADIUS_METERS = 40000;
+export const PATH_RADIUS_METERS = DEFAULT_NETWORK_RADIUS_METERS;
+export const POI_RADIUS_METERS = DEFAULT_NETWORK_RADIUS_METERS;
 const MIN_COORDINATE_SPAN_EPSILON = 1e-9;
 
 function normalizeNumber(value) {
