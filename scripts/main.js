@@ -9,12 +9,13 @@ import {
   SKY_SETTINGS,
   TILE_FADE_DURATION,
   VIEW_MODES,
-  VERSATILES_LOCAL_JSON
+  VERSATILES_LOCAL_JSON,
+  MAPTERHORN_TILE_URL,
+  MAPTERHORN_ATTRIBUTION
 } from './constants.js';
 import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from './gpx.js';
 import { DirectionsManager } from '../directions_test.js';
-import { ensureOvertureBuildings, pmtilesProtocol } from './pmtiles.js';
-import { waitForSWReady } from './service-worker.js';
+import { ensureOvertureBuildings } from './pmtiles.js';
 import {
   OfflineRouter,
   DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
@@ -127,17 +128,33 @@ function setBaseStyleOpacity(map, alpha) {
   }
 }
 
-async function init() {
-  await waitForSWReady();
+async function unregisterLegacyServiceWorker() {
+  if (!('serviceWorker' in navigator) ||
+      typeof navigator.serviceWorker.getRegistrations !== 'function') {
+    return;
+  }
 
-  maplibregl.addProtocol('mapterhorn', async (params, abortController) => {
-    const [z, x, y] = params.url.replace('mapterhorn://', '').split('/').map(Number);
-    const name = z <= 12 ? 'planet' : `6-${x >> (z - 6)}-${y >> (z - 6)}`;
-    const url = `pmtiles://https://download.mapterhorn.com/${name}.pmtiles/${z}/${x}/${y}.webp`;
-    const resp = await pmtilesProtocol.tile({ ...params, url }, abortController);
-    if (resp.data === null) throw new Error(`Tile z=${z} x=${x} y=${y} not found.`);
-    return resp;
-  });
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map(async (registration) => {
+      const candidates = [registration.active, registration.waiting, registration.installing]
+        .filter(Boolean)
+        .map((worker) => worker.scriptURL);
+      if (candidates.some((url) => typeof url === 'string' && url.endsWith('/sw.js'))) {
+        try {
+          await registration.unregister();
+        } catch (error) {
+          console.warn('Unable to unregister legacy service worker', error);
+        }
+      }
+    }));
+  } catch (error) {
+    console.warn('Legacy service worker cleanup failed', error);
+  }
+}
+
+async function init() {
+  await unregisterLegacyServiceWorker();
 
   const versaStyle = await fetch(VERSATILES_LOCAL_JSON, { cache: 'no-store' }).then(r => r.json());
   versaStyle.glyphs = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
@@ -882,9 +899,8 @@ async function init() {
     map.addImage(e.id, { width: 1, height: 1, data });
   });
 
-  const PROXY_ABS = `${window.location.origin}/mapterhorn-dem/{z}/{x}/{y}`;
   const demSource = new mlcontour.DemSource({
-    url: PROXY_ABS,
+    url: MAPTERHORN_TILE_URL,
     encoding: 'terrarium',
     maxzoom: 12,
     worker: true
@@ -998,31 +1014,33 @@ async function init() {
 
     map.addSource('terrainSource', {
       type: 'raster-dem',
-      tiles: ['mapterhorn://{z}/{x}/{y}'],
+      tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
       maxzoom: 17,
-      attribution: '<a href="https://mapterhorn.com/attribution">© Mapterhorn</a>'
+      attribution: MAPTERHORN_ATTRIBUTION
     });
     map.addSource('hillshadeSource', {
       type: 'raster-dem',
-      tiles: ['mapterhorn://{z}/{x}/{y}'],
+      tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
-      attribution: '<a href="https://mapterhorn.com/attribution">© Mapterhorn</a>'
+      attribution: MAPTERHORN_ATTRIBUTION
     });
     map.addSource('reliefDem', {
       type: 'raster-dem',
-      tiles: ['mapterhorn://{z}/{x}/{y}'],
+      tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
-      tileSize: 512
+      tileSize: 512,
+      attribution: MAPTERHORN_ATTRIBUTION
     });
 
     map.addSource('color-relief', {
       type: 'raster-dem',
-      tiles: ['mapterhorn://{z}/{x}/{y}'],
+      tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
-      tileSize: 512
+      tileSize: 512,
+      attribution: MAPTERHORN_ATTRIBUTION
     });
 
     map.addLayer({
