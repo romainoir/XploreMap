@@ -115,29 +115,48 @@ html, body { margin:0; height:100%; }
   text-align: center;
 }
 
-.debug-tools {
-  display: grid;
-  gap: 6px;
-}
-
-.routing-engine {
-  display: grid;
-  gap: 4px;
-}
-
-.routing-engine-label {
-  font-size: 12px;
-  color: rgba(17, 34, 48, 0.72);
-}
-
-.routing-engine-options {
+.directions-mode-controls {
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 
-.routing-engine-options .btn {
-  flex: 1;
-  text-align: center;
+.routing-mode-toggle {
+  white-space: nowrap;
+}
+
+.routing-mode-toggle.is-online {
+  background: rgba(34, 102, 153, 0.14);
+  border-color: rgba(34, 102, 153, 0.28);
+  color: rgba(17, 34, 48, 0.82);
+}
+
+.debug-network-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(17, 34, 48, 0.16);
+  background: rgba(17, 34, 48, 0.06);
+  color: rgba(17, 34, 48, 0.72);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.debug-network-control input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.debug-network-control span {
+  user-select: none;
+}
+
+.debug-network-control:hover {
+  background: rgba(17, 34, 48, 0.12);
 }
 
 .directions-ui {
@@ -153,6 +172,7 @@ html, body { margin:0; height:100%; }
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .icon-button {
