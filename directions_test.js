@@ -92,7 +92,83 @@ const SUMMARY_ICONS = {
 
 // Use the shared bivouac marker PNG so the UI references the canonical asset.
 const BIVOUAC_ICON_URL = new URL('./data/bivouac.png', import.meta.url).href;
-const BIVOUAC_ELEVATION_ICON = `<img class="elevation-marker__icon" src="${BIVOUAC_ICON_URL}" alt="" aria-hidden="true" loading="lazy" decoding="async" />`;
+
+let startMarkerAsset = null;
+let endMarkerAsset = null;
+let bivouacFallbackAsset = null;
+let startElevationIconMarkup = null;
+let endElevationIconMarkup = null;
+let bivouacElevationIconMarkup = null;
+
+function getStartMarkerAsset() {
+  if (!startMarkerAsset) {
+    startMarkerAsset = createFlagMarkerImage(SEGMENT_MARKER_COLORS.start);
+  }
+  return startMarkerAsset;
+}
+
+function getEndMarkerAsset() {
+  if (!endMarkerAsset) {
+    endMarkerAsset = createFlagMarkerImage(SEGMENT_MARKER_COLORS.end);
+  }
+  return endMarkerAsset;
+}
+
+function getBivouacFallbackAsset() {
+  if (!bivouacFallbackAsset) {
+    bivouacFallbackAsset = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
+  }
+  return bivouacFallbackAsset;
+}
+
+function createElevationMarkerIconMarkup({ url, asset }) {
+  const fallbackSrc = asset?.dataUrl ?? '';
+  if (url) {
+    const fallbackAttr = fallbackSrc ? ` data-fallback-src="${fallbackSrc}"` : '';
+    return `<img class="elevation-marker__icon" src="${url}" alt="" aria-hidden="true" loading="lazy" decoding="async" draggable="false"${fallbackAttr} />`;
+  }
+  if (fallbackSrc) {
+    return `<img class="elevation-marker__icon" src="${fallbackSrc}" alt="" aria-hidden="true" loading="lazy" decoding="async" draggable="false" />`;
+  }
+  return '<span class="elevation-marker__dot" aria-hidden="true"></span>';
+}
+
+function getStartElevationIcon() {
+  if (!startElevationIconMarkup) {
+    startElevationIconMarkup = createElevationMarkerIconMarkup({ asset: getStartMarkerAsset() });
+  }
+  return startElevationIconMarkup;
+}
+
+function getEndElevationIcon() {
+  if (!endElevationIconMarkup) {
+    endElevationIconMarkup = createElevationMarkerIconMarkup({ asset: getEndMarkerAsset() });
+  }
+  return endElevationIconMarkup;
+}
+
+function getBivouacElevationIcon() {
+  if (!bivouacElevationIconMarkup) {
+    bivouacElevationIconMarkup = createElevationMarkerIconMarkup({
+      url: BIVOUAC_ICON_URL,
+      asset: getBivouacFallbackAsset()
+    });
+  }
+  return bivouacElevationIconMarkup;
+}
+
+function getElevationMarkerIcon(type) {
+  switch (type) {
+    case 'start':
+      return getStartElevationIcon();
+    case 'end':
+      return getEndElevationIcon();
+    case 'bivouac':
+      return getBivouacElevationIcon();
+    default:
+      return '';
+  }
+}
 
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
 const DEFAULT_DISTANCE_MARKER_COLOR = '#f38b1c';
@@ -163,7 +239,13 @@ function finalizeMarkerImage(base) {
   }
 
   const imageData = ctx.getImageData(0, 0, width, height);
-  return { image: imageData, pixelRatio: ratio };
+  let dataUrl = '';
+  try {
+    dataUrl = canvas.toDataURL('image/png');
+  } catch (error) {
+    console.warn('Failed to serialize marker canvas', error);
+  }
+  return { image: imageData, pixelRatio: ratio, dataUrl, width, height };
 }
 
 function createFlagMarkerImage(fillColor) {
@@ -260,14 +342,14 @@ function ensureSegmentMarkerImages(map) {
   }
 
   if (!map.hasImage(START_MARKER_ICON_ID)) {
-    const startIcon = createFlagMarkerImage(SEGMENT_MARKER_COLORS.start);
+    const startIcon = getStartMarkerAsset();
     if (startIcon) {
       map.addImage(START_MARKER_ICON_ID, startIcon.image, { pixelRatio: startIcon.pixelRatio });
     }
   }
 
   if (!map.hasImage(END_MARKER_ICON_ID)) {
-    const endIcon = createFlagMarkerImage(SEGMENT_MARKER_COLORS.end);
+    const endIcon = getEndMarkerAsset();
     if (endIcon) {
       map.addImage(END_MARKER_ICON_ID, endIcon.image, { pixelRatio: endIcon.pixelRatio });
     }
@@ -290,14 +372,14 @@ function ensureSegmentMarkerImages(map) {
             console.warn('Unable to register bivouac marker PNG', error);
           }
         }
-        const fallbackIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
+        const fallbackIcon = getBivouacFallbackAsset();
         if (fallbackIcon && !map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
           map.addImage(BIVOUAC_MARKER_ICON_ID, fallbackIcon.image, { pixelRatio: fallbackIcon.pixelRatio });
         }
       })
       .catch((error) => {
         console.warn('Failed to load bivouac marker PNG', error);
-        const fallbackIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
+        const fallbackIcon = getBivouacFallbackAsset();
         if (fallbackIcon && !map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
           map.addImage(BIVOUAC_MARKER_ICON_ID, fallbackIcon.image, { pixelRatio: fallbackIcon.pixelRatio });
         }
@@ -4535,9 +4617,34 @@ export class DirectionsManager {
     const rawMinElevation = Math.min(...elevations);
     const minElevation = Number.isFinite(startElevation) ? startElevation : rawMinElevation;
     const yAxis = this.computeAxisTicks(minElevation, maxElevation, ELEVATION_TICK_TARGET);
+    const desiredMin = Number.isFinite(minElevation) ? Math.round(minElevation) : null;
+    if (desiredMin !== null) {
+      const step = Number.isFinite(yAxis.step) && yAxis.step > 0 ? yAxis.step : 1;
+      const filteredTicks = [...yAxis.ticks]
+        .filter((value) => Number.isFinite(value) && value >= desiredMin - step * 0.25)
+        .sort((a, b) => a - b);
+      const dedupedTicks = [];
+      filteredTicks.forEach((value) => {
+        if (!dedupedTicks.length || Math.abs(value - dedupedTicks[dedupedTicks.length - 1]) > step * 0.001) {
+          dedupedTicks.push(value);
+        } else {
+          dedupedTicks[dedupedTicks.length - 1] = value;
+        }
+      });
+      if (!dedupedTicks.length || Math.abs(dedupedTicks[0] - desiredMin) > step * 0.25) {
+        dedupedTicks.unshift(desiredMin);
+      } else {
+        dedupedTicks[0] = desiredMin;
+      }
+      yAxis.ticks = dedupedTicks;
+      yAxis.min = desiredMin;
+      if (!Number.isFinite(yAxis.max) || yAxis.max < desiredMin) {
+        yAxis.max = desiredMin + step;
+      }
+    }
     const range = Math.max(1, yAxis.max - yAxis.min);
 
-    const fallbackColor = this.modeColors[this.currentMode];
+    const fallbackColor = this.getColorForDistance(0) ?? this.modeColors[this.currentMode];
     const gradientStops = [];
     const addGradientStop = (distanceKm, color) => {
       if (totalDistance <= 0) {
@@ -4558,7 +4665,9 @@ export class DirectionsManager {
       .map((sample) => {
         const midDistance = (sample.startDistanceKm + sample.endDistanceKm) / 2;
         const segment = this.getCutSegmentForDistance(midDistance);
-        const baseColor = fallbackColor;
+        const baseColor = segment?.color
+          ? segment.color
+          : this.getColorForDistance(midDistance) ?? fallbackColor;
         addGradientStop(sample.startDistanceKm, baseColor);
         addGradientStop(sample.endDistanceKm, baseColor);
         const accentColor = adjustHexColor(baseColor, 0.18);
@@ -4671,8 +4780,9 @@ export class DirectionsManager {
     })();
 
     const areaPaths = this.buildElevationAreaPaths(samples, yAxis, totalDistance);
-    const areaFillColor = adjustHexColor(fallbackColor, 0.08);
-    const areaStrokeColor = adjustHexColor(fallbackColor, -0.25);
+    const primaryStrokeColor = gradientStops.length ? gradientStops[0].color : fallbackColor;
+    const areaFillColor = adjustHexColor(primaryStrokeColor, 0.08);
+    const areaStrokeColor = adjustHexColor(primaryStrokeColor, -0.25);
     const areaSvg = areaPaths.stroke
       ? `
         <svg class="elevation-area" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -4692,8 +4802,14 @@ export class DirectionsManager {
         return '';
       }
       const elements = markers
-        .filter((marker) => marker?.type === 'bivouac')
         .map((marker) => {
+          if (!marker || !marker.type) {
+            return null;
+          }
+          const iconMarkup = getElevationMarkerIcon(marker.type);
+          if (!iconMarkup) {
+            return null;
+          }
           const distanceKm = this.getMarkerDistance(marker);
           if (!Number.isFinite(distanceKm) || distanceKm < 0 || distanceKm > totalDistance) {
             return null;
@@ -4705,21 +4821,33 @@ export class DirectionsManager {
             percentY = ((clampedElevation - yAxis.min) / range) * 100;
             percentY = Math.max(0, Math.min(100, percentY));
           }
-          const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
-          const safeTitle = escapeHtml(rawTitle);
-          const verticalStyle = Number.isFinite(percentY)
+          const rawTitle = marker?.name ?? marker?.title ?? '';
+          const safeTitle = escapeHtml(rawTitle || (marker.type === 'start' ? 'Départ' : marker.type === 'end' ? 'Arrivée' : 'Bivouac'));
+          const verticalOffset = Number.isFinite(percentY)
             ? `bottom:${percentY.toFixed(2)}%`
             : 'bottom:0';
+          const markerColor = typeof marker.labelColor === 'string' && marker.labelColor.trim()
+            ? marker.labelColor.trim()
+            : this.getColorForDistance(distanceKm);
+          const styleParts = [verticalOffset];
+          if (markerColor) {
+            styleParts.push(`--marker-color:${markerColor}`);
+          }
+          const style = styleParts.join(';');
+          const labelMarkup = safeTitle
+            ? `<span class="elevation-marker__label">${safeTitle}</span>`
+            : '';
           return `
             <div
-              class="elevation-marker bivouac"
+              class="elevation-marker ${marker.type}"
               data-distance-km="${distanceKm.toFixed(4)}"
-              style="${verticalStyle}"
+              data-marker-type="${marker.type}"
+              style="${style}"
               title="${safeTitle}"
               aria-label="${safeTitle}"
             >
-              ${BIVOUAC_ELEVATION_ICON}
-              <span class="elevation-marker__label">${safeTitle}</span>
+              ${iconMarkup}
+              ${labelMarkup}
             </div>
           `;
         })
@@ -4745,6 +4873,30 @@ export class DirectionsManager {
         </div>
       </div>
     `;
+
+    const fallbackImages = Array.from(
+      this.elevationChart.querySelectorAll('.elevation-marker__icon[data-fallback-src]')
+    );
+    fallbackImages.forEach((element) => {
+      if (!(element instanceof HTMLImageElement)) {
+        return;
+      }
+      const fallbackSrc = element.getAttribute('data-fallback-src');
+      if (!fallbackSrc) {
+        return;
+      }
+      const handleError = () => {
+        if (element.dataset.fallbackApplied === '1') {
+          return;
+        }
+        element.dataset.fallbackApplied = '1';
+        element.src = fallbackSrc;
+      };
+      element.addEventListener('error', handleError, { once: true });
+      if (element.complete && element.naturalWidth === 0 && element.src !== fallbackSrc) {
+        handleError();
+      }
+    });
 
     this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
     this.elevationHoverReadout = this.elevationChart.querySelector('.elevation-hover-readout');
