@@ -864,6 +864,7 @@ export class DirectionsManager {
     this.swapButton?.addEventListener('click', () => {
       if (this.waypoints.length < 2) return;
       this.recordWaypointState();
+      this.mirrorRouteCutsForReversedRoute();
       this.waypoints.reverse();
       this.invalidateCachedLegSegments();
       this.updateWaypoints();
@@ -2346,6 +2347,26 @@ export class DirectionsManager {
     this.updateCutDisplays();
   }
 
+  mirrorRouteCutsForReversedRoute() {
+    if (!this.routeProfile || !Array.isArray(this.routeCutDistances) || !this.routeCutDistances.length) {
+      return;
+    }
+
+    const totalDistance = Number(this.routeProfile.totalDistanceKm);
+    if (!Number.isFinite(totalDistance) || totalDistance <= ROUTE_CUT_EPSILON_KM) {
+      return;
+    }
+
+    const mirrored = this.routeCutDistances
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => totalDistance - value)
+      .filter((value) => value > ROUTE_CUT_EPSILON_KM && totalDistance - value > ROUTE_CUT_EPSILON_KM)
+      .sort((a, b) => a - b);
+
+    this.routeCutDistances = mirrored;
+  }
+
   updateDraggedBivouac(distanceKm) {
     if (this.draggedBivouacIndex === null) {
       return;
@@ -3048,6 +3069,9 @@ export class DirectionsManager {
     if (typeof this.map.getTerrain === 'function') {
       const terrain = this.map.getTerrain();
       if (!terrain || !terrain.source) {
+        return false;
+      }
+      if (Number.isFinite(terrain.exaggeration) && terrain.exaggeration <= 0) {
         return false;
       }
     }
@@ -4645,9 +4669,9 @@ export class DirectionsManager {
         return `
           <div
             class="elevation-bar"
-            data-start-km="${sample.startDistanceKm.toFixed(4)}"
-            data-end-km="${sample.endDistanceKm.toFixed(4)}"
-            data-mid-km="${((sample.startDistanceKm + sample.endDistanceKm) / 2).toFixed(4)}"
+            data-start-km="${sample.startDistanceKm.toFixed(6)}"
+            data-end-km="${sample.endDistanceKm.toFixed(6)}"
+            data-mid-km="${((sample.startDistanceKm + sample.endDistanceKm) / 2).toFixed(6)}"
             data-segment-index="${segment ? segment.index : -1}"
             style="${style}"
             title="${title}"
@@ -4774,7 +4798,7 @@ export class DirectionsManager {
           return `
             <div
               class="elevation-marker bivouac"
-              data-distance-km="${distanceKm.toFixed(4)}"
+              data-distance-km="${distanceKm.toFixed(6)}"
               style="${verticalStyle}"
               title="${safeTitle}"
               aria-label="${safeTitle}"
@@ -4883,7 +4907,7 @@ export class DirectionsManager {
       const x = target.rect.left + ratio * target.rect.width;
       const offset = x - containerLeft;
       const percent = Math.max(0, Math.min(100, (offset / containerWidth) * 100));
-      marker.style.left = `${percent.toFixed(4)}%`;
+      marker.style.left = `${percent.toFixed(6)}%`;
     });
   }
 
