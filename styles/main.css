@@ -641,8 +641,8 @@ html, body { margin:0; height:100%; }
 }
 
 .elevation-marker.bivouac .elevation-marker__icon {
-  width: calc(22px / 3);
-  height: calc(22px / 3);
+  width: 16px;
+  height: 16px;
 }
 
 .elevation-marker__label {
