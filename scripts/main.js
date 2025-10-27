@@ -1128,13 +1128,19 @@ async function init() {
   }
 
   function syncTerrainAndSky() {
+    const terrainSourceId = 'terrainSource';
+    const hasTerrainSource = Boolean(map.getSource(terrainSourceId));
     if (currentViewMode === VIEW_MODES.THREED) {
-      if (map.getSource('terrainSource')) {
-        map.setTerrain({ source: 'terrainSource', exaggeration: 1 });
+      if (hasTerrainSource) {
+        map.setTerrain({ source: terrainSourceId, exaggeration: 1 });
       }
       map.setSky(SKY_SETTINGS);
     } else {
-      map.setTerrain(null);
+      if (hasTerrainSource) {
+        map.setTerrain({ source: terrainSourceId, exaggeration: 0 });
+      } else {
+        map.setTerrain(null);
+      }
       map.setSky(null);
     }
     if (vignetteEl) vignetteEl.dataset.mode = currentViewMode;
