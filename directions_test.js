@@ -715,7 +715,17 @@ export class DirectionsManager {
         'icon-image': ['get', 'icon'],
         'icon-anchor': 'bottom',
         'icon-offset': [0, 0],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.55, 12, 0.75, 16, 0.95],
+        'icon-size': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          8,
+          ['match', ['get', 'type'], 'bivouac', 0.45, 0.55],
+          12,
+          ['match', ['get', 'type'], 'bivouac', 0.65, 0.75],
+          16,
+          ['match', ['get', 'type'], 'bivouac', 0.85, 0.95]
+        ],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'text-field': ['get', 'title'],
@@ -4714,8 +4724,8 @@ export class DirectionsManager {
               title="${safeTitle}"
               aria-label="${safeTitle}"
             >
-              ${BIVOUAC_ELEVATION_ICON}
               <span class="elevation-marker__label">${safeTitle}</span>
+              ${BIVOUAC_ELEVATION_ICON}
             </div>
           `;
         })
