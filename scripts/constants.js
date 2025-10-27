@@ -21,7 +21,7 @@ export const VERSATILES_LOCAL_JSON = './osm_liberty.json';
 export const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
 export const TILE_FADE_DURATION = 800;
 export const S2_FADE_DURATION = 700;
-export const MAPTERHORN_TILE_URL = 'https://tiles.mapterhorn.com/dem/v1/{z}/{x}/{y}.webp';
+export const MAPTERHORN_TILE_URL = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp';
 export const MAPTERHORN_ATTRIBUTION = '<a href="https://mapterhorn.com/attribution">© Mapterhorn</a>';
 export const OVERTURE_BUILDINGS_PM_URL = 'https://data.source.coop/cholmes/overture/overture-buildings.pmtiles';
 export const OVERTURE_BUILDINGS_ATTRIBUTION = '<a href="https://overturemaps.org/">© Overture Maps Foundation</a>';

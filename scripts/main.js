@@ -903,7 +903,8 @@ async function init() {
     url: MAPTERHORN_TILE_URL,
     encoding: 'terrarium',
     maxzoom: 12,
-    worker: true
+    worker: true,
+    tileSize: 512
   });
   demSource.setupMaplibre(maplibregl);
 
