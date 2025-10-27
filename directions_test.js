@@ -507,6 +507,7 @@ export class DirectionsManager {
     this.routeSegmentsListener = null;
     this.networkPreparationCallback = null;
     this.elevationResizeObserver = null;
+    this.terrainElevationErrorLogged = false;
 
     this.setupRouteLayers();
     this.setupUIHandlers();
@@ -2800,6 +2801,46 @@ export class DirectionsManager {
     return earthRadiusKm * c;
   }
 
+  canQueryTerrainElevation() {
+    if (!this.map || typeof this.map.queryTerrainElevation !== 'function') {
+      return false;
+    }
+    if (typeof this.map.getTerrain === 'function') {
+      const terrain = this.map.getTerrain();
+      if (!terrain || !terrain.source) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  queryTerrainElevationValue(coord) {
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return null;
+    }
+    const lng = Number(coord[0]);
+    const lat = Number(coord[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return null;
+    }
+    if (!this.map || typeof this.map.queryTerrainElevation !== 'function') {
+      return null;
+    }
+    if (!this.canQueryTerrainElevation()) {
+      return null;
+    }
+    try {
+      const elevation = this.map.queryTerrainElevation([lng, lat]);
+      return Number.isFinite(elevation) ? elevation : null;
+    } catch (error) {
+      if (!this.terrainElevationErrorLogged) {
+        console.warn('Failed to query terrain elevation', error);
+        this.terrainElevationErrorLogged = true;
+      }
+      return null;
+    }
+  }
+
   findSegmentIndexByDistance(distanceKm) {
     if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
       return null;
@@ -2953,22 +2994,58 @@ export class DirectionsManager {
       return null;
     }
 
-    const cumulativeDistances = new Array(coordinates.length).fill(0);
+    const sanitized = [];
+    for (const coord of coordinates) {
+      if (!Array.isArray(coord) || coord.length < 2) {
+        continue;
+      }
+      const lng = Number(coord[0]);
+      const lat = Number(coord[1]);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        continue;
+      }
+      const rawElevation = coord.length > 2 ? Number(coord[2]) : null;
+      const normalizedElevation = Number.isFinite(rawElevation) ? rawElevation : null;
+      sanitized.push([lng, lat, normalizedElevation]);
+    }
+
+    if (sanitized.length < 2) {
+      return null;
+    }
+
+    const canQueryTerrain = this.canQueryTerrainElevation();
+    if (canQueryTerrain) {
+      this.terrainElevationErrorLogged = false;
+    }
+
+    for (let index = 0; index < sanitized.length; index += 1) {
+      const coord = sanitized[index];
+      let elevation = Number.isFinite(coord[2]) ? coord[2] : null;
+      if (canQueryTerrain) {
+        const terrainElevation = this.queryTerrainElevationValue(coord);
+        if (Number.isFinite(terrainElevation)) {
+          elevation = terrainElevation;
+        }
+      }
+      coord[2] = Number.isFinite(elevation) ? elevation : null;
+    }
+
+    const cumulativeDistances = new Array(sanitized.length).fill(0);
     let totalDistance = 0;
 
-    for (let index = 1; index < coordinates.length; index += 1) {
-      const segmentDistance = this.computeDistanceKm(coordinates[index - 1], coordinates[index]);
+    for (let index = 1; index < sanitized.length; index += 1) {
+      const segmentDistance = this.computeDistanceKm(sanitized[index - 1], sanitized[index]);
       totalDistance += Number.isFinite(segmentDistance) ? segmentDistance : 0;
       cumulativeDistances[index] = totalDistance;
     }
 
-    const elevations = coordinates.map((coord) => {
+    const elevations = sanitized.map((coord) => {
       const elevation = coord?.[2];
       return Number.isFinite(elevation) ? elevation : null;
     });
 
     return {
-      coordinates,
+      coordinates: sanitized,
       cumulativeDistances,
       totalDistanceKm: totalDistance,
       elevations
@@ -4493,10 +4570,24 @@ export class DirectionsManager {
     this.hideRouteHover();
     const previousCuts = Array.isArray(this.routeCutDistances) ? [...this.routeCutDistances] : [];
     const previousTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
-    this.routeGeojson = route;
     const coordinates = route?.geometry?.coordinates ?? [];
     this.routeProfile = this.buildRouteProfile(coordinates);
-    this.latestMetrics = this.calculateRouteMetrics(route);
+    const profileCoordinates = Array.isArray(this.routeProfile?.coordinates)
+      ? this.routeProfile.coordinates
+      : [];
+    const routeCoordinates = profileCoordinates.map((coord) => (Array.isArray(coord) ? coord.slice() : coord));
+    let resolvedRoute = route;
+    if (routeCoordinates.length) {
+      resolvedRoute = {
+        ...route,
+        geometry: {
+          ...(route.geometry ?? { type: 'LineString' }),
+          coordinates: routeCoordinates
+        }
+      };
+    }
+    this.routeGeojson = resolvedRoute;
+    this.latestMetrics = this.calculateRouteMetrics(resolvedRoute);
     this.rebuildSegmentData();
     const snapped = this.snapWaypointsToRoute();
     if (snapped) {
@@ -4532,8 +4623,8 @@ export class DirectionsManager {
       this.routeCutDistances = uniqueCuts;
     }
     this.updateCutDisplays();
-    this.updateDistanceMarkers(route);
-    this.updateStats(route);
+    this.updateDistanceMarkers(resolvedRoute);
+    this.updateStats(resolvedRoute);
   }
 
   async getRoute() {
