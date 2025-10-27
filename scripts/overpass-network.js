@@ -76,19 +76,109 @@ export function getOverpassQuery(lat, lon) {
 out body;`;
 }
 
+const FORBIDDEN_ACCESS_VALUES = new Set(['no', 'private']);
+const ALLOWED_ACCESS_VALUES = new Set(['yes', 'designated', 'permissive', 'destination']);
+const DRIVING_HIGHWAYS = new Set([
+  'trunk',
+  'trunk_link',
+  'primary',
+  'primary_link',
+  'secondary',
+  'secondary_link',
+  'tertiary',
+  'tertiary_link',
+  'unclassified',
+  'residential',
+  'living_street',
+  'service',
+  'road'
+]);
+const DRIVING_ONLY_HIGHWAYS = new Set(['motorway', 'motorway_link']);
+const CYCLING_AND_FOOT_HIGHWAYS = new Set(['cycleway', 'path', 'track', 'bridleway', 'byway']);
+const FOOT_ONLY_HIGHWAYS = new Set(['footway', 'pedestrian', 'steps', 'corridor', 'escalator']);
+
+function normalizeTagValue(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function parseAccess(value) {
+  const normalized = normalizeTagValue(value);
+  if (!normalized) {
+    return null;
+  }
+  if (FORBIDDEN_ACCESS_VALUES.has(normalized) || normalized === 'dismount') {
+    return 'forbidden';
+  }
+  if (ALLOWED_ACCESS_VALUES.has(normalized)) {
+    return 'allowed';
+  }
+  return null;
+}
+
+function getAccessStatus(tags, keys) {
+  for (const key of keys) {
+    const status = parseAccess(tags[key]);
+    if (status) {
+      return status;
+    }
+  }
+  return null;
+}
+
+function applyAccessRestrictions(modes, tags) {
+  if (!modes.size) {
+    return modes;
+  }
+
+  if (modes.has('driving-car')) {
+    const drivingStatus = getAccessStatus(tags, ['motor_vehicle', 'motorcar', 'vehicle', 'access']);
+    if (drivingStatus === 'forbidden') {
+      modes.delete('driving-car');
+    }
+  }
+
+  if (modes.has('cycling-regular')) {
+    const cyclingStatus = getAccessStatus(tags, ['bicycle', 'vehicle', 'access']);
+    if (cyclingStatus === 'forbidden') {
+      modes.delete('cycling-regular');
+    }
+  }
+
+  if (modes.has('foot-hiking')) {
+    const footStatus = getAccessStatus(tags, ['foot', 'pedestrian', 'access']);
+    if (footStatus === 'forbidden') {
+      modes.delete('foot-hiking');
+    }
+  }
+
+  return modes;
+}
+
 function determineModes(tags = {}) {
   const highway = typeof tags.highway === 'string' ? tags.highway.trim().toLowerCase() : '';
   if (!highway) {
     return new Set();
   }
+
   const modes = new Set();
-  if (highway === 'track') {
+  if (DRIVING_ONLY_HIGHWAYS.has(highway)) {
+    modes.add('driving-car');
+  } else if (DRIVING_HIGHWAYS.has(highway)) {
+    modes.add('driving-car');
     modes.add('cycling-regular');
-  }
-  if (['path', 'footway', 'track'].includes(highway)) {
+    modes.add('foot-hiking');
+  } else if (CYCLING_AND_FOOT_HIGHWAYS.has(highway)) {
+    modes.add('cycling-regular');
+    modes.add('foot-hiking');
+  } else if (FOOT_ONLY_HIGHWAYS.has(highway)) {
+    modes.add('foot-hiking');
+  } else {
+    modes.add('driving-car');
+    modes.add('cycling-regular');
     modes.add('foot-hiking');
   }
-  return modes;
+
+  return applyAccessRestrictions(modes, tags);
 }
 
 function sanitizeLineCoordinates(coords) {
