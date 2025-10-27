@@ -807,8 +807,11 @@ async function init() {
       debugNetworkButton.disabled = true;
       try {
         if (targetState) {
-          await refreshOfflineNetwork();
-          const applied = await applyDebugNetworkLayer();
+          let applied = await applyDebugNetworkLayer();
+          if (!applied) {
+            await refreshOfflineNetwork();
+            applied = await applyDebugNetworkLayer();
+          }
           if (!applied) {
             window.alert('Unable to display the routing network. Check the console for details.');
           }
