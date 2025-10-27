@@ -92,7 +92,7 @@ const SUMMARY_ICONS = {
 
 // Use the shared bivouac marker PNG so the UI references the canonical asset.
 const BIVOUAC_ICON_URL = new URL('./data/bivouac.png', import.meta.url).href;
-const BIVOUAC_ELEVATION_ICON = `<img src="${BIVOUAC_ICON_URL}" alt="" loading="lazy" decoding="async" />`;
+const BIVOUAC_ELEVATION_ICON = `<img class="elevation-marker__icon" src="${BIVOUAC_ICON_URL}" alt="" aria-hidden="true" loading="lazy" decoding="async" />`;
 
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
 const DEFAULT_DISTANCE_MARKER_COLOR = '#f38b1c';
@@ -112,6 +112,28 @@ const SEGMENT_MARKER_ICONS = {
   bivouac: BIVOUAC_MARKER_ICON_ID,
   end: END_MARKER_ICON_ID
 };
+
+let bivouacMarkerImagePromise = null;
+
+function loadBivouacMarkerImageElement() {
+  if (bivouacMarkerImagePromise) {
+    return bivouacMarkerImagePromise;
+  }
+  bivouacMarkerImagePromise = new Promise((resolve) => {
+    try {
+      const image = new Image();
+      image.decoding = 'async';
+      image.crossOrigin = 'anonymous';
+      image.onload = () => resolve(image);
+      image.onerror = () => resolve(null);
+      image.src = BIVOUAC_ICON_URL;
+    } catch (error) {
+      console.warn('Failed to start loading bivouac marker PNG', error);
+      resolve(null);
+    }
+  });
+  return bivouacMarkerImagePromise;
+}
 
 function createMarkerCanvas(baseSize = 52) {
   const ratio = 2;
@@ -252,10 +274,34 @@ function ensureSegmentMarkerImages(map) {
   }
 
   if (!map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
-    const bivouacIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
-    if (bivouacIcon) {
-      map.addImage(BIVOUAC_MARKER_ICON_ID, bivouacIcon.image, { pixelRatio: bivouacIcon.pixelRatio });
-    }
+    loadBivouacMarkerImageElement()
+      .then((image) => {
+        if (!map || typeof map.addImage !== 'function') {
+          return;
+        }
+        if (map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+          return;
+        }
+        if (image) {
+          try {
+            map.addImage(BIVOUAC_MARKER_ICON_ID, image, { pixelRatio: 1 });
+            return;
+          } catch (error) {
+            console.warn('Unable to register bivouac marker PNG', error);
+          }
+        }
+        const fallbackIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
+        if (fallbackIcon && !map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+          map.addImage(BIVOUAC_MARKER_ICON_ID, fallbackIcon.image, { pixelRatio: fallbackIcon.pixelRatio });
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to load bivouac marker PNG', error);
+        const fallbackIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
+        if (fallbackIcon && !map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+          map.addImage(BIVOUAC_MARKER_ICON_ID, fallbackIcon.image, { pixelRatio: fallbackIcon.pixelRatio });
+        }
+      });
   }
 }
 
@@ -283,6 +329,18 @@ function adjustHexColor(hex, ratio = 0) {
   const nextG = toHex(transform(g));
   const nextB = toHex(transform(b));
   return `#${nextR}${nextG}${nextB}`;
+}
+
+function escapeHtml(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function createDistanceMarkerImage(label, {
@@ -433,6 +491,7 @@ export class DirectionsManager {
       transportModes,
       swapButton,
       undoButton,
+      redoButton,
       clearButton,
       routeStats,
       elevationChart,
@@ -450,6 +509,7 @@ export class DirectionsManager {
     this.transportModes = transportModes ? Array.from(transportModes) : [];
     this.swapButton = swapButton ?? null;
     this.undoButton = undoButton ?? null;
+    this.redoButton = redoButton ?? null;
     this.clearButton = clearButton ?? null;
     this.routeStats = routeStats ?? null;
     this.elevationChart = elevationChart ?? null;
@@ -463,6 +523,7 @@ export class DirectionsManager {
 
     this.waypoints = [];
     this.waypointHistory = [];
+    this.waypointRedoHistory = [];
     this.currentMode = 'foot-hiking';
     this.modeColors = { ...MODE_COLORS };
 
@@ -803,6 +864,10 @@ export class DirectionsManager {
       this.undoLastWaypointChange();
     });
 
+    this.redoButton?.addEventListener('click', () => {
+      this.redoLastWaypointChange();
+    });
+
     this.clearButton?.addEventListener('click', () => {
       this.clearDirections();
     });
@@ -827,21 +892,32 @@ export class DirectionsManager {
     return source.map((coords) => (Array.isArray(coords) ? coords.slice() : []));
   }
 
+  trimHistoryStack(stack) {
+    if (!Array.isArray(stack)) {
+      return;
+    }
+    if (stack.length > WAYPOINT_HISTORY_LIMIT) {
+      stack.splice(0, stack.length - WAYPOINT_HISTORY_LIMIT);
+    }
+  }
+
   recordWaypointState() {
     const snapshot = this.cloneWaypoints();
     this.waypointHistory.push(snapshot);
-    if (this.waypointHistory.length > WAYPOINT_HISTORY_LIMIT) {
-      this.waypointHistory.splice(0, this.waypointHistory.length - WAYPOINT_HISTORY_LIMIT);
-    }
+    this.trimHistoryStack(this.waypointHistory);
+    this.waypointRedoHistory = [];
     this.updateUndoAvailability();
   }
 
   updateUndoAvailability() {
-    if (!this.undoButton) {
-      return;
-    }
     const hasHistory = Array.isArray(this.waypointHistory) && this.waypointHistory.length > 0;
-    this.undoButton.disabled = !hasHistory;
+    if (this.undoButton) {
+      this.undoButton.disabled = !hasHistory;
+    }
+    const hasRedo = Array.isArray(this.waypointRedoHistory) && this.waypointRedoHistory.length > 0;
+    if (this.redoButton) {
+      this.redoButton.disabled = !hasRedo;
+    }
   }
 
   undoLastWaypointChange() {
@@ -849,7 +925,45 @@ export class DirectionsManager {
       return;
     }
     const previous = this.waypointHistory.pop();
+    if (!Array.isArray(previous)) {
+      this.updateUndoAvailability();
+      return;
+    }
+    const currentSnapshot = this.cloneWaypoints();
+    if (Array.isArray(currentSnapshot)) {
+      this.waypointRedoHistory.push(currentSnapshot);
+      this.trimHistoryStack(this.waypointRedoHistory);
+    }
     this.waypoints = this.cloneWaypoints(previous);
+    this.invalidateCachedLegSegments();
+    if (this.waypoints.length >= 2) {
+      this.updateWaypoints();
+      this.getRoute();
+    } else {
+      this.clearRoute();
+      this.updateWaypoints();
+      this.updateStats(null);
+      this.updateElevationProfile([]);
+    }
+    this.updateModeAvailability();
+    this.updateUndoAvailability();
+  }
+
+  redoLastWaypointChange() {
+    if (!Array.isArray(this.waypointRedoHistory) || !this.waypointRedoHistory.length) {
+      return;
+    }
+    const next = this.waypointRedoHistory.pop();
+    if (!Array.isArray(next)) {
+      this.updateUndoAvailability();
+      return;
+    }
+    const currentSnapshot = this.cloneWaypoints();
+    if (Array.isArray(currentSnapshot)) {
+      this.waypointHistory.push(currentSnapshot);
+      this.trimHistoryStack(this.waypointHistory);
+    }
+    this.waypoints = this.cloneWaypoints(next);
     this.invalidateCachedLegSegments();
     if (this.waypoints.length >= 2) {
       this.updateWaypoints();
@@ -3563,6 +3677,7 @@ export class DirectionsManager {
     this.draggedBivouacIndex = null;
     this.setHoveredWaypointIndex(null);
     this.waypointHistory = [];
+    this.waypointRedoHistory = [];
     this.updateUndoAvailability();
   }
 
@@ -4506,7 +4621,20 @@ export class DirectionsManager {
       .filter((value) => value <= upperBound + tolerance * 0.25)
       .sort((a, b) => a - b);
     const xAxisLabels = xTicks
-      .map((value) => `<span>${this.formatDistanceTick(value)}</span>`)
+      .map((value) => {
+        const ratio = totalDistance > 0
+          ? Math.max(0, Math.min(1, value / totalDistance))
+          : 0;
+        const position = (ratio * 100).toFixed(3);
+        let transform = 'translateX(-50%)';
+        if (ratio <= 0.001) {
+          transform = 'translateX(0)';
+        } else if (ratio >= 0.999) {
+          transform = 'translateX(-100%)';
+        }
+        const style = `left:${position}%;transform:${transform}`;
+        return `<span style="${style}">${this.formatDistanceTick(value)}</span>`;
+      })
       .join('');
 
     const gradientId = 'elevation-area-gradient';
@@ -4573,7 +4701,8 @@ export class DirectionsManager {
             percentY = ((clampedElevation - yAxis.min) / range) * 100;
             percentY = Math.max(0, Math.min(100, percentY));
           }
-          const title = marker?.name ?? marker?.title ?? 'Bivouac';
+          const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
+          const safeTitle = escapeHtml(rawTitle);
           const verticalStyle = Number.isFinite(percentY)
             ? `bottom:${percentY.toFixed(2)}%`
             : 'bottom:0';
@@ -4582,9 +4711,11 @@ export class DirectionsManager {
               class="elevation-marker bivouac"
               data-distance-km="${distanceKm.toFixed(4)}"
               style="${verticalStyle}"
-              title="${title}"
+              title="${safeTitle}"
+              aria-label="${safeTitle}"
             >
               ${BIVOUAC_ELEVATION_ICON}
+              <span class="elevation-marker__label">${safeTitle}</span>
             </div>
           `;
         })
