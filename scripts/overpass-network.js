@@ -1,5 +1,5 @@
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
-const DEFAULT_NETWORK_RADIUS_METERS = 40000;
+const DEFAULT_NETWORK_RADIUS_METERS = 15000;
 export const PATH_RADIUS_METERS = DEFAULT_NETWORK_RADIUS_METERS;
 export const POI_RADIUS_METERS = DEFAULT_NETWORK_RADIUS_METERS;
 const MIN_COORDINATE_SPAN_EPSILON = 1e-9;
@@ -68,12 +68,12 @@ export function getOverpassQuery(lat, lon) {
   }
   const latValue = toFixed(normalizedLat, 6);
   const lonValue = toFixed(normalizedLon, 6);
-  return `[out:json][timeout:25];
+  return `[out:json][timeout:180];
 (
-    way(around:${PATH_RADIUS_METERS},${latValue},${lonValue})[highway~"^(path|footway|track)$"];
-    node(w);
+  way["highway"]["highway"!="proposed"]["highway"!="construction"](around:${PATH_RADIUS_METERS},${latValue},${lonValue});
 );
-out geom;`;
+(._;>;);
+out body;`;
 }
 
 function determineModes(tags = {}) {
