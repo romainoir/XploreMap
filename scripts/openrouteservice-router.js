@@ -1,6 +1,6 @@
 import { haversineDistanceKm } from './geojson-pathfinder.js';
 
-const DEFAULT_SERVICE_URL = 'https://router.project-osrm.org';
+const DEFAULT_SERVICE_URL = 'https://api.openrouteservice.org';
 const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
 const COORDINATE_DUPLICATE_TOLERANCE_METERS = 0.05;
 
@@ -11,9 +11,9 @@ const DEFAULT_MODE_SPEEDS_KMH = Object.freeze({
 });
 
 const MODE_PROFILES = Object.freeze({
-  'foot-hiking': 'foot',
-  'cycling-regular': 'cycling',
-  'driving-car': 'driving'
+  'foot-hiking': 'foot-hiking',
+  'cycling-regular': 'cycling-regular',
+  'driving-car': 'driving-car'
 });
 
 const sanitizeCoordinate = (coord) => {
@@ -171,11 +171,44 @@ const sanitizeSegmentMetrics = (segment) => {
   };
 };
 
-export class OsrmRouter {
+const sanitizeSummaryMetrics = (summary) => {
+  if (!summary || typeof summary !== 'object') {
+    return null;
+  }
+  const distance = Number(summary.distance);
+  const duration = Number(summary.duration);
+  const ascent = Number(summary.ascent);
+  const descent = Number(summary.descent);
+  const hasDistance = Number.isFinite(distance) && distance >= 0;
+  const hasDuration = Number.isFinite(duration) && duration >= 0;
+  const hasAscent = Number.isFinite(ascent);
+  const hasDescent = Number.isFinite(descent);
+  if (!hasDistance && !hasDuration && !hasAscent && !hasDescent) {
+    return null;
+  }
+  return {
+    distance: hasDistance ? distance : null,
+    duration: hasDuration ? duration : null,
+    ascent: hasAscent ? ascent : null,
+    descent: hasDescent ? descent : null
+  };
+};
+
+const metersFromKm = (distanceKm) => {
+  if (!Number.isFinite(distanceKm)) {
+    return 0;
+  }
+  return distanceKm * 1000;
+};
+
+export class OrsRouter {
   constructor(options = {}) {
     const {
       serviceUrl = DEFAULT_SERVICE_URL,
-      supportedModes = Object.keys(MODE_PROFILES)
+      apiKey = null,
+      supportedModes = Object.keys(MODE_PROFILES),
+      requestParameters = null,
+      fetchOptions = null
     } = options || {};
 
     const normalizedUrl = typeof serviceUrl === 'string' && serviceUrl.length
@@ -183,6 +216,7 @@ export class OsrmRouter {
       : DEFAULT_SERVICE_URL;
 
     this.serviceUrl = normalizedUrl;
+    this.apiKey = typeof apiKey === 'string' && apiKey.trim().length ? apiKey.trim() : null;
 
     const modes = Array.isArray(supportedModes) ? supportedModes : Object.keys(MODE_PROFILES);
     this.supportedModes = new Set(
@@ -191,6 +225,14 @@ export class OsrmRouter {
 
     const defaultMode = modes.find((mode) => this.supportedModes.has(mode));
     this.defaultMode = defaultMode || 'foot-hiking';
+
+    this.requestParameters = requestParameters && typeof requestParameters === 'object'
+      ? { ...requestParameters }
+      : {};
+
+    this.fetchOptions = fetchOptions && typeof fetchOptions === 'object'
+      ? { ...fetchOptions }
+      : {};
   }
 
   ensureReady() {
@@ -224,16 +266,69 @@ export class OsrmRouter {
     return (distanceKm / speed) * 3600;
   }
 
-  buildRouteUrl(coords, mode) {
+  mergeFetchOptions(baseOptions) {
+    if (!this.fetchOptions || typeof this.fetchOptions !== 'object') {
+      return baseOptions;
+    }
+    const merged = { ...this.fetchOptions, ...baseOptions };
+    const baseHeaders = (this.fetchOptions && typeof this.fetchOptions.headers === 'object')
+      ? this.fetchOptions.headers
+      : {};
+    const routeHeaders = baseOptions && typeof baseOptions.headers === 'object'
+      ? baseOptions.headers
+      : {};
+    merged.headers = { ...baseHeaders, ...routeHeaders };
+    return merged;
+  }
+
+  buildRouteRequest(coords, mode) {
     const profile = this.getProfileForMode(mode);
-    const coordinateString = coords.map((coord) => `${coord[0]},${coord[1]}`).join(';');
-    const params = new URLSearchParams({
-      overview: 'full',
-      geometries: 'geojson',
-      steps: 'false',
-      annotations: 'false'
+    const coordinatePayload = coords.map((coord) => [coord[0], coord[1]]);
+    const url = `${this.serviceUrl}/v2/directions/${profile}/geojson`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.apiKey && !headers.Authorization) {
+      headers.Authorization = this.apiKey;
+    }
+    const payload = {
+      instructions: false,
+      elevation: true,
+      ...this.requestParameters,
+      coordinates: coordinatePayload
+    };
+    const options = this.mergeFetchOptions({
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
     });
-    return `${this.serviceUrl}/route/v1/${profile}/${coordinateString}?${params.toString()}`;
+    return { url, options };
+  }
+
+  extractRouteFeature(payload) {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+    if (payload.type === 'FeatureCollection' && Array.isArray(payload.features)) {
+      return payload.features.find((feature) => feature && feature.geometry && feature.geometry.type === 'LineString')
+        || payload.features[0]
+        || null;
+    }
+    if (payload.type === 'Feature' && payload.geometry) {
+      return payload;
+    }
+    if (Array.isArray(payload.routes) && payload.routes.length) {
+      const route = payload.routes[0];
+      if (route && route.geometry && typeof route.geometry === 'object') {
+        return {
+          type: 'Feature',
+          properties: {
+            summary: route.summary,
+            segments: route.segments
+          },
+          geometry: route.geometry
+        };
+      }
+    }
+    return null;
   }
 
   async requestRoute(coords, mode) {
@@ -241,24 +336,29 @@ export class OsrmRouter {
       return null;
     }
 
-    const url = this.buildRouteUrl(coords, mode);
-    const response = await fetch(url);
+    const { url, options } = this.buildRouteRequest(coords, mode);
+    const response = await fetch(url, options);
     if (!response.ok) {
-      throw new Error(`OSRM request failed (${response.status})`);
+      throw new Error(`OpenRouteService request failed (${response.status})`);
     }
 
     const payload = await response.json();
-    if (!payload || payload.code !== 'Ok') {
-      const message = payload?.message || 'Unknown OSRM error';
-      throw new Error(`OSRM response error: ${message}`);
+    const feature = this.extractRouteFeature(payload);
+    if (!feature || !feature.geometry || !Array.isArray(feature.geometry.coordinates)) {
+      throw new Error('OpenRouteService response did not include a valid route geometry');
     }
 
-    const route = Array.isArray(payload.routes) ? payload.routes[0] : null;
-    if (!route || !route.geometry || !route.geometry.coordinates) {
-      throw new Error('OSRM response did not include a valid route geometry');
-    }
+    return feature;
+  }
 
-    return route;
+  buildSummaryFromGeometry(coords, mode) {
+    const metrics = accumulateSequenceMetrics(coords);
+    return {
+      distance: metersFromKm(metrics.distanceKm),
+      duration: this.estimateDurationSeconds(metrics.distanceKm, mode),
+      ascent: metrics.ascent,
+      descent: metrics.descent
+    };
   }
 
   async getRoute(waypoints, { mode, preservedSegments } = {}) {
@@ -294,32 +394,69 @@ export class OsrmRouter {
 
     if (!preservedMap.size) {
       const requestCoords = coords.map((coord) => [coord[0], coord[1]]);
-      const route = await this.requestRoute(requestCoords, travelMode);
-      const legs = Array.isArray(route.legs) ? route.legs : [];
-      const segments = legs.map((leg, index) => ({
-        distance: Number(leg?.distance) || 0,
-        duration: Number(leg?.duration) || 0,
-        ascent: 0,
-        descent: 0,
-        start_index: index,
-        end_index: index + 1
-      }));
+      const routeFeature = await this.requestRoute(requestCoords, travelMode);
+      const rawCoordinates = Array.isArray(routeFeature.geometry?.coordinates)
+        ? routeFeature.geometry.coordinates
+        : [];
+      const geometryCoordinates = sanitizeCoordinateSequence(rawCoordinates)
+        || rawCoordinates.map((coord) => sanitizeCoordinate(coord)).filter(Boolean);
 
-      const summary = {
-        distance: Number(route.distance) || 0,
-        duration: Number(route.duration) || 0,
-        ascent: 0,
-        descent: 0
-      };
+      const summaryMetrics = sanitizeSummaryMetrics(routeFeature.properties?.summary);
+      const geometrySummary = this.buildSummaryFromGeometry(geometryCoordinates, travelMode);
+
+      const totalDistance = Number.isFinite(summaryMetrics?.distance)
+        ? summaryMetrics.distance
+        : geometrySummary.distance;
+      const totalDuration = Number.isFinite(summaryMetrics?.duration)
+        ? summaryMetrics.duration
+        : geometrySummary.duration;
+      const totalAscent = Number.isFinite(summaryMetrics?.ascent)
+        ? summaryMetrics.ascent
+        : geometrySummary.ascent;
+      const totalDescent = Number.isFinite(summaryMetrics?.descent)
+        ? summaryMetrics.descent
+        : geometrySummary.descent;
+
+      const segmentData = Array.isArray(routeFeature.properties?.segments)
+        ? routeFeature.properties.segments
+        : [];
+
+      const segments = segmentData.map((segment, index) => {
+        const metrics = sanitizeSegmentMetrics(segment);
+        const distance = Number.isFinite(metrics?.distance)
+          ? metrics.distance
+          : segmentData.length ? totalDistance / segmentData.length : totalDistance;
+        const duration = Number.isFinite(metrics?.duration)
+          ? metrics.duration
+          : this.estimateDurationSeconds(distance / 1000, travelMode);
+        const ascent = Number.isFinite(metrics?.ascent) ? metrics.ascent : 0;
+        const descent = Number.isFinite(metrics?.descent) ? metrics.descent : 0;
+        return {
+          distance,
+          duration,
+          ascent,
+          descent,
+          start_index: index,
+          end_index: index + 1
+        };
+      });
 
       return {
         type: 'Feature',
         properties: {
           profile: travelMode,
-          summary,
+          summary: {
+            distance: totalDistance,
+            duration: totalDuration,
+            ascent: totalAscent,
+            descent: totalDescent
+          },
           segments
         },
-        geometry: route.geometry
+        geometry: {
+          type: 'LineString',
+          coordinates: geometryCoordinates
+        }
       };
     }
 
@@ -344,7 +481,7 @@ export class OsrmRouter {
         endIndex += 1;
       }
       tasks.push({
-        type: 'osrm',
+        type: 'ors',
         startIndex: index,
         endIndex
       });
@@ -398,7 +535,7 @@ export class OsrmRouter {
         const stored = preserved.metrics || {};
         const distanceMeters = Number.isFinite(stored.distance) && stored.distance > 0
           ? stored.distance
-          : metrics.distanceKm * 1000;
+          : metersFromKm(metrics.distanceKm);
         const durationSeconds = Number.isFinite(stored.duration) && stored.duration >= 0
           ? stored.duration
           : this.estimateDurationSeconds(metrics.distanceKm, travelMode);
@@ -421,9 +558,9 @@ export class OsrmRouter {
         continue;
       }
 
-      const route = await this.requestRoute(blockWaypoints, travelMode);
-      const blockCoordinates = Array.isArray(route.geometry?.coordinates)
-        ? route.geometry.coordinates.map((coord) => sanitizeCoordinate(coord))
+      const routeFeature = await this.requestRoute(blockWaypoints, travelMode);
+      const blockCoordinates = Array.isArray(routeFeature.geometry?.coordinates)
+        ? routeFeature.geometry.coordinates.map((coord) => sanitizeCoordinate(coord)).filter(Boolean)
         : [];
       if (blockCoordinates.length) {
         const startWaypoint = coords[task.startIndex];
@@ -444,16 +581,25 @@ export class OsrmRouter {
         appendCoordinateSequence(geometryCoords, blockCoordinates);
       }
 
-      const legs = Array.isArray(route.legs) ? route.legs : [];
-      legs.forEach((leg, legOffset) => {
-        const startIndex = task.startIndex + legOffset;
-        const distance = Number(leg?.distance) || 0;
-        const duration = Number(leg?.duration) || 0;
+      const routeSegments = Array.isArray(routeFeature.properties?.segments)
+        ? routeFeature.properties.segments
+        : [];
+      routeSegments.forEach((segment, segOffset) => {
+        const startIndex = task.startIndex + segOffset;
+        const metrics = sanitizeSegmentMetrics(segment);
+        const distance = Number.isFinite(metrics?.distance)
+          ? metrics.distance
+          : 0;
+        const duration = Number.isFinite(metrics?.duration)
+          ? metrics.duration
+          : this.estimateDurationSeconds((distance || 0) / 1000, travelMode);
+        const ascent = Number.isFinite(metrics?.ascent) ? metrics.ascent : 0;
+        const descent = Number.isFinite(metrics?.descent) ? metrics.descent : 0;
         appendMetrics({
           distance,
           duration,
-          ascent: 0,
-          descent: 0,
+          ascent,
+          descent,
           startIndex
         });
       });
@@ -462,26 +608,45 @@ export class OsrmRouter {
     if (geometryCoords.length < 2) {
       const requestCoords = coords.map((coord) => [coord[0], coord[1]]);
       const fallbackRoute = await this.requestRoute(requestCoords, travelMode);
+      const rawCoordinates = Array.isArray(fallbackRoute.geometry?.coordinates)
+        ? fallbackRoute.geometry.coordinates
+        : [];
+      const geometryCoordinates = sanitizeCoordinateSequence(rawCoordinates)
+        || rawCoordinates.map((coord) => sanitizeCoordinate(coord)).filter(Boolean);
+      const summaryMetrics = sanitizeSummaryMetrics(fallbackRoute.properties?.summary);
+      const geometrySummary = this.buildSummaryFromGeometry(geometryCoordinates, travelMode);
       return {
         type: 'Feature',
         properties: {
           profile: travelMode,
           summary: {
-            distance: Number(fallbackRoute.distance) || 0,
-            duration: Number(fallbackRoute.duration) || 0,
-            ascent: 0,
-            descent: 0
+            distance: Number.isFinite(summaryMetrics?.distance) ? summaryMetrics.distance : geometrySummary.distance,
+            duration: Number.isFinite(summaryMetrics?.duration) ? summaryMetrics.duration : geometrySummary.duration,
+            ascent: Number.isFinite(summaryMetrics?.ascent) ? summaryMetrics.ascent : geometrySummary.ascent,
+            descent: Number.isFinite(summaryMetrics?.descent) ? summaryMetrics.descent : geometrySummary.descent
           },
-          segments: (Array.isArray(fallbackRoute.legs) ? fallbackRoute.legs : []).map((leg, index) => ({
-            distance: Number(leg?.distance) || 0,
-            duration: Number(leg?.duration) || 0,
-            ascent: 0,
-            descent: 0,
-            start_index: index,
-            end_index: index + 1
-          }))
+          segments: (Array.isArray(fallbackRoute.properties?.segments) ? fallbackRoute.properties.segments : []).map((segment, index) => {
+            const metrics = sanitizeSegmentMetrics(segment);
+            const distance = Number.isFinite(metrics?.distance) ? metrics.distance : 0;
+            const duration = Number.isFinite(metrics?.duration)
+              ? metrics.duration
+              : this.estimateDurationSeconds((distance || 0) / 1000, travelMode);
+            const ascent = Number.isFinite(metrics?.ascent) ? metrics.ascent : 0;
+            const descent = Number.isFinite(metrics?.descent) ? metrics.descent : 0;
+            return {
+              distance,
+              duration,
+              ascent,
+              descent,
+              start_index: index,
+              end_index: index + 1
+            };
+          })
         },
-        geometry: fallbackRoute.geometry
+        geometry: {
+          type: 'LineString',
+          coordinates: geometryCoordinates
+        }
       };
     }
 
@@ -507,4 +672,4 @@ export class OsrmRouter {
   }
 }
 
-export default OsrmRouter;
+export default OrsRouter;

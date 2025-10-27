@@ -38,25 +38,28 @@
     <button id="gpxImportButton" class="btn" type="button">Import GPX</button>
     <button id="gpxExportButton" class="btn" type="button">Export GPX</button>
   </div>
-  <div class="debug-tools">
-    <button
-      id="toggleDebugNetwork"
-      class="btn"
-      type="button"
-      aria-pressed="false"
-      title="Display the offline routing network used for directions"
-    >Show offline routing network</button>
-    <div class="routing-engine">
-      <div class="routing-engine-label">Routing engine</div>
-      <div class="routing-engine-options" role="group" aria-label="Routing engine">
-        <button class="btn active" type="button" data-router-option="offline" aria-pressed="true">Offline</button>
-        <button class="btn" type="button" data-router-option="osrm" aria-pressed="false">OSRM (online)</button>
-      </div>
-    </div>
-  </div>
   <div class="directions-ui">
     <div class="directions-toggle-group">
       <button id="directionsToggle" class="btn directions-toggle" type="button" aria-controls="directionsControl">Directions</button>
+      <div class="directions-mode-controls">
+        <button
+          id="routingModeToggle"
+          class="btn routing-mode-toggle"
+          type="button"
+          data-mode="offline"
+          aria-pressed="true"
+          title="Switch to online routing"
+        >Offline routing</button>
+        <label
+          id="debugNetworkControl"
+          class="debug-network-control"
+          hidden
+          aria-hidden="true"
+        >
+          <input id="debugNetworkCheckbox" type="checkbox" aria-label="Toggle offline routing network debug" />
+          <span>Debug network</span>
+        </label>
+      </div>
       <button id="directionsInfoButton" class="icon-button has-tooltip" type="button" aria-label="Directions information" aria-describedby="directionsHint" title="How to use directions">
         <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
           <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z"/>
