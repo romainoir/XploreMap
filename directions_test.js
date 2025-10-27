@@ -3331,6 +3331,9 @@ export class DirectionsManager {
 
     const segments = [];
     let searchStart = 0;
+    const segmentMetrics = Array.isArray(this.routeGeojson?.properties?.segments)
+      ? this.routeGeojson.properties.segments
+      : [];
 
     for (let waypointIndex = 0; waypointIndex < normalizedWaypoints.length - 1; waypointIndex += 1) {
       const startWaypoint = normalizedWaypoints[waypointIndex];
@@ -3384,10 +3387,20 @@ export class DirectionsManager {
       segmentCoordinates[0] = [...startWaypoint];
       segmentCoordinates[segmentCoordinates.length - 1] = [...endWaypoint];
 
+      const metrics = segmentMetrics[waypointIndex] || {};
+      const distance = Number.isFinite(metrics?.distance) ? Number(metrics.distance) : null;
+      const duration = Number.isFinite(metrics?.duration) ? Number(metrics.duration) : null;
+      const ascent = Number.isFinite(metrics?.ascent) ? Number(metrics.ascent) : null;
+      const descent = Number.isFinite(metrics?.descent) ? Number(metrics.descent) : null;
+
       segments.push({
         startIndex: waypointIndex,
         endIndex: waypointIndex + 1,
-        coordinates: segmentCoordinates
+        coordinates: segmentCoordinates,
+        distance,
+        duration,
+        ascent,
+        descent
       });
 
       searchStart = endIndex;
@@ -3446,10 +3459,18 @@ export class DirectionsManager {
           || !this.coordinatesMatch(coordinates[coordinates.length - 1], endWaypoint)) {
           return null;
         }
+        const distance = Number.isFinite(segment.distance) ? Number(segment.distance) : null;
+        const duration = Number.isFinite(segment.duration) ? Number(segment.duration) : null;
+        const ascent = Number.isFinite(segment.ascent) ? Number(segment.ascent) : null;
+        const descent = Number.isFinite(segment.descent) ? Number(segment.descent) : null;
         return {
           startIndex,
           endIndex,
-          coordinates
+          coordinates,
+          distance,
+          duration,
+          ascent,
+          descent
         };
       })
       .filter(Boolean);

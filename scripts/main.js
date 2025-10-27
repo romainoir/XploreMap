@@ -378,19 +378,27 @@ async function init() {
         paint: {
           'circle-radius': [
             'interpolate',
-            ['linear'],
+            ['exponential', 1.4],
             ['zoom'],
-            10,
-            3,
-            14,
-            5.2,
+            8,
+            0.6,
+            12,
+            1.4,
             16,
-            6.5
+            2.6
           ],
           'circle-color': '#2ca25f',
           'circle-stroke-color': '#0b4222',
-          'circle-stroke-width': 1.2,
-          'circle-opacity': 0.9
+          'circle-stroke-width': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            8,
+            0.4,
+            16,
+            0.9
+          ],
+          'circle-opacity': 0.85
         }
       });
     }
