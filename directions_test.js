@@ -14,6 +14,7 @@ const COORD_EPSILON = 1e-6;
 const WAYPOINT_MATCH_TOLERANCE_METERS = 30;
 const MAX_ELEVATION_POINTS = 180;
 const MAX_DISTANCE_MARKERS = 60;
+const WAYPOINT_HISTORY_LIMIT = 20;
 const ELEVATION_TICK_TARGET = 5;
 const DISTANCE_TICK_TARGET = 6;
 const ROUTE_CUT_EPSILON_KM = 0.02;
@@ -89,7 +90,10 @@ const SUMMARY_ICONS = {
   descent: DESCENT_ICON
 };
 
-const BIVOUAC_ELEVATION_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3c.36 0 .7.19.88.5l8 13.5a1 1 0 0 1-.86 1.5H4a1 1 0 0 1-.86-1.5l8-13.5A1 1 0 0 1 12 3Zm0 3.2L6.27 17h11.46ZM7 17h10a1 1 0 0 1 .8 1.6l-1.6 2a1 1 0 0 1-.8.4H8.6a1 1 0 0 1-.8-.4l-1.6-2A1 1 0 0 1 7 17Z"/></svg>';
+// Inline the bivouac marker PNG as a data URL so the asset can be used without
+// introducing a binary diff that breaks the automated PR tooling.
+const BIVOUAC_ICON_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAACDklEQVR42u2Yu1MTURhHqazosHGgSGUXxETU8BZm6Kh84P8CRoMP3g+lQwH/qhgwJCQ41hZWNp97x0lhRmTD3t3v7t1zZk693/5OsTPb1wcAAAAAAAAAAAAAAADwP/JLVWEFxfE7skbCDC9XpVtWSYg7L77IZbJO3OOXg6GvkJViYqRck7CylmXuvqxJr7KarfFfnch1Zb0IFConYkvW7JFi5VRsy6ohubdyKnHJuleN/zoYKmZZ+RJG33yVpGTtLu4HoyQtq3fGf1sXLTM9/IN3dXHFzI3/cPVMXJPxiRA/pbWGuK6344+tNyQtejf++EZT0ibjEyEaE5tN8cXUjT+5dS6+mZ7xt4ODPdX58ae2W+K7zo4/vdOSrOje+LttyZrOjD+z15asqjr8o/cXgn9MfPzZ4KH4t8mN/yF4IP7T2Mef2/8mYRx6/tk7w767Ex/mwcVj8c1U/YogAAEIQADVAEfimwQgAAEIQICQAZ4FR3tmygIcim8SgAAEIAABkg/w4+ev79c1wwE+iS2jBbB3BwEI0EOAp8HRlowUwOIdBCAAAVIU4KPYMloAe3cQgAAEIAABCJCOAE8OxJaRAli8gwAEIEAmA7giAQgAAAA+cTNXuIF6mgD9qKcJMIB6mgC3UE8TIId6mgC3UU8TII96mgBF1NMEKKGeJsAM6mkCzKOeJsAC6mkCPEY9fwMw+dC4Nzq2wQAAAABJRU5ErkJggg==';
+const BIVOUAC_ELEVATION_ICON = `<img src="${BIVOUAC_ICON_DATA_URL}" alt="" loading="lazy" decoding="async" />`;
 
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
 const DEFAULT_DISTANCE_MARKER_COLOR = '#f38b1c';
@@ -429,6 +433,7 @@ export class DirectionsManager {
       directionsControl,
       transportModes,
       swapButton,
+      undoButton,
       clearButton,
       routeStats,
       elevationChart,
@@ -445,6 +450,7 @@ export class DirectionsManager {
     this.directionsControl = directionsControl ?? null;
     this.transportModes = transportModes ? Array.from(transportModes) : [];
     this.swapButton = swapButton ?? null;
+    this.undoButton = undoButton ?? null;
     this.clearButton = clearButton ?? null;
     this.routeStats = routeStats ?? null;
     this.elevationChart = elevationChart ?? null;
@@ -457,6 +463,7 @@ export class DirectionsManager {
     }
 
     this.waypoints = [];
+    this.waypointHistory = [];
     this.currentMode = 'foot-hiking';
     this.modeColors = { ...MODE_COLORS };
 
@@ -513,6 +520,7 @@ export class DirectionsManager {
     this.setupUIHandlers();
     this.setupMapHandlers();
     this.setRouter(router ?? null);
+    this.updateUndoAvailability();
     this.updatePanelVisibilityState();
   }
 
@@ -785,10 +793,15 @@ export class DirectionsManager {
 
     this.swapButton?.addEventListener('click', () => {
       if (this.waypoints.length < 2) return;
+      this.recordWaypointState();
       this.waypoints.reverse();
       this.invalidateCachedLegSegments();
       this.updateWaypoints();
       this.getRoute();
+    });
+
+    this.undoButton?.addEventListener('click', () => {
+      this.undoLastWaypointChange();
     });
 
     this.clearButton?.addEventListener('click', () => {
@@ -806,6 +819,50 @@ export class DirectionsManager {
     this.map.on('click', this.handleMapClick);
     this.map.on('dblclick', 'waypoints-hit-area', this.handleWaypointDoubleClick);
     this.map.on('contextmenu', this.handleRouteContextMenu);
+  }
+
+  cloneWaypoints(source = this.waypoints) {
+    if (!Array.isArray(source)) {
+      return [];
+    }
+    return source.map((coords) => (Array.isArray(coords) ? coords.slice() : []));
+  }
+
+  recordWaypointState() {
+    const snapshot = this.cloneWaypoints();
+    this.waypointHistory.push(snapshot);
+    if (this.waypointHistory.length > WAYPOINT_HISTORY_LIMIT) {
+      this.waypointHistory.splice(0, this.waypointHistory.length - WAYPOINT_HISTORY_LIMIT);
+    }
+    this.updateUndoAvailability();
+  }
+
+  updateUndoAvailability() {
+    if (!this.undoButton) {
+      return;
+    }
+    const hasHistory = Array.isArray(this.waypointHistory) && this.waypointHistory.length > 0;
+    this.undoButton.disabled = !hasHistory;
+  }
+
+  undoLastWaypointChange() {
+    if (!Array.isArray(this.waypointHistory) || !this.waypointHistory.length) {
+      return;
+    }
+    const previous = this.waypointHistory.pop();
+    this.waypoints = this.cloneWaypoints(previous);
+    this.invalidateCachedLegSegments();
+    if (this.waypoints.length >= 2) {
+      this.updateWaypoints();
+      this.getRoute();
+    } else {
+      this.clearRoute();
+      this.updateWaypoints();
+      this.updateStats(null);
+      this.updateElevationProfile([]);
+    }
+    this.updateModeAvailability();
+    this.updateUndoAvailability();
   }
 
   updateModeAvailability() {
@@ -2366,6 +2423,7 @@ export class DirectionsManager {
     const targetLngLat = Array.isArray(snapped) && snapped.length >= 2
       ? [snapped[0], snapped[1]]
       : [event.lngLat.lng, event.lngLat.lat];
+    this.recordWaypointState();
     this.waypoints.push(targetLngLat);
     this.invalidateCachedLegSegments();
     this.updateWaypoints();
@@ -2381,6 +2439,7 @@ export class DirectionsManager {
     if (!this.isPanelVisible()) return;
     const index = Number(event.features?.[0]?.properties.index);
     if (!Number.isFinite(index) || index <= 0 || index >= this.waypoints.length - 1) return;
+    this.recordWaypointState();
     this.waypoints.splice(index, 1);
     this.invalidateCachedLegSegments();
     this.updateWaypoints();
@@ -2518,6 +2577,7 @@ export class DirectionsManager {
 
     insertIndex = Math.max(1, insertIndex);
 
+    this.recordWaypointState();
     this.waypoints.splice(insertIndex, 0, snapped);
     this.invalidateCachedLegSegments();
     this.updateWaypoints();
@@ -3118,6 +3178,116 @@ export class DirectionsManager {
     return samples;
   }
 
+  buildElevationAreaPaths(samples, yAxis, totalDistance) {
+    const distances = Array.isArray(this.routeProfile?.cumulativeDistances)
+      ? this.routeProfile.cumulativeDistances
+      : [];
+    const elevations = Array.isArray(this.routeProfile?.elevations)
+      ? this.routeProfile.elevations
+      : [];
+    const range = Math.max(1, yAxis.max - yAxis.min);
+    const points = [];
+
+    const pushPoint = (ratio, elevation) => {
+      if (!Number.isFinite(ratio) || !Number.isFinite(elevation)) {
+        return;
+      }
+      const clampedRatio = Math.max(0, Math.min(1, ratio));
+      const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
+      const normalized = range > 0 ? (clampedElevation - yAxis.min) / range : 0;
+      const x = clampedRatio * 100;
+      const y = 100 - normalized * 100;
+      if (points.length && Math.abs(points[points.length - 1].x - x) < 0.01) {
+        points[points.length - 1] = { x, y };
+      } else {
+        points.push({ x, y });
+      }
+    };
+
+    if (distances.length && distances.length === elevations.length) {
+      const lastIndex = distances.length - 1;
+      const denominator = totalDistance > 0 ? totalDistance : Math.max(lastIndex, 1);
+      for (let index = 0; index < distances.length; index += 1) {
+        const distanceKm = Number(distances[index]);
+        const elevation = Number(elevations[index]);
+        if (!Number.isFinite(elevation)) {
+          continue;
+        }
+        const ratio = totalDistance > 0
+          ? (Number.isFinite(distanceKm) ? distanceKm / denominator : index / Math.max(1, lastIndex))
+          : index / Math.max(1, lastIndex);
+        pushPoint(ratio, elevation);
+      }
+    }
+
+    if (points.length < 2 && Array.isArray(samples) && samples.length) {
+      const denominator = totalDistance > 0 ? totalDistance : Math.max(samples.length, 1);
+      samples.forEach((sample, index) => {
+        const elevation = Number(sample.elevation);
+        if (!Number.isFinite(elevation)) {
+          return;
+        }
+        if (totalDistance > 0) {
+          const start = Number(sample.startDistanceKm) || 0;
+          const end = Number(sample.endDistanceKm) || start;
+          pushPoint(start / denominator, elevation);
+          pushPoint(end / denominator, elevation);
+        } else {
+          const startRatio = index / denominator;
+          const endRatio = (index + 1) / denominator;
+          pushPoint(startRatio, elevation);
+          pushPoint(endRatio, elevation);
+        }
+      });
+    }
+
+    if (points.length < 2) {
+      return { fill: '', stroke: '' };
+    }
+
+    points.sort((a, b) => a.x - b.x);
+
+    const normalized = [];
+    points.forEach((point) => {
+      const last = normalized[normalized.length - 1];
+      if (!last || Math.abs(last.x - point.x) > 0.01) {
+        normalized.push(point);
+      } else {
+        normalized[normalized.length - 1] = point;
+      }
+    });
+
+    if (!normalized.length) {
+      return { fill: '', stroke: '' };
+    }
+
+    if (normalized[0].x > 0.01) {
+      normalized.unshift({ x: 0, y: normalized[0].y });
+    }
+    const lastPoint = normalized[normalized.length - 1];
+    if (lastPoint.x < 99.99) {
+      normalized.push({ x: 100, y: lastPoint.y });
+    }
+
+    const strokePath = normalized
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(3)} ${point.y.toFixed(3)}`)
+      .join(' ');
+
+    const fillParts = ['M 0 100'];
+    if (normalized[0].x > 0) {
+      fillParts.push(`L ${normalized[0].x.toFixed(3)} 100`);
+    }
+    normalized.forEach((point) => {
+      fillParts.push(`L ${point.x.toFixed(3)} ${point.y.toFixed(3)}`);
+    });
+    fillParts.push('L 100 100', 'Z');
+
+    return {
+      fill: fillParts.join(' '),
+      stroke: strokePath
+    };
+  }
+
   ensureRouteHoverTooltip() {
     if (this.routeHoverTooltip && this.routeHoverTooltip.parentElement) {
       return this.routeHoverTooltip;
@@ -3393,6 +3563,8 @@ export class DirectionsManager {
     this.draggedWaypointIndex = null;
     this.draggedBivouacIndex = null;
     this.setHoveredWaypointIndex(null);
+    this.waypointHistory = [];
+    this.updateUndoAvailability();
   }
 
   normalizeImportedCoordinate(coord) {
@@ -4236,9 +4408,6 @@ export class DirectionsManager {
 
     const metrics = this.latestMetrics ?? this.calculateRouteMetrics({ geometry: { coordinates } });
     const totalDistance = Number(metrics.distanceKm) || 0;
-    const distanceLabel = this.formatDistance(totalDistance);
-    const ascent = Math.max(0, Math.round(metrics.ascent ?? 0));
-    const descent = Math.max(0, Math.round(metrics.descent ?? 0));
 
     this.elevationSamples = samples;
 
@@ -4248,16 +4417,33 @@ export class DirectionsManager {
     const yAxis = this.computeAxisTicks(minElevation, maxElevation, ELEVATION_TICK_TARGET);
     const range = Math.max(1, yAxis.max - yAxis.min);
 
-    const chartHtml = samples
+    const fallbackColor = this.modeColors[this.currentMode];
+    const gradientStops = [];
+    const addGradientStop = (distanceKm, color) => {
+      if (totalDistance <= 0) {
+        return;
+      }
+      if (!Number.isFinite(distanceKm) || typeof color !== 'string') {
+        return;
+      }
+      const trimmed = color.trim();
+      if (!trimmed) {
+        return;
+      }
+      const ratio = Math.max(0, Math.min(1, distanceKm / totalDistance));
+      gradientStops.push({ offset: ratio, color: trimmed });
+    };
+
+    const hitTargetsHtml = samples
       .map((sample) => {
-        const clamped = Math.min(yAxis.max, Math.max(yAxis.min, sample.elevation));
-        const height = Math.max(2, ((clamped - yAxis.min) / range) * 100);
         const midDistance = (sample.startDistanceKm + sample.endDistanceKm) / 2;
         const segment = this.getCutSegmentForDistance(midDistance);
-        const baseColor = segment?.color ?? this.modeColors[this.currentMode];
-        const topColor = adjustHexColor(baseColor, 0.25);
-        const bottomColor = adjustHexColor(baseColor, -0.25);
-        const accentColor = adjustHexColor(baseColor, 0.15);
+        const baseColor = typeof segment?.color === 'string' && segment.color.trim()
+          ? segment.color.trim()
+          : fallbackColor;
+        addGradientStop(sample.startDistanceKm, baseColor);
+        addGradientStop(sample.endDistanceKm, baseColor);
+        const accentColor = adjustHexColor(baseColor, 0.18);
         const spanKm = Math.max(0, sample.endDistanceKm - sample.startDistanceKm);
         const fallbackSpan = samples.length
           ? Math.max(totalDistance / (samples.length * 2), 0.0005)
@@ -4272,11 +4458,8 @@ export class DirectionsManager {
         }
         const title = titleParts.join(' · ');
         const style = [
-          `height:${height.toFixed(2)}%`,
           `--bar-flex-grow:${flexGrow.toFixed(6)}`,
-          `--bar-color:${topColor}`,
-          `--bar-color-dark:${bottomColor}`,
-          `--bar-accent:${accentColor}`
+          `--bar-highlight:${accentColor}`
         ].join(';');
         return `
           <div
@@ -4327,6 +4510,48 @@ export class DirectionsManager {
       .map((value) => `<span>${this.formatDistanceTick(value)}</span>`)
       .join('');
 
+    const gradientId = 'elevation-area-gradient';
+    const gradientMarkup = (() => {
+      if (!gradientStops.length) {
+        return '';
+      }
+      const sorted = gradientStops
+        .map((stop) => ({
+          offset: Math.max(0, Math.min(1, stop.offset ?? 0)),
+          color: stop.color
+        }))
+        .sort((a, b) => a.offset - b.offset);
+      const deduped = [];
+      sorted.forEach((stop) => {
+        const last = deduped[deduped.length - 1];
+        if (!last || Math.abs(stop.offset - last.offset) > 1e-4 || last.color !== stop.color) {
+          deduped.push(stop);
+        } else {
+          deduped[deduped.length - 1] = stop;
+        }
+      });
+      if (deduped.length < 2) {
+        return '';
+      }
+      const stopsMarkup = deduped
+        .map((stop) => `<stop offset="${(stop.offset * 100).toFixed(3)}%" stop-color="${stop.color}" />`)
+        .join('');
+      return `<defs><linearGradient id="${gradientId}" gradientUnits="objectBoundingBox">${stopsMarkup}</linearGradient></defs>`;
+    })();
+
+    const areaPaths = this.buildElevationAreaPaths(samples, yAxis, totalDistance);
+    const areaFillColor = adjustHexColor(fallbackColor, 0.08);
+    const areaStrokeColor = adjustHexColor(fallbackColor, -0.25);
+    const areaSvg = areaPaths.stroke
+      ? `
+        <svg class="elevation-area" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          ${gradientMarkup}
+          <path class="elevation-area-fill" d="${areaPaths.fill}" fill="${gradientMarkup ? `url(#${gradientId})` : areaFillColor}"/>
+          <path class="elevation-area-outline" d="${areaPaths.stroke}" stroke="${areaStrokeColor}" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+        </svg>
+      `
+      : '';
+
     const markerOverlay = (() => {
       if (!totalDistance) {
         return '';
@@ -4373,23 +4598,14 @@ export class DirectionsManager {
     })();
 
     this.elevationChart.innerHTML = `
-      <div class="elevation-summary" role="presentation">
-        <div class="summary-item ascent" title="Total ascent">
-          ${SUMMARY_ICONS.ascent}
-          <span>${ascent} m</span>
-        </div>
-        <div class="summary-item descent" title="Total descent">
-          ${SUMMARY_ICONS.descent}
-          <span>${descent} m</span>
-        </div>
-        <div class="summary-item distance" title="Total distance">
-          <span>${distanceLabel} km</span>
-        </div>
-      </div>
       <div class="elevation-plot">
         <div class="elevation-y-axis">${yAxisLabels}</div>
         <div class="elevation-plot-area">
-          <div class="elevation-chart-container" role="presentation">${chartHtml}${markerOverlay}</div>
+          <div class="elevation-chart-container" role="presentation">
+            ${areaSvg}
+            <div class="elevation-hit-targets">${hitTargetsHtml}</div>
+            ${markerOverlay}
+          </div>
           <div class="elevation-hover-readout" aria-live="polite" aria-hidden="true"></div>
           <div class="elevation-x-axis">${xAxisLabels}</div>
         </div>
