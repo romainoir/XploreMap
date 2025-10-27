@@ -902,6 +902,47 @@ export class DirectionsManager {
     return source.map((coords) => (Array.isArray(coords) ? coords.slice() : []));
   }
 
+  cloneRouteCuts(source = this.routeCutDistances) {
+    if (!Array.isArray(source)) {
+      return [];
+    }
+    return source
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+  }
+
+  createHistorySnapshot() {
+    const waypoints = this.cloneWaypoints();
+    const routeCuts = this.cloneRouteCuts();
+    return { waypoints, routeCuts };
+  }
+
+  restoreStateFromSnapshot(snapshot) {
+    if (!snapshot) {
+      return false;
+    }
+
+    let waypointSnapshot = null;
+    let routeCutSnapshot = [];
+
+    if (Array.isArray(snapshot)) {
+      waypointSnapshot = this.cloneWaypoints(snapshot);
+    } else if (Array.isArray(snapshot.waypoints)) {
+      waypointSnapshot = this.cloneWaypoints(snapshot.waypoints);
+      routeCutSnapshot = this.cloneRouteCuts(
+        Array.isArray(snapshot.routeCuts) ? snapshot.routeCuts : []
+      );
+    }
+
+    if (!Array.isArray(waypointSnapshot)) {
+      return false;
+    }
+
+    this.waypoints = waypointSnapshot;
+    this.routeCutDistances = routeCutSnapshot;
+    return true;
+  }
+
   trimHistoryStack(stack) {
     if (!Array.isArray(stack)) {
       return;
@@ -912,7 +953,10 @@ export class DirectionsManager {
   }
 
   recordWaypointState() {
-    const snapshot = this.cloneWaypoints();
+    const snapshot = this.createHistorySnapshot();
+    if (!snapshot || !Array.isArray(snapshot.waypoints)) {
+      return;
+    }
     this.waypointHistory.push(snapshot);
     this.trimHistoryStack(this.waypointHistory);
     this.waypointRedoHistory = [];
@@ -935,16 +979,16 @@ export class DirectionsManager {
       return;
     }
     const previous = this.waypointHistory.pop();
-    if (!Array.isArray(previous)) {
+    const currentSnapshot = this.createHistorySnapshot();
+    const restored = this.restoreStateFromSnapshot(previous);
+    if (!restored) {
       this.updateUndoAvailability();
       return;
     }
-    const currentSnapshot = this.cloneWaypoints();
-    if (Array.isArray(currentSnapshot)) {
+    if (currentSnapshot && Array.isArray(currentSnapshot.waypoints)) {
       this.waypointRedoHistory.push(currentSnapshot);
       this.trimHistoryStack(this.waypointRedoHistory);
     }
-    this.waypoints = this.cloneWaypoints(previous);
     this.invalidateCachedLegSegments();
     if (this.waypoints.length >= 2) {
       this.updateWaypoints();
@@ -964,16 +1008,16 @@ export class DirectionsManager {
       return;
     }
     const next = this.waypointRedoHistory.pop();
-    if (!Array.isArray(next)) {
+    const currentSnapshot = this.createHistorySnapshot();
+    const restored = this.restoreStateFromSnapshot(next);
+    if (!restored) {
       this.updateUndoAvailability();
       return;
     }
-    const currentSnapshot = this.cloneWaypoints();
-    if (Array.isArray(currentSnapshot)) {
+    if (currentSnapshot && Array.isArray(currentSnapshot.waypoints)) {
       this.waypointHistory.push(currentSnapshot);
       this.trimHistoryStack(this.waypointHistory);
     }
-    this.waypoints = this.cloneWaypoints(next);
     this.invalidateCachedLegSegments();
     if (this.waypoints.length >= 2) {
       this.updateWaypoints();
@@ -2296,6 +2340,7 @@ export class DirectionsManager {
       return;
     }
 
+    this.recordWaypointState();
     this.routeCutDistances.push(clamped);
     this.routeCutDistances.sort((a, b) => a - b);
     this.updateCutDisplays();
@@ -2348,6 +2393,14 @@ export class DirectionsManager {
       ? this.draggedBivouacLngLat
       : null;
     let target = null;
+
+    const hasDraggedCut = Number.isInteger(this.draggedBivouacIndex)
+      && this.draggedBivouacIndex >= 0
+      && Array.isArray(this.routeCutDistances)
+      && this.routeCutDistances.length > this.draggedBivouacIndex;
+    if (hasDraggedCut) {
+      this.recordWaypointState();
+    }
 
     if (lngLat && Number.isFinite(lngLat.lng) && Number.isFinite(lngLat.lat)) {
       target = lngLat;
