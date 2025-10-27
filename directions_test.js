@@ -545,6 +545,7 @@ export class DirectionsManager {
     this.cachedLegSegments = [];
     this.routeProfile = null;
     this.elevationSamples = [];
+    this.elevationDomain = null;
     this.elevationChartContainer = null;
     this.elevationHoverReadout = null;
     this.highlightedElevationBar = null;
@@ -3384,21 +3385,30 @@ export class DirectionsManager {
     return samples;
   }
 
-  buildElevationAreaPaths(samples, yAxis, totalDistance) {
+  buildElevationAreaPaths(samples, yAxis, domain) {
     const distances = Array.isArray(this.routeProfile?.cumulativeDistances)
       ? this.routeProfile.cumulativeDistances
       : [];
     const elevations = Array.isArray(this.routeProfile?.elevations)
       ? this.routeProfile.elevations
       : [];
-    const range = Math.max(1, yAxis.max - yAxis.min);
+    const range = Math.max(Number.EPSILON, yAxis.max - yAxis.min);
     const points = [];
 
-    const pushPoint = (ratio, elevation) => {
-      if (!Number.isFinite(ratio) || !Number.isFinite(elevation)) {
+    const domainMin = Number.isFinite(domain?.min) ? domain.min : 0;
+    const domainMax = Number.isFinite(domain?.max) ? domain.max : domainMin;
+    const domainSpan = domainMax - domainMin;
+    const safeSpan = domainSpan === 0 ? 1 : domainSpan;
+
+    const pushPoint = (distance, elevation) => {
+      if (!Number.isFinite(elevation)) {
         return;
       }
-      const clampedRatio = Math.max(0, Math.min(1, ratio));
+      let ratio = 0;
+      if (domainSpan !== 0 && Number.isFinite(distance)) {
+        ratio = (distance - domainMin) / safeSpan;
+      }
+      const clampedRatio = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
       const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
       const normalized = range > 0 ? (clampedElevation - yAxis.min) / range : 0;
       const x = clampedRatio * 100;
@@ -3412,37 +3422,42 @@ export class DirectionsManager {
 
     if (distances.length && distances.length === elevations.length) {
       const lastIndex = distances.length - 1;
-      const denominator = totalDistance > 0 ? totalDistance : Math.max(lastIndex, 1);
       for (let index = 0; index < distances.length; index += 1) {
         const distanceKm = Number(distances[index]);
         const elevation = Number(elevations[index]);
         if (!Number.isFinite(elevation)) {
           continue;
         }
-        const ratio = totalDistance > 0
-          ? (Number.isFinite(distanceKm) ? distanceKm / denominator : index / Math.max(1, lastIndex))
-          : index / Math.max(1, lastIndex);
-        pushPoint(ratio, elevation);
+        if (Number.isFinite(distanceKm)) {
+          pushPoint(distanceKm, elevation);
+        } else if (lastIndex > 0) {
+          const fallbackDistance = domainMin + (domainSpan * index) / lastIndex;
+          pushPoint(fallbackDistance, elevation);
+        } else {
+          pushPoint(domainMin, elevation);
+        }
       }
     }
 
     if (points.length < 2 && Array.isArray(samples) && samples.length) {
-      const denominator = totalDistance > 0 ? totalDistance : Math.max(samples.length, 1);
       samples.forEach((sample, index) => {
         const elevation = Number(sample.elevation);
         if (!Number.isFinite(elevation)) {
           return;
         }
-        if (totalDistance > 0) {
-          const start = Number(sample.startDistanceKm) || 0;
-          const end = Number(sample.endDistanceKm) || start;
-          pushPoint(start / denominator, elevation);
-          pushPoint(end / denominator, elevation);
+        const start = Number(sample.startDistanceKm);
+        const end = Number(sample.endDistanceKm);
+        if (Number.isFinite(start)) {
+          pushPoint(start, elevation);
         } else {
-          const startRatio = index / denominator;
-          const endRatio = (index + 1) / denominator;
-          pushPoint(startRatio, elevation);
-          pushPoint(endRatio, elevation);
+          const fallbackStart = domainMin + (domainSpan * index) / Math.max(1, samples.length - 1);
+          pushPoint(fallbackStart, elevation);
+        }
+        if (Number.isFinite(end)) {
+          pushPoint(end, elevation);
+        } else {
+          const fallbackEnd = domainMin + (domainSpan * (index + 1)) / Math.max(1, samples.length);
+          pushPoint(fallbackEnd, elevation);
         }
       });
     }
@@ -3742,6 +3757,7 @@ export class DirectionsManager {
     this.latestMetrics = null;
     this.routeProfile = null;
     this.elevationSamples = [];
+    this.elevationDomain = null;
     this.resetRouteCuts();
     this.detachElevationChartEvents();
     this.elevationChartContainer = null;
@@ -4402,38 +4418,6 @@ export class DirectionsManager {
     return parseFloat(distanceKm.toFixed(2)).toString();
   }
 
-  niceNumber(value, round) {
-    const absValue = Math.abs(value);
-    if (!Number.isFinite(absValue) || absValue === 0) {
-      return 1;
-    }
-    const exponent = Math.floor(Math.log10(absValue));
-    const fraction = absValue / 10 ** exponent;
-    let niceFraction;
-
-    if (round) {
-      if (fraction < 1.5) {
-        niceFraction = 1;
-      } else if (fraction < 3) {
-        niceFraction = 2;
-      } else if (fraction < 7) {
-        niceFraction = 5;
-      } else {
-        niceFraction = 10;
-      }
-    } else if (fraction <= 1) {
-      niceFraction = 1;
-    } else if (fraction <= 2) {
-      niceFraction = 2;
-    } else if (fraction <= 5) {
-      niceFraction = 5;
-    } else {
-      niceFraction = 10;
-    }
-
-    return niceFraction * 10 ** exponent;
-  }
-
   computeAxisTicks(minValue, maxValue, maxTicks = 6) {
     let min = Number.isFinite(minValue) ? minValue : 0;
     let max = Number.isFinite(maxValue) ? maxValue : min;
@@ -4443,25 +4427,23 @@ export class DirectionsManager {
     }
 
     if (max === min) {
-      const adjustment = Math.max(1, Math.abs(max) * 0.05 || 1);
-      min -= adjustment;
-      max += adjustment;
+      const value = Number(min.toFixed(6));
+      return { ticks: [value], min: value, max: value, step: 0 };
     }
 
-    const span = Math.max(max - min, Number.EPSILON);
-    const niceRange = this.niceNumber(span, false);
-    const step = Math.max(
-      this.niceNumber(niceRange / Math.max(1, maxTicks - 1), true),
-      Number.EPSILON
-    );
-    const niceMin = Math.floor(min / step) * step;
-    const niceMax = Math.ceil(max / step) * step;
+    const tickTarget = Math.max(2, Math.round(maxTicks));
+    const span = max - min;
+    const step = span / (tickTarget - 1);
     const ticks = [];
-    const epsilon = step * 0.001;
-    for (let value = niceMin; value <= niceMax + epsilon; value += step) {
+    for (let index = 0; index < tickTarget; index += 1) {
+      const value = min + step * index;
       ticks.push(Number(value.toFixed(6)));
     }
-    return { ticks, min: niceMin, max: niceMax, step };
+    if (ticks.length) {
+      ticks[0] = Number(min.toFixed(6));
+      ticks[ticks.length - 1] = Number(max.toFixed(6));
+    }
+    return { ticks, min, max, step };
   }
 
   formatElevationLabel(value) {
@@ -4595,6 +4577,7 @@ export class DirectionsManager {
     if (!Array.isArray(coordinates) || coordinates.length < 2) {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
+      this.elevationDomain = null;
       this.elevationChartContainer = null;
       this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
@@ -4606,6 +4589,7 @@ export class DirectionsManager {
     if (!samples.length) {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
+      this.elevationDomain = null;
       this.elevationChartContainer = null;
       this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
@@ -4621,23 +4605,56 @@ export class DirectionsManager {
     const elevations = samples.map((sample) => sample.elevation);
     const maxElevation = Math.max(...elevations);
     const minElevation = Math.min(...elevations);
-    const yAxis = this.computeAxisTicks(minElevation, maxElevation, ELEVATION_TICK_TARGET);
-    const range = Math.max(1, yAxis.max - yAxis.min);
+    const elevationSpan = maxElevation - minElevation;
+    const computedMargin = Math.min(
+      10,
+      Math.max(5, Number.isFinite(elevationSpan) ? elevationSpan * 0.05 : 0)
+    );
+    const margin = Number.isFinite(computedMargin) ? computedMargin : 5;
+    const yMin = minElevation - margin;
+    const yMax = maxElevation + margin;
+    const yAxis = this.computeAxisTicks(yMin, yMax, ELEVATION_TICK_TARGET);
+    const range = Math.max(Number.EPSILON, yAxis.max - yAxis.min);
+
+    const distanceSeries = Array.isArray(this.routeProfile?.cumulativeDistances)
+      ? this.routeProfile.cumulativeDistances.filter((value) => Number.isFinite(value))
+      : [];
+    let domainStart = distanceSeries.length ? Number(distanceSeries[0]) : Number(samples[0]?.startDistanceKm);
+    let domainEnd = distanceSeries.length
+      ? Number(distanceSeries[distanceSeries.length - 1])
+      : Number(samples[samples.length - 1]?.endDistanceKm);
+    if (!Number.isFinite(domainStart)) {
+      domainStart = 0;
+    }
+    if (!Number.isFinite(domainEnd)) {
+      domainEnd = domainStart;
+    }
+    if (domainEnd < domainStart) {
+      [domainStart, domainEnd] = [domainEnd, domainStart];
+    }
+    const xAxis = this.computeAxisTicks(domainStart, domainEnd, DISTANCE_TICK_TARGET);
+    const xMin = xAxis.min;
+    const xMax = xAxis.max;
+    const rawXSpan = xMax - xMin;
+    const safeXSpan = rawXSpan === 0 ? 1 : rawXSpan;
+    const xBoundaryTolerance = Math.max(1e-6, Math.abs(rawXSpan) * 1e-4);
+    this.elevationDomain = { min: xMin, max: xMax, span: rawXSpan };
 
     const fallbackColor = this.modeColors[this.currentMode];
     const gradientStops = [];
     const addGradientStop = (distanceKm, color) => {
-      if (totalDistance <= 0) {
+      if (!Number.isFinite(distanceKm) || typeof color !== 'string') {
         return;
       }
-      if (!Number.isFinite(distanceKm) || typeof color !== 'string') {
+      if (!(rawXSpan > 0)) {
         return;
       }
       const trimmed = color.trim();
       if (!trimmed) {
         return;
       }
-      const ratio = Math.max(0, Math.min(1, distanceKm / totalDistance));
+      const clampedDistance = Math.min(xMax, Math.max(xMin, distanceKm));
+      const ratio = Math.max(0, Math.min(1, (clampedDistance - xMin) / safeXSpan));
       gradientStops.push({ offset: ratio, color: trimmed });
     };
 
@@ -4687,37 +4704,27 @@ export class DirectionsManager {
       .map((value) => `<span>${this.formatElevationLabel(value)}</span>`)
       .join('');
 
-    const distanceAxis = this.computeAxisTicks(0, totalDistance, DISTANCE_TICK_TARGET);
-    const rawTicks = [...distanceAxis.ticks];
-    if (totalDistance > 0) {
-      const lastTick = rawTicks[rawTicks.length - 1];
-      if (!rawTicks.length || Math.abs(lastTick - totalDistance) > distanceAxis.step * 0.25) {
-        rawTicks.push(totalDistance);
+    const xTickValues = Array.isArray(xAxis.ticks)
+      ? xAxis.ticks.filter((value) => Number.isFinite(value))
+      : [];
+    const ensureTick = (value) => {
+      if (!Number.isFinite(value)) {
+        return;
       }
-    }
-    const tickSet = new Set();
-    rawTicks.forEach((value) => {
-      const normalized = Number(value.toFixed(3));
-      if (Number.isFinite(normalized) && normalized >= 0) {
-        tickSet.add(normalized);
+      const exists = xTickValues.some((tick) => Math.abs(tick - value) < 1e-6);
+      if (!exists) {
+        xTickValues.push(value);
       }
-    });
-    if (totalDistance > 0) {
-      tickSet.add(Number(totalDistance.toFixed(3)));
-    }
-    tickSet.add(0);
-    const tolerance = distanceAxis.step || 1;
-    const upperBound = totalDistance > 0
-      ? Number(totalDistance.toFixed(3))
-      : Math.max(...tickSet);
-    const xTicks = Array.from(tickSet)
-      .filter((value) => value <= upperBound + tolerance * 0.25)
-      .sort((a, b) => a - b);
-    const xAxisLabels = xTicks
+    };
+    ensureTick(xMin);
+    ensureTick(xMax);
+    xTickValues.sort((a, b) => a - b);
+    const xAxisLabels = xTickValues
       .map((value) => {
-        const ratio = totalDistance > 0
-          ? Math.max(0, Math.min(1, value / totalDistance))
-          : 0;
+        const clampedValue = Math.min(xMax, Math.max(xMin, value));
+        const ratio = rawXSpan === 0
+          ? 0
+          : Math.max(0, Math.min(1, (clampedValue - xMin) / safeXSpan));
         const position = (ratio * 100).toFixed(3);
         let transform = 'translateX(-50%)';
         if (ratio <= 0.001) {
@@ -4726,7 +4733,7 @@ export class DirectionsManager {
           transform = 'translateX(-100%)';
         }
         const style = `left:${position}%;transform:${transform}`;
-        return `<span style="${style}">${this.formatDistanceTick(value)}</span>`;
+        return `<span style="${style}">${this.formatDistanceTick(clampedValue)}</span>`;
       })
       .join('');
 
@@ -4759,7 +4766,7 @@ export class DirectionsManager {
       return `<defs><linearGradient id="${gradientId}" gradientUnits="objectBoundingBox">${stopsMarkup}</linearGradient></defs>`;
     })();
 
-    const areaPaths = this.buildElevationAreaPaths(samples, yAxis, totalDistance);
+    const areaPaths = this.buildElevationAreaPaths(samples, yAxis, { min: xMin, max: xMax });
     const areaFillColor = adjustHexColor(fallbackColor, 0.08);
     const areaSvg = areaPaths.fill
       ? `
@@ -4771,7 +4778,7 @@ export class DirectionsManager {
       : '';
 
     const markerOverlay = (() => {
-      if (!totalDistance) {
+      if (!(rawXSpan > 0)) {
         return '';
       }
       const markers = this.computeSegmentMarkers();
@@ -4782,7 +4789,11 @@ export class DirectionsManager {
         .filter((marker) => marker?.type === 'bivouac')
         .map((marker) => {
           const distanceKm = this.getMarkerDistance(marker);
-          if (!Number.isFinite(distanceKm) || distanceKm < 0 || distanceKm > totalDistance) {
+          if (
+            !Number.isFinite(distanceKm)
+            || distanceKm < xMin - xBoundaryTolerance
+            || distanceKm > xMax + xBoundaryTolerance
+          ) {
             return null;
           }
           const elevation = this.getElevationAtDistance(distanceKm);
@@ -4884,8 +4895,11 @@ export class DirectionsManager {
     if (!barMetrics.length) {
       return;
     }
-    const totalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
-    const epsilon = Math.max(1e-5, totalDistance * 1e-4);
+    const domainSpan = Number(this.elevationDomain?.span);
+    const span = Number.isFinite(domainSpan)
+      ? Math.abs(domainSpan)
+      : Number(this.routeProfile?.totalDistanceKm) || 0;
+    const epsilon = Math.max(1e-5, span * 1e-4);
     markers.forEach((marker) => {
       const distanceKm = Number(marker.dataset.distanceKm);
       if (!Number.isFinite(distanceKm)) {
