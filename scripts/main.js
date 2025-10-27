@@ -15,7 +15,7 @@ import {
 } from './constants.js';
 import { ensureGpxLayers, geojsonToGpx, parseGpxToGeoJson, zoomToGeojson } from './gpx.js';
 import { DirectionsManager } from '../directions_test.js';
-import { ensureOvertureBuildings } from './pmtiles.js';
+import './pmtiles.js';
 import {
   OfflineRouter,
   DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
@@ -1017,14 +1017,11 @@ async function init() {
       if (liveLayers[i].type === 'symbol') { topLabelId = liveLayers[i].id; break; }
     }
 
-    rmL('overture-buildings-3d');
-    rmL('overture-buildings-flat');
     rmL('contour-text');
     rmL('contours');
     rmL('hillshade');
     rmL('color-relief');
     rmL('s2cloudless');
-    rmS('overture-buildings');
     rmS('contours');
     rmS('hillshadeSource');
     rmS('reliefDem');
@@ -1106,8 +1103,6 @@ async function init() {
         'hillshade-shadow-color': 'rgba(0,0,0,0.55)'
       }
     }, topLabelId || undefined);
-
-    await ensureOvertureBuildings(map, topLabelId);
 
     map.addSource('contours', {
       type: 'vector',
