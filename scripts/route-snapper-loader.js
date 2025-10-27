@@ -1,5 +1,11 @@
-const DEFAULT_MODULE_URL = './scripts/vendor/route-snapper/route_snapper.js';
-const DEFAULT_WASM_URL = './scripts/vendor/route-snapper/route_snapper_bg.wasm';
+const DEFAULT_MODULE_URL = new URL(
+  './vendor/route-snapper/route_snapper.js',
+  import.meta.url
+).href;
+const DEFAULT_WASM_URL = new URL(
+  './vendor/route-snapper/route_snapper_bg.wasm',
+  import.meta.url
+).href;
 
 let routeSnapperModulePromise = null;
 
