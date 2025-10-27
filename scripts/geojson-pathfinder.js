@@ -7,6 +7,10 @@ const DEFAULT_NODE_BUCKET_DEGREES = 0.005;
 // Treat distances under ~1 mm as effectively identical when we need to allow
 // nodes to merge despite the avoid-key guard.
 const DUPLICATE_NODE_DISTANCE_KM = 1e-6;
+// Allow edge-based snaps to win when they meaningfully reduce the snap distance while
+// still avoiding tiny perturbations near network nodes.
+const SNAP_DISTANCE_EPSILON_KM = 1e-9;
+const EDGE_SNAP_ENDPOINT_TOLERANCE_METERS = 0.1;
 const METERS_PER_LATITUDE_DEGREE = 111132;
 
 export function haversineDistanceKm(a, b) {
@@ -490,10 +494,18 @@ export class GeoJsonPathFinder {
         if (!projection) {
           return;
         }
-        if (projection.fraction <= 1e-6 || projection.fraction >= 1 - 1e-6) {
+        const minEndpointDistanceKm = Math.min(
+          Number.isFinite(projection.distanceToStartKm) ? projection.distanceToStartKm : Infinity,
+          Number.isFinite(projection.distanceToEndKm) ? projection.distanceToEndKm : Infinity
+        );
+        const minEndpointDistanceMeters = minEndpointDistanceKm * 1000;
+        if (Number.isFinite(minEndpointDistanceMeters)
+          && minEndpointDistanceMeters <= EDGE_SNAP_ENDPOINT_TOLERANCE_METERS
+          && bestSnap
+          && projection.distanceKm >= bestSnap.distanceKm - SNAP_DISTANCE_EPSILON_KM) {
           return;
         }
-        if (bestSnap && projection.distanceKm >= bestSnap.distanceKm) {
+        if (bestSnap && projection.distanceKm >= bestSnap.distanceKm - SNAP_DISTANCE_EPSILON_KM) {
           return;
         }
         bestSnap = {
