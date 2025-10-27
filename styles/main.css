@@ -120,21 +120,24 @@ html, body { margin:0; height:100%; }
   gap: 6px;
 }
 
-.tolerance-control {
+.routing-engine {
   display: grid;
   gap: 4px;
 }
 
-.tolerance-control label {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+.routing-engine-label {
   font-size: 12px;
   color: rgba(17, 34, 48, 0.72);
 }
 
-.tolerance-control input[type="range"] {
-  width: 100%;
+.routing-engine-options {
+  display: flex;
+  gap: 6px;
+}
+
+.routing-engine-options .btn {
+  flex: 1;
+  text-align: center;
 }
 
 .directions-ui {
