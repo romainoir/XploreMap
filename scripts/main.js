@@ -1167,7 +1167,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
-      maxzoom: 17,
+      maxzoom: 18,
       attribution: MAPTERHORN_ATTRIBUTION
     });
     map.addSource('hillshadeSource', {
@@ -1175,6 +1175,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
+      maxzoom: 18,
       attribution: MAPTERHORN_ATTRIBUTION
     });
     map.addSource('reliefDem', {
@@ -1182,6 +1183,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
+      maxzoom: 18,
       attribution: MAPTERHORN_ATTRIBUTION
     });
 
@@ -1190,6 +1192,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
+      maxzoom: 18,
       attribution: MAPTERHORN_ATTRIBUTION
     });
 

@@ -1,3 +1,5 @@
+import { GeoJsonPathFinder } from './geojson-pathfinder.js';
+
 const DEFAULT_MODULE_URL = new URL(
   './vendor/route-snapper/route_snapper.js',
   import.meta.url
@@ -177,6 +179,38 @@ function wrapRouteSnapperInstance(instance) {
   };
 }
 
+function createGeoJsonFallbackPathFinder(geojson, options = {}) {
+  if (!geojson || typeof geojson !== 'object') {
+    return null;
+  }
+
+  try {
+    const fallbackOptions = options?.fallbackPathFinderOptions ?? {};
+    const pathFinder = new GeoJsonPathFinder(geojson, fallbackOptions);
+    const wrapped = wrapRouteSnapperInstance(pathFinder);
+    if (!wrapped) {
+      return null;
+    }
+
+    const originalDispose = wrapped.dispose;
+    return {
+      ...wrapped,
+      compatSource: 'geojson',
+      dispose: () => {
+        if (typeof originalDispose === 'function') {
+          originalDispose();
+        }
+        if (typeof pathFinder.clear === 'function') {
+          pathFinder.clear();
+        }
+      }
+    };
+  } catch (error) {
+    console.warn('[RouteSnapperLoader] GeoJSON compatibility pathfinder failed', error);
+    return null;
+  }
+}
+
 async function createFromFactories(module, geojson, options) {
   if (!module) {
     return null;
@@ -242,6 +276,12 @@ export async function createRouteSnapperPathFinder(geojson, options = {}) {
   const pathFinder = await createFromFactories(module, geojson, options);
   if (pathFinder) {
     return pathFinder;
+  }
+
+  const fallback = createGeoJsonFallbackPathFinder(geojson, options);
+  if (fallback) {
+    console.info('[RouteSnapperLoader] Using GeoJSON compatibility pathfinder');
+    return fallback;
   }
 
   console.warn('[RouteSnapperLoader] No compatible RouteSnapper factory found');
