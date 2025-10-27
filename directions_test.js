@@ -20,6 +20,57 @@ const ROUTE_CUT_EPSILON_KM = 0.02;
 const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
+const EARTH_RADIUS_METERS = 6371000;
+const toRadians = (value) => (value * Math.PI) / 180;
+const toDegrees = (value) => (value * 180) / Math.PI;
+
+const haversineDistanceMeters = (a, b) => {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
+    return null;
+  }
+  const lat1 = Number(a[1]);
+  const lat2 = Number(b[1]);
+  const lon1 = Number(a[0]);
+  const lon2 = Number(b[0]);
+  if (!Number.isFinite(lat1) || !Number.isFinite(lat2) || !Number.isFinite(lon1) || !Number.isFinite(lon2)) {
+    return null;
+  }
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  const radLat1 = toRadians(lat1);
+  const radLat2 = toRadians(lat2);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const aTerm = sinLat * sinLat + Math.cos(radLat1) * Math.cos(radLat2) * sinLon * sinLon;
+  const c = 2 * Math.atan2(Math.sqrt(aTerm), Math.sqrt(Math.max(0, 1 - aTerm)));
+  return EARTH_RADIUS_METERS * c;
+};
+
+const bearingBetween = (start, end) => {
+  if (!Array.isArray(start) || !Array.isArray(end) || start.length < 2 || end.length < 2) {
+    return null;
+  }
+  const lat1 = toRadians(Number(start[1]));
+  const lat2 = toRadians(Number(end[1]));
+  const lon1 = toRadians(Number(start[0]));
+  const lon2 = toRadians(Number(end[0]));
+  if (!Number.isFinite(lat1) || !Number.isFinite(lat2) || !Number.isFinite(lon1) || !Number.isFinite(lon2)) {
+    return null;
+  }
+  const dLon = lon2 - lon1;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  if (x === 0 && y === 0) {
+    return 0;
+  }
+  let bearing = toDegrees(Math.atan2(y, x));
+  if (!Number.isFinite(bearing)) {
+    return null;
+  }
+  bearing = (bearing + 360) % 360;
+  return bearing;
+};
+
 const SEGMENT_COLOR_PALETTE = [
   '#3ab7c6',
   '#9c27b0',
@@ -2189,6 +2240,14 @@ export class DirectionsManager {
     }
   }
 
+  ensurePanelVisible() {
+    if (this.directionsControl && !this.isPanelVisible()) {
+      this.directionsControl.classList.add('visible');
+      this.directionsToggle?.classList.add('active');
+      this.updatePanelVisibilityState();
+    }
+  }
+
   onWaypointMouseDown(event) {
     if (!this.isPanelVisible()) return;
     const feature = event.features?.[0];
@@ -3259,6 +3318,302 @@ export class DirectionsManager {
     this.setHoveredWaypointIndex(null);
   }
 
+  normalizeImportedCoordinate(coord) {
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return null;
+    }
+    const lng = Number(coord[0]);
+    const lat = Number(coord[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return null;
+    }
+    const normalized = [lng, lat];
+    if (coord.length > 2) {
+      const elevation = Number(coord[2]);
+      if (Number.isFinite(elevation)) {
+        normalized.push(elevation);
+      }
+    }
+    return normalized;
+  }
+
+  normalizeImportedSequence(coords) {
+    if (!Array.isArray(coords)) {
+      return [];
+    }
+    const sequence = [];
+    coords.forEach((coord) => {
+      const normalized = this.normalizeImportedCoordinate(coord);
+      if (!normalized) {
+        return;
+      }
+      if (sequence.length && this.coordinatesMatch(sequence[sequence.length - 1], normalized)) {
+        return;
+      }
+      sequence.push(normalized);
+    });
+    return sequence;
+  }
+
+  mergeImportedCoordinateSegments(segments) {
+    if (!Array.isArray(segments)) {
+      return [];
+    }
+    const merged = [];
+    segments.forEach((segment) => {
+      const sequence = this.normalizeImportedSequence(segment);
+      if (!sequence.length) {
+        return;
+      }
+      if (!merged.length) {
+        sequence.forEach((coord) => merged.push(coord));
+        return;
+      }
+      const last = merged[merged.length - 1];
+      const startIndex = this.coordinatesMatch(last, sequence[0]) ? 1 : 0;
+      for (let index = startIndex; index < sequence.length; index += 1) {
+        const coord = sequence[index];
+        if (merged.length && this.coordinatesMatch(merged[merged.length - 1], coord)) {
+          continue;
+        }
+        merged.push(coord);
+      }
+    });
+    return merged;
+  }
+
+  estimateSequenceDistanceKm(coords) {
+    if (!Array.isArray(coords) || coords.length < 2) {
+      return 0;
+    }
+    let totalMeters = 0;
+    for (let index = 0; index < coords.length - 1; index += 1) {
+      const distance = this.computeCoordinateDistanceMeters(coords[index], coords[index + 1]);
+      if (Number.isFinite(distance)) {
+        totalMeters += distance;
+      }
+    }
+    return totalMeters / 1000;
+  }
+
+  deriveWaypointsFromImportedSequence(coords, options = {}) {
+    const sequence = this.normalizeImportedSequence(coords);
+    if (sequence.length < 2) {
+      return sequence;
+    }
+
+    const totalDistanceKm = this.estimateSequenceDistanceKm(sequence);
+    const maxWaypoints = Number.isInteger(options.maxWaypoints) && options.maxWaypoints >= 2
+      ? options.maxWaypoints
+      : 60;
+    const desiredSpacing = maxWaypoints > 1 && totalDistanceKm > 0
+      ? (totalDistanceKm * 1000) / (maxWaypoints - 1)
+      : 0;
+    const minSpacingMeters = Math.max(120, Math.min(800, desiredSpacing || 250));
+    const angleThreshold = Number.isFinite(options.angleThresholdDegrees)
+      ? options.angleThresholdDegrees
+      : 28;
+
+    const waypoints = [];
+    const pushWaypoint = (coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) {
+        return;
+      }
+      const waypoint = coord.length > 2
+        ? [coord[0], coord[1], coord[2]]
+        : [coord[0], coord[1]];
+      if (waypoints.length && this.coordinatesMatch(waypoints[waypoints.length - 1], waypoint)) {
+        return;
+      }
+      waypoints.push(waypoint);
+    };
+
+    pushWaypoint(sequence[0]);
+    let lastIndex = 0;
+    let accumulatedDistance = 0;
+
+    for (let index = 1; index < sequence.length - 1; index += 1) {
+      const current = sequence[index];
+      const previous = sequence[lastIndex];
+      const next = sequence[index + 1];
+      const segmentDistance = this.computeCoordinateDistanceMeters(previous, current)
+        || haversineDistanceMeters(previous, current)
+        || 0;
+      accumulatedDistance += segmentDistance;
+
+      let include = accumulatedDistance >= minSpacingMeters;
+
+      if (!include && previous && next) {
+        const bearingPrev = bearingBetween(previous, current);
+        const bearingNext = bearingBetween(current, next);
+        if (Number.isFinite(bearingPrev) && Number.isFinite(bearingNext)) {
+          let delta = Math.abs(bearingNext - bearingPrev);
+          if (delta > 180) {
+            delta = 360 - delta;
+          }
+          if (delta >= angleThreshold) {
+            include = true;
+          }
+        }
+      }
+
+      if (!include && previous && next) {
+        const nextDistance = this.computeCoordinateDistanceMeters(current, next)
+          || haversineDistanceMeters(current, next)
+          || 0;
+        if (nextDistance >= minSpacingMeters * 1.5) {
+          include = true;
+        }
+      }
+
+      if (include) {
+        pushWaypoint(current);
+        lastIndex = index;
+        accumulatedDistance = 0;
+      }
+    }
+
+    pushWaypoint(sequence[sequence.length - 1]);
+
+    if (waypoints.length > maxWaypoints) {
+      const step = (waypoints.length - 1) / (maxWaypoints - 1);
+      const reduced = [];
+      for (let i = 0; i < maxWaypoints; i += 1) {
+        const targetIndex = Math.min(waypoints.length - 1, Math.round(i * step));
+        const coord = waypoints[targetIndex];
+        if (!reduced.length || !this.coordinatesMatch(reduced[reduced.length - 1], coord)) {
+          reduced.push(coord.slice());
+        }
+      }
+      if (!this.coordinatesMatch(reduced[reduced.length - 1], waypoints[waypoints.length - 1])) {
+        reduced.push(waypoints[waypoints.length - 1].slice());
+      }
+      return reduced;
+    }
+
+    return waypoints;
+  }
+
+  extractRouteFromGeojson(geojson) {
+    if (!geojson) {
+      return null;
+    }
+
+    const candidates = [];
+    const pushCandidate = (coordinates, properties = {}) => {
+      const sequence = this.normalizeImportedSequence(coordinates);
+      if (sequence.length < 2) {
+        return;
+      }
+      const distanceKm = this.estimateSequenceDistanceKm(sequence);
+      const source = typeof properties.source === 'string' ? properties.source : null;
+      let priority = 1;
+      if (source === 'track') {
+        priority = 3;
+      } else if (source === 'route') {
+        priority = 2;
+      }
+      candidates.push({
+        coordinates: sequence.map((coord) => coord.slice()),
+        properties: { ...properties },
+        distanceKm,
+        priority
+      });
+    };
+
+    const handleGeometry = (geometry, properties = {}) => {
+      if (!geometry || typeof geometry !== 'object') {
+        return;
+      }
+      if (geometry.type === 'LineString') {
+        pushCandidate(geometry.coordinates, properties);
+        return;
+      }
+      if (geometry.type === 'MultiLineString') {
+        const merged = this.mergeImportedCoordinateSegments(geometry.coordinates);
+        if (merged.length >= 2) {
+          pushCandidate(merged, properties);
+        }
+        return;
+      }
+      if (geometry.type === 'GeometryCollection' && Array.isArray(geometry.geometries)) {
+        geometry.geometries.forEach((child) => handleGeometry(child, properties));
+      }
+    };
+
+    if (geojson.type === 'FeatureCollection' && Array.isArray(geojson.features)) {
+      geojson.features.forEach((feature) => {
+        if (!feature || !feature.geometry) {
+          return;
+        }
+        handleGeometry(feature.geometry, feature.properties || {});
+      });
+    } else if (geojson.type === 'Feature') {
+      handleGeometry(geojson.geometry, geojson.properties || {});
+    } else if (geojson.type === 'LineString' || geojson.type === 'MultiLineString' || geojson.type === 'GeometryCollection') {
+      handleGeometry(geojson, {});
+    }
+
+    if (!candidates.length) {
+      return null;
+    }
+
+    candidates.sort((a, b) => {
+      if (b.priority !== a.priority) {
+        return b.priority - a.priority;
+      }
+      if (Number.isFinite(b.distanceKm) && Number.isFinite(a.distanceKm) && b.distanceKm !== a.distanceKm) {
+        return b.distanceKm - a.distanceKm;
+      }
+      return (b.coordinates.length || 0) - (a.coordinates.length || 0);
+    });
+
+    const best = candidates[0];
+    const properties = { ...(best.properties || {}) };
+    return {
+      coordinates: best.coordinates,
+      properties,
+      distanceKm: best.distanceKm
+    };
+  }
+
+  importRouteFromGeojson(geojson, options = {}) {
+    const candidate = this.extractRouteFromGeojson(geojson);
+    if (!candidate || !Array.isArray(candidate.coordinates) || candidate.coordinates.length < 2) {
+      console.warn('No route geometry found in imported data');
+      return false;
+    }
+
+    const waypoints = this.deriveWaypointsFromImportedSequence(candidate.coordinates, options);
+    if (!Array.isArray(waypoints) || waypoints.length < 2) {
+      console.warn('Imported route did not contain enough distinct coordinates');
+      return false;
+    }
+
+    this.clearDirections();
+    this.ensurePanelVisible();
+    this.waypoints = waypoints.map((coord) => coord.slice());
+
+    const routeFeature = {
+      type: 'Feature',
+      properties: {
+        ...(candidate.properties || {}),
+        source: candidate.properties?.source || 'imported-route',
+        name: candidate.properties?.name || options.name || null
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: candidate.coordinates.map((coord) => coord.slice())
+      }
+    };
+
+    this.applyRoute(routeFeature);
+    this.updateWaypoints();
+    this.updateModeAvailability();
+    this.prepareNetwork({ reason: 'imported-route' }).catch(() => {});
+    return true;
+  }
+
   setTransportMode(mode) {
     if (!this.modeColors[mode]) return;
     if (this.router && typeof this.router.supportsMode === 'function' && !this.router.supportsMode(mode)) {
@@ -3559,17 +3914,23 @@ export class DirectionsManager {
   }
 
   computeCoordinateDistanceMeters(source, target) {
-    if (!Array.isArray(source) || !Array.isArray(target) || !turfApi) {
+    if (!Array.isArray(source) || !Array.isArray(target)) {
       return null;
     }
 
-    try {
-      const distance = turfApi.distance(turfApi.point(source), turfApi.point(target), { units: 'meters' });
-      return Number.isFinite(distance) ? distance : null;
-    } catch (error) {
-      console.warn('Failed to compute waypoint snap distance', error);
-      return null;
+    if (turfApi) {
+      try {
+        const distance = turfApi.distance(turfApi.point(source), turfApi.point(target), { units: 'meters' });
+        if (Number.isFinite(distance)) {
+          return distance;
+        }
+      } catch (error) {
+        console.warn('Failed to compute waypoint snap distance', error);
+      }
     }
+
+    const fallback = haversineDistanceMeters(source, target);
+    return Number.isFinite(fallback) ? fallback : null;
   }
 
   formatDistance(distanceKm) {

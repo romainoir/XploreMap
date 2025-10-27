@@ -238,6 +238,8 @@ async function init() {
     orsOptions.apiKey = resolvedApiKey;
   }
 
+  orsOptions.fallbackRouter = offlineRouter;
+
   const orsRouter = new OrsRouter(orsOptions);
 
   const routers = {
@@ -949,6 +951,12 @@ async function init() {
           window.alert('No GPX features were found in the selected file.');
         } else {
           applyGpxData(geojson, { fitBounds: true });
+          if (directionsManager && typeof directionsManager.importRouteFromGeojson === 'function') {
+            const imported = directionsManager.importRouteFromGeojson(geojson);
+            if (!imported) {
+              console.warn('Unable to initialize routing from the imported GPX data');
+            }
+          }
         }
       } catch (error) {
         console.error('Failed to import GPX file', error);
