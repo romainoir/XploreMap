@@ -21,11 +21,8 @@ import {
 } from './gpx.js';
 import { DirectionsManager } from '../directions_test.js';
 import './pmtiles.js';
-import {
-  OfflineRouter,
-  DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
-  MAX_NODE_CONNECTION_TOLERANCE_METERS
-} from './offline-router.js';
+import { OfflineRouter, DEFAULT_NODE_CONNECTION_TOLERANCE_METERS } from './offline-router.js';
+import { OsrmRouter } from './osrm-router.js';
 import { extractOverpassNetwork } from './overpass-network.js';
 import { extractOpenFreeMapNetwork } from './openfreemap-network.js';
 
@@ -205,13 +202,23 @@ async function init() {
   const directionsInfoButton = document.getElementById('directionsInfoButton');
   const directionsHint = document.getElementById('directionsHint');
   const debugNetworkButton = document.getElementById('toggleDebugNetwork');
-  const nodeToleranceSlider = document.getElementById('nodeToleranceSlider');
-  const nodeToleranceValue = document.getElementById('nodeToleranceValue');
+  const routerToggleButtons = Array.from(document.querySelectorAll('[data-router-option]'));
 
   const offlineRouter = new OfflineRouter({ networkUrl: './data/offline-network.geojson' });
+  if (typeof offlineRouter.setNodeConnectionToleranceMeters === 'function') {
+    offlineRouter.setNodeConnectionToleranceMeters(DEFAULT_NODE_CONNECTION_TOLERANCE_METERS);
+  }
   offlineRouter.ensureReady().catch((error) => {
     console.error('Failed to preload offline routing network', error);
   });
+  const osrmRouter = new OsrmRouter();
+
+  const routers = {
+    offline: offlineRouter,
+    osrm: osrmRouter
+  };
+
+  let activeRouterKey = 'offline';
 
   let offlineNetworkCoverage = null;
   let offlineNetworkRefreshPromise = null;
@@ -249,12 +256,43 @@ async function init() {
 
   const updateDebugNetworkButton = (active) => {
     if (!debugNetworkButton) return;
-    debugNetworkButton.classList.toggle('active', active);
-    debugNetworkButton.setAttribute('aria-pressed', active ? 'true' : 'false');
-    debugNetworkButton.textContent = active ? 'Hide routing network' : 'Show routing network';
+    const isActive = active && activeRouterKey === 'offline';
+    debugNetworkButton.classList.toggle('active', isActive);
+    debugNetworkButton.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    debugNetworkButton.textContent = isActive
+      ? 'Hide offline routing network'
+      : 'Show offline routing network';
+  };
+
+  const updateRouterSelectionUI = () => {
+    routerToggleButtons.forEach((button) => {
+      if (!button) return;
+      const key = button.dataset?.routerOption;
+      const isActive = key === activeRouterKey;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  };
+
+  const updateDebugNetworkAvailability = () => {
+    if (!debugNetworkButton) return;
+    const offlineActive = activeRouterKey === 'offline';
+    debugNetworkButton.disabled = !offlineActive;
+    debugNetworkButton.title = offlineActive
+      ? 'Display the offline routing network used for directions'
+      : 'Offline network visualization is only available when offline routing is active';
+    if (!offlineActive) {
+      debugNetworkVisible = false;
+      updateDebugNetworkButton(false);
+    } else {
+      updateDebugNetworkButton(debugNetworkVisible);
+    }
   };
 
   const loadDebugNetworkData = async () => {
+    if (activeRouterKey !== 'offline') {
+      return null;
+    }
     if (debugNetworkData) {
       return debugNetworkData;
     }
@@ -291,6 +329,9 @@ async function init() {
   };
 
   const applyDebugNetworkLayer = async () => {
+    if (activeRouterKey !== 'offline') {
+      return false;
+    }
     const data = await loadDebugNetworkData();
     if (!data) {
       return false;
@@ -368,71 +409,6 @@ async function init() {
       map.setLayoutProperty(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID, 'visibility', 'none');
     }
   };
-
-  const clampNodeToleranceMeters = (value) => {
-    const numericValue = Number(value);
-    if (!Number.isFinite(numericValue) || numericValue < 0) {
-      return null;
-    }
-    return Math.min(numericValue, MAX_NODE_CONNECTION_TOLERANCE_METERS);
-  };
-
-  const formatNodeToleranceLabel = (meters) => {
-    const value = Number(meters);
-    if (!Number.isFinite(value) || value < 0) {
-      return 'n/a';
-    }
-    if (value >= 1000) {
-      return `${(value / 1000).toFixed(2)} km`;
-    }
-    if (value >= 10) {
-      return `${value.toFixed(0)} m`;
-    }
-    return `${value.toFixed(1)} m`;
-  };
-
-  const updateNodeToleranceDisplay = (meters) => {
-    const normalized = clampNodeToleranceMeters(meters);
-    const numericValue = normalized ?? DEFAULT_NODE_CONNECTION_TOLERANCE_METERS;
-    if (nodeToleranceValue) {
-      nodeToleranceValue.textContent = formatNodeToleranceLabel(numericValue);
-    }
-    if (nodeToleranceSlider) {
-      nodeToleranceSlider.value = String(numericValue);
-    }
-  };
-
-  const applyNodeToleranceMeters = (meters, { reroute = false } = {}) => {
-    const normalized = clampNodeToleranceMeters(meters);
-    const numericValue = normalized ?? DEFAULT_NODE_CONNECTION_TOLERANCE_METERS;
-
-    updateNodeToleranceDisplay(numericValue);
-
-    const changed = typeof offlineRouter.setNodeConnectionToleranceMeters === 'function'
-      ? offlineRouter.setNodeConnectionToleranceMeters(numericValue)
-      : false;
-
-    if (!changed) {
-      return;
-    }
-
-    debugNetworkData = null;
-    if (debugNetworkVisible) {
-      applyDebugNetworkLayer().catch((error) => {
-        console.error('Failed to refresh routing network debug layer after tolerance change', error);
-      });
-    }
-
-    if (reroute && directionsManager && typeof directionsManager.getRoute === 'function') {
-      directionsManager.getRoute();
-    }
-  };
-
-  updateNodeToleranceDisplay(
-    typeof offlineRouter.getNodeConnectionToleranceMeters === 'function'
-      ? offlineRouter.getNodeConnectionToleranceMeters()
-      : DEFAULT_NODE_CONNECTION_TOLERANCE_METERS
-  );
 
   const boundsToPlain = (bounds) => {
     if (!bounds) {
@@ -569,6 +545,9 @@ async function init() {
     if (!map) {
       return null;
     }
+    if (activeRouterKey !== 'offline') {
+      return null;
+    }
     if (offlineNetworkRefreshPromise) {
       return offlineNetworkRefreshPromise;
     }
@@ -629,6 +608,70 @@ async function init() {
       }
     })();
     return offlineNetworkRefreshPromise;
+  };
+
+  const setActiveRouter = async (targetKey, { reroute = false } = {}) => {
+    if (!routers[targetKey]) {
+      return;
+    }
+
+    if (targetKey === activeRouterKey) {
+      updateRouterSelectionUI();
+      updateDebugNetworkAvailability();
+      if (
+        reroute
+        && directionsManager
+        && typeof directionsManager.getRoute === 'function'
+        && Array.isArray(directionsManager.waypoints)
+        && directionsManager.waypoints.length >= 2
+      ) {
+        directionsManager.getRoute();
+      }
+      return;
+    }
+
+    routerToggleButtons.forEach((button) => {
+      if (button) {
+        button.disabled = true;
+      }
+    });
+
+    activeRouterKey = targetKey;
+    updateRouterSelectionUI();
+    updateDebugNetworkAvailability();
+
+    try {
+      if (targetKey === 'offline') {
+        try {
+          await offlineRouter.ensureReady();
+        } catch (ensureError) {
+          console.warn('Offline router initialization failed during router switch', ensureError);
+        }
+        try {
+          await refreshOfflineNetwork();
+        } catch (networkError) {
+          console.warn('Failed to refresh offline routing network during router switch', networkError);
+        }
+      } else {
+        if (debugNetworkVisible) {
+          hideDebugNetworkLayer();
+          debugNetworkVisible = false;
+        }
+        updateDebugNetworkButton(false);
+      }
+
+      if (directionsManager && typeof directionsManager.setRouter === 'function') {
+        directionsManager.setRouter(routers[targetKey], { reroute });
+      }
+    } finally {
+      routerToggleButtons.forEach((button) => {
+        if (button) {
+          button.disabled = false;
+        }
+      });
+      updateRouterSelectionUI();
+      updateDebugNetworkAvailability();
+    }
   };
 
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
@@ -726,6 +769,10 @@ async function init() {
       ], {
         router: offlineRouter
       });
+      const initialRouter = routers[activeRouterKey] ?? offlineRouter;
+      if (typeof directionsManager.setRouter === 'function') {
+        directionsManager.setRouter(initialRouter);
+      }
       directionsManager.setRouteSegmentsListener((payload) => {
         const isObject = payload && typeof payload === 'object';
         const dataset = isObject && payload.full ? payload.full : payload;
@@ -750,6 +797,9 @@ async function init() {
       });
 
       directionsManager.setNetworkPreparationCallback(async ({ waypoints }) => {
+        if (activeRouterKey !== 'offline') {
+          return;
+        }
         const coords = Array.isArray(waypoints) ? waypoints : [];
         const bounds = computeCoordinateBounds(coords);
 
@@ -803,6 +853,9 @@ async function init() {
       const targetState = !debugNetworkVisible;
       debugNetworkButton.disabled = true;
       try {
+        if (activeRouterKey !== 'offline') {
+          return;
+        }
         if (targetState) {
           let applied = await applyDebugNetworkLayer();
           if (!applied) {
@@ -827,15 +880,23 @@ async function init() {
     });
   }
 
-  if (nodeToleranceSlider) {
-    nodeToleranceSlider.addEventListener('input', (event) => {
-      applyNodeToleranceMeters(event.currentTarget?.value);
-    });
-
-    nodeToleranceSlider.addEventListener('change', (event) => {
-      applyNodeToleranceMeters(event.currentTarget?.value, { reroute: true });
+  if (routerToggleButtons.length) {
+    routerToggleButtons.forEach((button) => {
+      if (!button) return;
+      button.addEventListener('click', () => {
+        const key = button.dataset?.routerOption;
+        if (!key) {
+          return;
+        }
+        setActiveRouter(key, { reroute: true }).catch((error) => {
+          console.error('Failed to switch routing engine', error);
+        });
+      });
     });
   }
+
+  updateRouterSelectionUI();
+  updateDebugNetworkAvailability();
 
   if (gpxImportButton && gpxFileInput) {
     gpxImportButton.addEventListener('click', () => {

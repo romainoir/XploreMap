@@ -433,12 +433,7 @@ export class DirectionsManager {
 
     this.setHintVisible(false);
 
-    this.router = router ?? null;
-    if (this.router && typeof this.router.ensureReady === 'function') {
-      this.router.ensureReady().catch((error) => {
-        console.error('Offline router failed to initialize', error);
-      });
-    }
+    this.router = null;
 
     this.handleWaypointMouseDown = (event) => this.onWaypointMouseDown(event);
     this.handleMapMouseMove = (event) => this.onMapMouseMove(event);
@@ -465,8 +460,8 @@ export class DirectionsManager {
     this.setupRouteLayers();
     this.setupUIHandlers();
     this.setupMapHandlers();
+    this.setRouter(router ?? null);
     this.updatePanelVisibilityState();
-    this.updateModeAvailability();
   }
 
   setupRouteLayers() {
@@ -796,6 +791,20 @@ export class DirectionsManager {
       if (fallbackButton) {
         this.setTransportMode(fallbackButton.dataset.mode);
       }
+    }
+  }
+
+  setRouter(router, options = {}) {
+    this.router = router ?? null;
+    if (this.router && typeof this.router.ensureReady === 'function') {
+      this.router.ensureReady().catch((error) => {
+        console.error('Router failed to initialize', error);
+      });
+    }
+    this.updateModeAvailability();
+    const { reroute = false } = options;
+    if (reroute && this.waypoints.length >= 2) {
+      this.getRoute();
     }
   }
 

@@ -45,21 +45,13 @@
       type="button"
       aria-pressed="false"
       title="Display the offline routing network used for directions"
-    >Show routing network</button>
-    <div class="tolerance-control">
-      <label for="nodeToleranceSlider">
-        Node connection tolerance
-        <span id="nodeToleranceValue" aria-live="polite">8 m</span>
-      </label>
-      <input
-        id="nodeToleranceSlider"
-        type="range"
-        min="0"
-        max="100"
-        step="0.5"
-        value="8"
-        aria-describedby="nodeToleranceValue"
-      >
+    >Show offline routing network</button>
+    <div class="routing-engine">
+      <div class="routing-engine-label">Routing engine</div>
+      <div class="routing-engine-options" role="group" aria-label="Routing engine">
+        <button class="btn active" type="button" data-router-option="offline" aria-pressed="true">Offline</button>
+        <button class="btn" type="button" data-router-option="osrm" aria-pressed="false">OSRM (online)</button>
+      </div>
     </div>
   </div>
   <div class="directions-ui">
