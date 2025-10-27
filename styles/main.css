@@ -268,37 +268,26 @@ html, body { margin:0; height:100%; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   padding: 0;
-  border: 1px solid rgba(17, 34, 48, 0.12);
-  border-radius: 50%;
-  background: rgba(17, 34, 48, 0.08);
-  color: rgba(17, 34, 48, 0.8);
+  border: 1px solid rgba(17, 34, 48, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.04);
+  color: rgba(17, 34, 48, 0.82);
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.icon-button:hover {
-  background: rgba(17, 34, 48, 0.12);
+.icon-button:hover,
+.icon-button:focus-visible {
+  background: rgba(17, 34, 48, 0.08);
 }
 
 .icon-button:focus-visible {
   outline: 2px solid rgba(17, 98, 128, 0.45);
   outline-offset: 2px;
-}
-
-.ui .icon-button {
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-  border-color: rgba(17, 34, 48, 0.14);
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.04);
-}
-
-.ui .icon-button:hover {
-  background: rgba(17, 34, 48, 0.08);
 }
 
 .icon-button svg {
@@ -640,9 +629,14 @@ html, body { margin:0; height:100%; }
   display: block;
 }
 
+.elevation-marker.bivouac {
+  min-width: 40px;
+  min-height: 40px;
+}
+
 .elevation-marker.bivouac .elevation-marker__icon {
-  width: 16px;
-  height: 16px;
+  width: 40px;
+  height: 40px;
 }
 
 .elevation-marker__label {
@@ -851,10 +845,11 @@ html, body { margin:0; height:100%; }
   box-shadow: 0 6px 18px rgba(0,0,0,.12);
 }
 .hs-title { font-weight: 600; margin-bottom: 6px; }
-.terrain-controls { display:flex; align-items: flex-start; gap:8px; flex-wrap: wrap; }
+.terrain-controls { display:flex; flex-direction: column; align-items: stretch; gap:8px; }
 .btns { display:flex; gap:6px; flex-direction: column; }
 .terrain-controls .btns { flex: 1 1 auto; }
 .btns .btn { width: 100%; }
+.toggle-3d { width: 100%; }
 .btn {
   display: inline-flex;
   align-items: center;
@@ -937,6 +932,10 @@ html, body { margin:0; height:100%; }
 .btn--icon-only img {
   width: 22px;
   height: 22px;
+}
+
+.terrain-controls .toggle-3d.btn--icon-only {
+  width: 100%;
 }
 
 .imagery-toggle {
