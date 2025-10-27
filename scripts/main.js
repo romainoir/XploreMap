@@ -22,6 +22,7 @@ import {
   MAX_NODE_CONNECTION_TOLERANCE_METERS
 } from './offline-router.js';
 import { extractOverpassNetwork } from './overpass-network.js';
+import { extractOpenFreeMapNetwork } from './openfreemap-network.js';
 
 const PEAK_POINTER_ID = 'peak-pointer';
 
@@ -155,6 +156,11 @@ async function unregisterLegacyServiceWorker() {
 
 async function init() {
   await unregisterLegacyServiceWorker();
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const networkSourceParam = searchParams.get('networkSource');
+  const preferOpenFreeMapNetwork = networkSourceParam === 'openfreemap'
+    || (!networkSourceParam && searchParams.has('openfreemapNetwork'));
 
   const versaStyle = await fetch(VERSATILES_LOCAL_JSON, { cache: 'no-store' }).then(r => r.json());
   versaStyle.glyphs = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
@@ -564,19 +570,30 @@ async function init() {
         const mapCenter = typeof map.getCenter === 'function' ? map.getCenter() : null;
         const centerLat = Number(mapCenter?.lat ?? mapCenter?.latitude ?? mapCenter?.[1]);
         const centerLon = Number(mapCenter?.lng ?? mapCenter?.lon ?? mapCenter?.longitude ?? mapCenter?.[0]);
-        let overpassCenter = Number.isFinite(centerLat) && Number.isFinite(centerLon)
-          ? { lat: centerLat, lon: centerLon }
-          : null;
-        if (!overpassCenter) {
-          const fallbackCenter = deriveOverpassCenter(targetBounds ?? fallbackBounds);
-          if (fallbackCenter) {
-            overpassCenter = fallbackCenter;
+
+        let networkResult = { network: null, coverageBounds: null };
+
+        if (preferOpenFreeMapNetwork) {
+          const network = await extractOpenFreeMapNetwork(map, { targetBounds });
+          networkResult = { network, coverageBounds: null };
+        } else {
+          let overpassCenter = Number.isFinite(centerLat) && Number.isFinite(centerLon)
+            ? { lat: centerLat, lon: centerLon }
+            : null;
+          if (!overpassCenter) {
+            const fallbackCenter = deriveOverpassCenter(targetBounds ?? fallbackBounds);
+            if (fallbackCenter) {
+              overpassCenter = fallbackCenter;
+            }
           }
+          if (!overpassCenter) {
+            throw new Error('Unable to determine center coordinate for Overpass network extraction');
+          }
+          networkResult = await extractOverpassNetwork(overpassCenter);
         }
-        if (!overpassCenter) {
-          throw new Error('Unable to determine center coordinate for Overpass network extraction');
-        }
-        const { network, coverageBounds } = await extractOverpassNetwork(overpassCenter);
+
+        const { network } = networkResult;
+        let { coverageBounds } = networkResult;
         if (network && Array.isArray(network.features) && network.features.length) {
           offlineRouter.setNetworkGeoJSON(network);
           const debugDataset = typeof offlineRouter.getNetworkDebugGeoJSON === 'function'
@@ -589,10 +606,12 @@ async function init() {
             await applyDebugNetworkLayer();
           }
         } else {
-          console.warn('Overpass network extraction returned no features for offline routing');
+          const sourceLabel = preferOpenFreeMapNetwork ? 'OpenFreeMap' : 'Overpass';
+          console.warn(`${sourceLabel} network extraction returned no features for offline routing`);
         }
       } catch (error) {
-        console.error('Failed to rebuild offline routing network from Overpass data', error);
+        const sourceLabel = preferOpenFreeMapNetwork ? 'OpenFreeMap' : 'Overpass';
+        console.error(`Failed to rebuild offline routing network from ${sourceLabel} data`, error);
       } finally {
         offlineNetworkRefreshPromise = null;
       }
@@ -681,8 +700,7 @@ async function init() {
     }
 
     try {
-      const params = new URLSearchParams(window.location.search);
-      const enableWaypointLogging = params.has('directionsDebug');
+      const enableWaypointLogging = searchParams.has('directionsDebug');
       directionsManager = new DirectionsManager(map, [
         directionsToggle,
         directionsDock,
