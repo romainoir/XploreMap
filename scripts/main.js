@@ -196,6 +196,7 @@ async function init() {
   const directionsControl = document.getElementById('directionsControl');
   const transportModes = directionsControl?.querySelectorAll('[data-mode]') ?? [];
   const swapButton = document.getElementById('swapDirectionsButton');
+  const undoButton = document.getElementById('undoDirectionsButton');
   const clearButton = document.getElementById('clearDirectionsButton');
   const routeStats = document.getElementById('routeStats');
   const elevationChart = document.getElementById('elevationChart');
@@ -816,13 +817,14 @@ async function init() {
 
     try {
       directionsManager = new DirectionsManager(map, [
-        directionsToggle,
-        directionsDock,
-        directionsControl,
-        transportModes,
-        swapButton,
-        clearButton,
-        routeStats,
+      directionsToggle,
+      directionsDock,
+      directionsControl,
+      transportModes,
+      swapButton,
+      undoButton,
+      clearButton,
+      routeStats,
         elevationChart,
         directionsInfoButton,
         directionsHint
