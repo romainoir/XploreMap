@@ -74,18 +74,48 @@
 
 <div id="directionsDock" class="directions-dock" aria-hidden="true">
   <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
-    <div class="transport-modes" role="group" aria-label="Travel mode">
-      <button class="btn active" type="button" data-mode="foot-hiking">Hike</button>
-      <button class="btn" type="button" data-mode="cycling-regular">Cycle</button>
-      <button class="btn" type="button" data-mode="driving-car">Drive</button>
+    <div class="directions-header">
+      <div class="transport-modes" role="group" aria-label="Travel mode">
+        <button class="btn btn--icon active" type="button" data-mode="foot-hiking">
+          <img src="./data/walk.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span>Hike</span>
+        </button>
+        <button class="btn btn--icon" type="button" data-mode="cycling-regular">
+          <img src="./data/bike.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span>Cycle</span>
+        </button>
+        <button class="btn btn--icon" type="button" data-mode="driving-car">
+          <img src="./data/car.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span>Drive</span>
+        </button>
+      </div>
+      <div class="directions-actions">
+        <button id="swapDirectionsButton" class="btn btn--icon" type="button">
+          <img src="./data/swap.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span>Swap A/B</span>
+        </button>
+        <button id="undoDirectionsButton" class="btn btn--icon" type="button" disabled>
+          <img src="./data/undo.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span>Undo</span>
+        </button>
+        <button id="clearDirectionsButton" class="btn btn--icon" type="button">
+          <img src="./data/clear.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span>Clear</span>
+        </button>
+      </div>
     </div>
-    <div class="directions-actions">
-      <button id="swapDirectionsButton" class="btn" type="button">Swap A/B</button>
-      <button id="undoDirectionsButton" class="btn" type="button" disabled>Undo</button>
-      <button id="clearDirectionsButton" class="btn" type="button">Clear</button>
+    <div class="directions-body">
+      <div class="chart-card" role="group" aria-label="Route elevation overview">
+        <div class="chart-card__header">
+          <div class="chart-card__title">
+            <img src="./data/line.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span>Elevation profile</span>
+          </div>
+          <div id="routeStats" class="route-stats" aria-live="polite"></div>
+        </div>
+        <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
+      </div>
     </div>
-    <div id="routeStats" class="route-stats" aria-live="polite"></div>
-    <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
   </div>
 </div>
 
