@@ -464,9 +464,15 @@ html, body { margin:0; height:100%; }
   color: inherit;
 }
 
+.summary-item svg,
+.summary-item img {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex: 0 0 auto;
+}
+
 .summary-item svg {
-  width: 16px;
-  height: 16px;
   fill: currentColor;
   opacity: 0.85;
 }

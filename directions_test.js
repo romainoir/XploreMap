@@ -84,10 +84,12 @@ const SEGMENT_COLOR_PALETTE = [
 
 const ASCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 18a1 1 0 0 1-.7-1.7l6.3-6.3a1 1 0 0 1 1.4 0l3.3 3.3 4.9-6.7H17a1 1 0 0 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V7.41l-5.6 7.6a1 1 0 0 1-1.5.12l-3.3-3.3-5.6 5.6a1 1 0 0 1-.7.27Z"/></svg>';
 const DESCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 6a1 1 0 0 1 .7 1.7l-6.3 6.3a1 1 0 0 1-1.4 0l-3.3-3.3-4.9 6.7H7a1 1 0 0 1 0 2H2a1 1 0 0 1-1-1v-5a1 1 0 0 1 2 0v3.59l5.6-7.6a1 1 0 0 1 1.5-.12l3.3 3.3 5.6-5.6a1 1 0 0 1 .7-.27Z"/></svg>';
+const DISTANCE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor"><circle cx="6" cy="6" r="2.4"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="18" r="2.4"/><path d="M8.95 7.05 10.36 5.64 18.36 13.64 16.95 15.05 8.95 7.05Z"/></svg>';
 
 const SUMMARY_ICONS = {
   ascent: ASCENT_ICON,
-  descent: DESCENT_ICON
+  descent: DESCENT_ICON,
+  distance: DISTANCE_ICON
 };
 
 // Use the shared bivouac marker PNG so the UI references the canonical asset.

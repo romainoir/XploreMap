@@ -1374,7 +1374,7 @@ async function init() {
 
   map.on('style.load', applyOverlays);
 
-  const methodButtons = Array.from(document.querySelectorAll('.hs-panel .btn'));
+  const methodButtons = Array.from(document.querySelectorAll('.terrain-controls .btns .btn'));
   const DEFAULT_METHOD = 'igor';
   function setHillshadeMethod(method) {
     methodButtons.forEach(b => b.classList.toggle('active', b.dataset.method === method));
