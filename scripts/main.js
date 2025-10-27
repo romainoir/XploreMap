@@ -27,12 +27,12 @@ import { extractOverpassNetwork } from './overpass-network.js';
 import { extractOpenFreeMapNetwork } from './openfreemap-network.js';
 
 const UI_ICON_SOURCES = Object.freeze({
-  'view-toggle': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAABDElEQVR42u3bsQ0CMRBE0SuCkJD+W4QGCA92Z/y+dPnZT4BkL9clSZIkSZIkSZIkSZLO6/F8vb893md4wVOLBgBgD8CmBwAAAAAAAIAAAAAEAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoA0gZYYHAAAAAAAAAACgG+Cf6wLwo03xCRgE8BU0COA3IAjAWc3NGxN7CNcAEH0Cmg4Qf/ycDFBx9p8KUHPxkghQdfPVDuDK8GaAujvfJIDKC/cUgNpphwSA6lGT7QD1cz6bAY4YtGoBuFLbCnDMiOFGgKPmO0012Hybb/NtPgCbD+Ccf7TY/OUAp7/P6IK9z+CCvY8kSZK0ug84nu0y7Uj/5gAAAABJRU5ErkJggg==',
-  'gpx-import': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAA+ElEQVR42u3ZOxKCQBBFURZBaMj+twipIZ9pfUyfW2WmA9WnFBmWRZIkSZIkSZI0oPWz7W9+AQAAAAAAAAAAAAAAAAAAAAAAAAMiHNLGAb5HJBfyEmWDA9cMkAy7eJgrAX1eTDbhvMOGAmzaTDrhjNnEA9otMPmCzzvDtePYefksEe/8A+gJ4Amb4PRE8Czb8vggAJgC4ss7IYwL4GkTV+wGcHELlZwAAyAO4u07V8VsBPFmn8hxaADxdp/o8pgYYsc4vzmVKgLet4yGOwQEAAAAAAAAAAAAAAAAAAAAAAAAQAAACAEAAAAgAAAGQJEmSJEmSJEnSnzoAHmY9liTds6kAAAAASUVORK5CYII=',
-  'gpx-export': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAA7UlEQVR42u3ZMQ6DMBBEUQ6RkjL3vyKpkGhiaOxdMe9LdBiJeUpDtk2SJEmSJEmSJEk6++zf48llKQAABACAAAAQAAACAEAAAAgAAAEAIAAABACAAAAQAAACAEAA+g/X7TmvA7h76ZXPiAUYvfiq8/EA/15+xVkAgwFmnwNwM8LMMwAA9AS4DjHrfgAPx5hxL4DGFwAAuQjR34SMH4zg66jxAUAwfhaCf8uMn4lg+UIEiwPIRbB0IYKFCxEsW4hgUQC5CJYsRLBgIYLlChEs1uyLZ+yvCAAAAAAAAAAAAAAAAAAAAAAAQJIkSVJyP7PrjQru2Ha3AAAAAElFTkSuQmCC',
-  'routing-offline': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAABTElEQVR42u3ZMU4DMRCG0RyCBomSg3MbjhX6FIk3tvE/9vukrYnnKTI7ud0kSZIkSZIkSZIkSZIkSVJDnz+/92ePCS0GgBAAACEAAEIAAIQAgEeEj6/v+8gHQOMzevDHYrwL8F8I22P0AECAAGEFwrYQEDa6lF/9HQhPhlLpW7ANwuOhICwGqIaw3fAhBAwfQsDwIYQAVEIA8GKNDaBjCFXelrcFqIKwNUAFhK2HX+VS3h4gHeEIgGSEYwBSEY4CSEQ4DiANoSTA6n9Rrw74OIAWoFE/bY74rAA6EAB0HnrE8g5A56FnriwANB56FgKAC4cGENCIH3MEAYLevHcghF32EBYv/CAEbFshFAeAMAAAwqLhQwj6BkAIAXApBwD0IJj+xfeA0SsLk7/wJjxjb2TqjbugWcs7k54UgCIIprQYwYQkSZIkSZIkqac/3w4r0ONVjaAAAAAASUVORK5CYII=',
-  'routing-online': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAA30lEQVR42u3YsQ2DQBBEUYogdOj+WzQVWCI43c3uvic5Bs8HW3BdAAAAAAAAAAAAAADQ1/35/lZ+LHpgdDGCRhcjcPzREVLGHxchbfhRIdLHbx1h1zgiFL7yW0aoOn6bCAIYf2aELuOXjNBt/HIRBGgeIO24rn53gQACCNB//PgIAggggACDApw+7tgAqcePDrBqoB0XwZvv0i7Am/FW3YkrzlUAAfYGqHwuAggggAATAgAM4zc58M+ewy/8rBTwttVaAgjAofFFcAcIYC0BPAfgSXhGDCsAAAAAAADw1wMgIztO9B4zRQAAAABJRU5ErkJggg==',
-  'debug-network': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAABJklEQVR42u3ZsRGDMBAFUYpw4hmHLtzduCxogMwW9497O0PiRGgXgwTbBgAAAAAAAADAPXm83vvZMWX82ABXSKgcu0WAlSKqxm0XYIWMijFbB/inkKvHu02Aqw8rIfJnRrAnIH9mBOYLIzBeGIHpwggMF0ZgtiAGgwIIgIBnAZshKyF2A/YCLAfshtkOeSFHvtfRApAvwmz5PsqLIMCYAMnyR0QQQIC5ATrIv3UEARoEeH6+Sw8BBBBAAAFyH8ApAcZG8A8QQAABbMR2okURQAABBBBAAAFarozIF8J+oHMI34WJnxVimwrxQ0MwLoBbkHu/hzDx1v8/yjn7XYgFV3yXcceLFyL0FuB7QMgkBQiZnAAhkxobwDkXTca5AwAAAAAAACjhALq+7H2JSUoUAAAAAElFTkSuQmCC'
+  'view-toggle': './data/2d_3d.png',
+  'gpx-import': './data/upload.png',
+  'gpx-export': './data/downloads.png',
+  'routing-offline': './data/no-wifi.png',
+  'routing-online': './data/wifi.png',
+  'debug-network': './data/debugg.png'
 });
 
 const ROUTING_ICON_OFFLINE = UI_ICON_SOURCES['routing-offline'];
@@ -345,6 +345,10 @@ async function init() {
     if (!debugNetworkCheckbox) return;
     const isActive = Boolean(active && activeRouterKey === 'offline');
     debugNetworkCheckbox.checked = isActive;
+    if (debugNetworkControl) {
+      debugNetworkControl.classList.toggle('is-active', isActive);
+      debugNetworkControl.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    }
   };
 
   const updateRoutingModeToggle = () => {

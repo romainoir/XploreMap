@@ -91,19 +91,6 @@ html, body { margin:0; height:100%; }
   flex-wrap: wrap;
 }
 
-.ui__row--actions .btn {
-  flex: 1 1 30%;
-  min-width: 0;
-}
-
-.ui__row--actions .toggle-3d {
-  flex: 0 0 auto;
-}
-
-.ui__row--routing {
-  align-items: stretch;
-}
-
 .ui__row--directions {
   align-items: stretch;
 }
@@ -170,6 +157,12 @@ html, body { margin:0; height:100%; }
   padding-inline: 14px;
 }
 
+.toggle-3d.btn--icon-only {
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+}
+
 .btn--primary {
   background: linear-gradient(135deg, rgba(17, 34, 48, 0.92), rgba(32, 68, 102, 0.92));
   color: #fff;
@@ -183,7 +176,7 @@ html, body { margin:0; height:100%; }
   border-color: transparent;
 }
 
-.ui__row--routing .routing-mode-toggle {
+.routing-mode-toggle {
   flex: 1 1 auto;
   display: inline-flex;
   align-items: center;
@@ -192,10 +185,23 @@ html, body { margin:0; height:100%; }
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.06);
 }
 
+.routing-mode-toggle.btn--icon-only {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  gap: 0;
+}
+
 .routing-mode-toggle__icon {
   width: 22px;
   height: 22px;
   object-fit: contain;
+}
+
+.routing-mode-toggle.btn--icon-only .routing-mode-toggle__icon {
+  width: 24px;
+  height: 24px;
 }
 
 .routing-mode-toggle__text {
@@ -217,40 +223,45 @@ html, body { margin:0; height:100%; }
 }
 
 .debug-network-control {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   border-radius: 14px;
-  border: 1px solid rgba(17, 34, 48, 0.16);
-  background: rgba(17, 34, 48, 0.06);
-  color: rgba(17, 34, 48, 0.72);
-  font-size: 12px;
-  line-height: 1.2;
-  cursor: pointer;
+  border: 1px solid rgba(17, 34, 48, 0.14);
+  background: rgba(255, 255, 255, 0.9);
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.04);
-}
-
-.debug-network-control input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .debug-network-control img {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
 }
 
-.debug-network-control span {
-  user-select: none;
-  font-weight: 600;
+.debug-network-control:hover {
+  background: rgba(17, 34, 48, 0.08);
 }
 
-.debug-network-control:hover,
-.debug-network-control:focus-visible {
-  background: rgba(17, 34, 48, 0.12);
+.debug-network-control.is-active {
+  background: rgba(17, 34, 48, 0.92);
+  border-color: rgba(17, 34, 48, 0.92);
+  box-shadow: 0 10px 24px rgba(17, 34, 48, 0.24);
+}
+
+.debug-network-control.is-active img {
+  filter: brightness(0) invert(1) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+}
+
+.debug-network-control:focus-within {
+  outline: 2px solid rgba(17, 98, 128, 0.45);
+  outline-offset: 2px;
 }
 
 .icon-button {
@@ -840,7 +851,9 @@ html, body { margin:0; height:100%; }
   box-shadow: 0 6px 18px rgba(0,0,0,.12);
 }
 .hs-title { font-weight: 600; margin-bottom: 6px; }
+.terrain-controls { display:flex; align-items: flex-start; gap:8px; flex-wrap: wrap; }
 .btns { display:flex; gap:6px; flex-direction: column; }
+.terrain-controls .btns { flex: 1 1 auto; }
 .btns .btn { width: 100%; }
 .btn {
   display: inline-flex;
