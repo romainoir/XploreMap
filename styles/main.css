@@ -510,7 +510,7 @@ html, body { margin:0; height:100%; }
 .elevation-plot-area {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   min-width: 0;
 }
 
