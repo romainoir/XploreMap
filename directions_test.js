@@ -385,10 +385,7 @@ export class DirectionsManager {
       directionsHint
     ] = uiElements;
 
-    const {
-      router = null,
-      enableWaypointLogging = false
-    } = options ?? {};
+    const { router = null } = options ?? {};
 
     this.map = map;
     this.mapContainer = map.getContainer?.() ?? null;
@@ -402,7 +399,6 @@ export class DirectionsManager {
     this.elevationChart = elevationChart ?? null;
     this.infoButton = directionsInfoButton ?? null;
     this.directionsHint = directionsHint ?? null;
-    this.enableWaypointLogging = Boolean(enableWaypointLogging);
 
     if (this.routeStats) {
       this.routeStats.setAttribute('aria-live', 'polite');
@@ -418,12 +414,10 @@ export class DirectionsManager {
     this.isDragging = false;
     this.draggedWaypointIndex = null;
     this.draggedBivouacIndex = null;
-    this.draggedBivouacStartCuts = null;
     this.draggedBivouacLngLat = null;
     this.hoveredWaypointIndex = null;
     this.hoveredSegmentIndex = null;
     this.hoveredLegIndex = null;
-    this.dragStartWaypointSnapshot = null;
 
     this.routeGeojson = null;
     this.routeSegments = [];
@@ -473,10 +467,6 @@ export class DirectionsManager {
     this.setupMapHandlers();
     this.updatePanelVisibilityState();
     this.updateModeAvailability();
-  }
-
-  setWaypointLoggingEnabled(isEnabled) {
-    this.enableWaypointLogging = Boolean(isEnabled);
   }
 
   setupRouteLayers() {
@@ -748,10 +738,8 @@ export class DirectionsManager {
 
     this.swapButton?.addEventListener('click', () => {
       if (this.waypoints.length < 2) return;
-      const before = this.snapshotWaypoints();
       this.waypoints.reverse();
       this.invalidateCachedLegSegments();
-      this.logViaWaypointState('Swapped start/end waypoints', before, this.waypoints);
       this.updateWaypoints();
       this.getRoute();
     });
@@ -2005,312 +1993,6 @@ export class DirectionsManager {
     return null;
   }
 
-  logViaWaypointState(context, before = [], after = [], options = {}) {
-    if (!this.enableWaypointLogging) {
-      return;
-    }
-
-    const {
-      force = false,
-      bivouacBefore = null,
-      bivouacAfter = null
-    } = options ?? {};
-
-    const beforeEntries = this.collectViaWaypointEntries(before);
-    const afterEntries = this.collectViaWaypointEntries(after);
-
-    const beforeList = Array.from(beforeEntries.entries()).map(([index, entry]) => ({ index, entry }));
-    const afterList = Array.from(afterEntries.entries()).map(([index, entry]) => ({ index, entry, used: false }));
-    const afterLookup = new Map();
-    afterList.forEach((item) => {
-      const key = typeof item.entry?.string === 'string' ? item.entry.string : null;
-      if (!key) {
-        return;
-      }
-      if (!afterLookup.has(key)) {
-        afterLookup.set(key, []);
-      }
-      afterLookup.get(key).push(item);
-    });
-
-    const rows = [];
-    const markUsed = (item) => {
-      item.used = true;
-    };
-
-    beforeList.forEach((beforeItem) => {
-      const { index: previousIndex, entry: previousEntry } = beforeItem;
-      const key = typeof previousEntry?.string === 'string' ? previousEntry.string : null;
-      const candidates = key && afterLookup.has(key) ? afterLookup.get(key) : afterList;
-
-      let match = null;
-      if (Array.isArray(candidates)) {
-        match = candidates.find((candidate) => !candidate.used && this.areLoggedWaypointsEqual(previousEntry, candidate.entry));
-      }
-
-      if (match) {
-        markUsed(match);
-        const status = previousIndex === match.index ? 'unchanged' : 'shifted';
-        const deltaMeters = this.computeWaypointDeltaMeters(previousEntry, match.entry);
-        rows.push({
-          waypointIndex: match.index,
-          previousIndex,
-          nextIndex: match.index,
-          previous: previousEntry,
-          next: match.entry,
-          deltaMeters,
-          status,
-          changed: status !== 'unchanged'
-        });
-        return;
-      }
-
-      const sameIndexCandidate = afterList.find((candidate) => !candidate.used && candidate.index === previousIndex);
-      if (sameIndexCandidate) {
-        markUsed(sameIndexCandidate);
-        const deltaMeters = this.computeWaypointDeltaMeters(previousEntry, sameIndexCandidate.entry);
-        rows.push({
-          waypointIndex: sameIndexCandidate.index,
-          previousIndex,
-          nextIndex: sameIndexCandidate.index,
-          previous: previousEntry,
-          next: sameIndexCandidate.entry,
-          deltaMeters,
-          status: 'moved',
-          changed: true
-        });
-        return;
-      }
-
-      rows.push({
-        waypointIndex: previousIndex,
-        previousIndex,
-        nextIndex: null,
-        previous: previousEntry,
-        next: null,
-        deltaMeters: null,
-        status: 'removed',
-        changed: true
-      });
-    });
-
-    afterList.forEach((afterItem) => {
-      if (afterItem.used) {
-        return;
-      }
-      rows.push({
-        waypointIndex: afterItem.index,
-        previousIndex: null,
-        nextIndex: afterItem.index,
-        previous: null,
-        next: afterItem.entry,
-        deltaMeters: null,
-        status: 'added',
-        changed: true
-      });
-    });
-
-    rows.sort((a, b) => {
-      const aIndex = Number.isFinite(a.nextIndex) ? a.nextIndex : a.previousIndex;
-      const bIndex = Number.isFinite(b.nextIndex) ? b.nextIndex : b.previousIndex;
-      if (Number.isFinite(aIndex) && Number.isFinite(bIndex)) {
-        return aIndex - bIndex;
-      }
-      if (Number.isFinite(aIndex)) {
-        return -1;
-      }
-      if (Number.isFinite(bIndex)) {
-        return 1;
-      }
-      return 0;
-    });
-
-    const hasMeaningfulChange = rows.some((row) => row.status !== 'unchanged');
-
-    const viaSummary = rows.map((row) => ({
-      index: Number.isFinite(row.nextIndex) ? row.nextIndex : row.previousIndex,
-      previousIndex: row.previousIndex,
-      nextIndex: row.nextIndex,
-      beforeLng: row.previous?.rounded?.[0] ?? null,
-      beforeLat: row.previous?.rounded?.[1] ?? null,
-      afterLng: row.next?.rounded?.[0] ?? null,
-      afterLat: row.next?.rounded?.[1] ?? null,
-      status: row.status,
-      deltaMeters: row.deltaMeters
-    }));
-
-    const beforeWaypointSummary = this.buildWaypointLogSummary(before);
-    const afterWaypointSummary = this.buildWaypointLogSummary(after);
-    const beforeWaypointList = this.buildWaypointListEntries(beforeWaypointSummary);
-    const afterWaypointList = this.buildWaypointListEntries(afterWaypointSummary);
-    const beforeWaypointDescriptions = beforeWaypointList.map((item) => item.description).filter(Boolean);
-    const afterWaypointDescriptions = afterWaypointList.map((item) => item.description).filter(Boolean);
-    const beforeBivouacSummary = this.buildBivouacLogSummary(Array.isArray(bivouacBefore) ? bivouacBefore : []);
-    const afterBivouacSummary = this.buildBivouacLogSummary(
-      Array.isArray(bivouacAfter) ? bivouacAfter : this.routeCutDistances
-    );
-
-    const waypointSummaryChanged = this.haveWaypointSummariesChanged(beforeWaypointSummary, afterWaypointSummary);
-    const bivouacSummaryChanged = this.haveBivouacSummariesChanged(beforeBivouacSummary, afterBivouacSummary);
-
-    if (!force && !hasMeaningfulChange && !waypointSummaryChanged && !bivouacSummaryChanged) {
-      return;
-    }
-
-    const currentViaOrder = afterWaypointSummary
-      .filter((item) => item.role === 'via')
-      .map((item) => {
-        if (!Number.isFinite(item.lng) || !Number.isFinite(item.lat)) {
-          return null;
-        }
-        return `[${item.lng.toFixed(6)}, ${item.lat.toFixed(6)}]`;
-      })
-      .filter(Boolean);
-
-    const title = `[DirectionsManager] ${context}`;
-    if (typeof console !== 'undefined' && console) {
-      const summaryPayload = {};
-      if (viaSummary.length) {
-        summaryPayload.viaChanges = viaSummary;
-      }
-      if (afterWaypointSummary.length) {
-        summaryPayload.currentWaypoints = afterWaypointSummary;
-      }
-      if (beforeWaypointDescriptions.length) {
-        summaryPayload.waypointListBefore = beforeWaypointDescriptions;
-      }
-      if (afterWaypointDescriptions.length) {
-        summaryPayload.waypointListAfter = afterWaypointDescriptions;
-      }
-      if (afterBivouacSummary.length) {
-        summaryPayload.currentBivouacs = afterBivouacSummary;
-      }
-      if (currentViaOrder.length) {
-        summaryPayload.currentViaOrder = currentViaOrder;
-      }
-
-      if (typeof console.log === 'function') {
-        console.log(title, summaryPayload);
-      }
-
-      if (typeof console.groupCollapsed === 'function') {
-        console.groupCollapsed(`${title} (details)`);
-        if (typeof console.table === 'function') {
-          if (viaSummary.length) {
-            console.table(viaSummary);
-          } else {
-            console.log('Via waypoint summary: none');
-          }
-          if (beforeWaypointSummary.length) {
-            console.log('Waypoint positions (before):');
-            console.table(beforeWaypointSummary);
-          }
-          if (afterWaypointSummary.length) {
-            console.log('Waypoint positions (after):');
-            console.table(afterWaypointSummary);
-          }
-          if (beforeWaypointDescriptions.length) {
-            console.log('Waypoint list (before):', beforeWaypointDescriptions);
-          }
-          if (afterWaypointDescriptions.length) {
-            console.log('Waypoint list (after):', afterWaypointDescriptions);
-          }
-          if (beforeBivouacSummary.length) {
-            console.log('Bivouac positions (before):');
-            console.table(beforeBivouacSummary);
-          }
-          if (afterBivouacSummary.length) {
-            console.log('Bivouac positions (after):');
-            console.table(afterBivouacSummary);
-          }
-        } else {
-          if (viaSummary.length) {
-            console.log('Via waypoint summary:', viaSummary);
-          } else {
-            console.log('Via waypoint summary: none');
-          }
-          if (beforeWaypointSummary.length) {
-            console.log('Waypoint positions (before):', beforeWaypointSummary);
-          }
-          if (afterWaypointSummary.length) {
-            console.log('Waypoint positions (after):', afterWaypointSummary);
-          }
-          if (beforeWaypointDescriptions.length) {
-            console.log('Waypoint list (before):', beforeWaypointDescriptions);
-          }
-          if (afterWaypointDescriptions.length) {
-            console.log('Waypoint list (after):', afterWaypointDescriptions);
-          }
-          if (beforeBivouacSummary.length) {
-            console.log('Bivouac positions (before):', beforeBivouacSummary);
-          }
-          if (afterBivouacSummary.length) {
-            console.log('Bivouac positions (after):', afterBivouacSummary);
-          }
-        }
-        rows
-          .filter((row) => row.status !== 'unchanged')
-          .forEach((row) => {
-            const fromIndex = Number.isFinite(row.previousIndex) ? row.previousIndex : null;
-            const toIndex = Number.isFinite(row.nextIndex) ? row.nextIndex : null;
-            let message = 'Waypoint';
-            if (fromIndex !== null) {
-              message += ` #${fromIndex}`;
-            }
-            if (row.status === 'shifted' && toIndex !== null && toIndex !== fromIndex) {
-              message += ` shifted to #${toIndex}`;
-            } else {
-              message += ` ${row.status}`;
-            }
-            console.log(
-              message,
-              {
-                before: row.previous?.raw ?? null,
-                after: row.next?.raw ?? null,
-                roundedBefore: row.previous?.string ?? null,
-                roundedAfter: row.next?.string ?? null,
-                deltaMeters: row.deltaMeters,
-                previousIndex: row.previousIndex,
-                nextIndex: row.nextIndex
-              }
-            );
-          });
-        if (currentViaOrder.length) {
-          console.log('Current via coordinates (lng, lat):', currentViaOrder);
-        }
-        console.groupEnd();
-      } else {
-        if (typeof console.table === 'function') {
-          if (viaSummary.length) {
-            console.table(viaSummary);
-          }
-          if (afterWaypointSummary.length) {
-            console.table(afterWaypointSummary);
-          }
-          if (afterBivouacSummary.length) {
-            console.table(afterBivouacSummary);
-          }
-        } else {
-          if (viaSummary.length) {
-            console.log('Via waypoint summary:', viaSummary);
-          }
-          if (afterWaypointSummary.length) {
-            console.log('Waypoint positions (after):', afterWaypointSummary);
-          }
-          if (afterWaypointDescriptions.length) {
-            console.log('Waypoint list (after):', afterWaypointDescriptions);
-          }
-          if (afterBivouacSummary.length) {
-            console.log('Bivouac positions (after):', afterBivouacSummary);
-          }
-        }
-        if (currentViaOrder.length) {
-          console.log('Current via coordinates (lng, lat):', currentViaOrder);
-        }
-      }
-    }
-  }
-
   snapWaypointsToRoute() {
     if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
       return false;
@@ -2331,7 +2013,7 @@ export class DirectionsManager {
       return [lng, lat];
     });
 
-    let before = null;
+    let changed = false;
     normalizedWaypoints.forEach((coord, index) => {
       if (!Array.isArray(coord) || coord.length < 2) {
         return;
@@ -2341,19 +2023,12 @@ export class DirectionsManager {
       const lengthChanged = !Array.isArray(current) || current.length !== coord.length;
       const differs = hasComparableCurrent ? !this.coordinatesMatch(current, coord) : true;
       if (lengthChanged || differs) {
-        if (!before) {
-          before = this.snapshotWaypoints();
-        }
         this.waypoints[index] = coord.slice();
+        changed = true;
       }
     });
 
-    if (before) {
-      this.logViaWaypointState('Normalized waypoint coordinates', before, this.waypoints);
-      return true;
-    }
-
-    return false;
+    return changed;
   }
 
   addRouteCut(distanceKm) {
@@ -2371,7 +2046,6 @@ export class DirectionsManager {
       return;
     }
 
-    const previousCuts = Array.isArray(this.routeCutDistances) ? this.routeCutDistances.slice() : [];
     const exists = this.routeCutDistances.some((cut) => Math.abs(cut - clamped) <= ROUTE_CUT_EPSILON_KM / 2);
     if (exists) {
       return;
@@ -2380,11 +2054,6 @@ export class DirectionsManager {
     this.routeCutDistances.push(clamped);
     this.routeCutDistances.sort((a, b) => a - b);
     this.updateCutDisplays();
-    this.logViaWaypointState('Added bivouac marker', this.waypoints, this.waypoints, {
-      force: true,
-      bivouacBefore: previousCuts,
-      bivouacAfter: this.routeCutDistances.slice()
-    });
   }
 
   updateDraggedBivouac(distanceKm) {
@@ -2456,16 +2125,6 @@ export class DirectionsManager {
 
     this.draggedBivouacLngLat = null;
     this.updateSegmentMarkers();
-    if (Array.isArray(this.draggedBivouacStartCuts)) {
-      const beforeCuts = this.draggedBivouacStartCuts;
-      const afterCuts = Array.isArray(this.routeCutDistances) ? this.routeCutDistances.slice() : [];
-      this.logViaWaypointState('Updated bivouac marker', this.waypoints, this.waypoints, {
-        force: true,
-        bivouacBefore: beforeCuts,
-        bivouacAfter: afterCuts
-      });
-    }
-    this.draggedBivouacStartCuts = null;
   }
 
   onRouteContextMenu(event) {
@@ -2528,7 +2187,6 @@ export class DirectionsManager {
     this.isDragging = true;
     this.draggedWaypointIndex = Number(feature.properties.index);
     this.setHoveredWaypointIndex(this.draggedWaypointIndex);
-    this.dragStartWaypointSnapshot = this.snapshotWaypoints();
     this.map.dragPan?.disable();
   }
 
@@ -2553,9 +2211,6 @@ export class DirectionsManager {
     this.isDragging = true;
     this.draggedWaypointIndex = null;
     this.draggedBivouacIndex = cutIndex;
-    this.draggedBivouacStartCuts = Array.isArray(this.routeCutDistances)
-      ? this.routeCutDistances.slice()
-      : [];
     if (event?.lngLat && Number.isFinite(event.lngLat.lng) && Number.isFinite(event.lngLat.lat)) {
       this.draggedBivouacLngLat = [event.lngLat.lng, event.lngLat.lat];
       this.updateSegmentMarkers();
@@ -2610,15 +2265,6 @@ export class DirectionsManager {
     this.draggedWaypointIndex = null;
     this.map.dragPan?.enable();
     this.setHoveredWaypointIndex(null);
-    if (movedWaypoint) {
-      this.logViaWaypointState(
-        'Waypoint drag ended',
-        Array.isArray(this.dragStartWaypointSnapshot) ? this.dragStartWaypointSnapshot : [],
-        this.waypoints,
-        { force: true }
-      );
-    }
-    this.dragStartWaypointSnapshot = null;
     if (movedWaypoint && this.waypoints.length >= 2) {
       this.invalidateCachedLegSegments();
       this.getRoute();
@@ -2647,14 +2293,12 @@ export class DirectionsManager {
       return;
     }
 
-    const before = this.snapshotWaypoints();
     const snapped = await this.snapLngLatToNetwork(event.lngLat);
     const targetLngLat = Array.isArray(snapped) && snapped.length >= 2
       ? [snapped[0], snapped[1]]
       : [event.lngLat.lng, event.lngLat.lat];
     this.waypoints.push(targetLngLat);
     this.invalidateCachedLegSegments();
-    this.logViaWaypointState('Added waypoint from map click', before, this.waypoints, { force: true });
     this.updateWaypoints();
     if (this.waypoints.length === 1) {
       this.prepareNetwork({ reason: 'first-waypoint' });
@@ -2668,10 +2312,8 @@ export class DirectionsManager {
     if (!this.isPanelVisible()) return;
     const index = Number(event.features?.[0]?.properties.index);
     if (!Number.isFinite(index) || index <= 0 || index >= this.waypoints.length - 1) return;
-    const before = this.snapshotWaypoints();
     this.waypoints.splice(index, 1);
     this.invalidateCachedLegSegments();
-    this.logViaWaypointState('Removed via waypoint', before, this.waypoints, { force: true });
     this.updateWaypoints();
     if (this.waypoints.length >= 2) {
       this.getRoute();
@@ -2807,10 +2449,8 @@ export class DirectionsManager {
 
     insertIndex = Math.max(1, insertIndex);
 
-    const before = this.snapshotWaypoints();
     this.waypoints.splice(insertIndex, 0, snapped);
     this.invalidateCachedLegSegments();
-    this.logViaWaypointState('Inserted via waypoint', before, this.waypoints, { force: true });
     this.updateWaypoints();
     this.resetSegmentHover();
     await this.prepareNetwork({ reason: 'via-inserted' });
@@ -3589,7 +3229,6 @@ export class DirectionsManager {
     this.lastElevationHoverDistance = null;
     this.draggedBivouacIndex = null;
     this.draggedBivouacLngLat = null;
-    this.draggedBivouacStartCuts = null;
 
     this.updateRouteLineSource();
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
