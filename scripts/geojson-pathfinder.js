@@ -3,6 +3,7 @@ const EARTH_RADIUS_METERS = EARTH_RADIUS_KM * 1000;
 const DEG_TO_RAD = Math.PI / 180;
 const NODE_CONNECTION_TOLERANCE_METERS = 8;
 const NODE_CONNECTION_TOLERANCE_KM = NODE_CONNECTION_TOLERANCE_METERS / 1000;
+const DEFAULT_NODE_BUCKET_DEGREES = 0.005;
 // Treat distances under ~1 mm as effectively identical when we need to allow
 // nodes to merge despite the avoid-key guard.
 const DUPLICATE_NODE_DISTANCE_KM = 1e-6;
@@ -164,7 +165,8 @@ export class GeoJsonPathFinder {
       costProperty,
       modeSeparator,
       tolerance,
-      nodeConnectionToleranceMeters
+      nodeConnectionToleranceMeters,
+      nodeBucketSizeDegrees
     } = options;
 
     this.precision = Number.isFinite(precision) && precision > 0 ? precision : 1e7;
@@ -186,8 +188,14 @@ export class GeoJsonPathFinder {
       toleranceMeters: nodeConnectionToleranceMeters
     });
 
+    const bucketSize = Number(nodeBucketSizeDegrees);
+    this.nodeBucketSizeDegrees = Number.isFinite(bucketSize) && bucketSize > 0
+      ? bucketSize
+      : DEFAULT_NODE_BUCKET_DEGREES;
+
     this.nodes = new Map();
     this.nodeList = [];
+    this.nodeBuckets = new Map();
 
     if (geojson) {
       this.load(geojson);
@@ -197,6 +205,7 @@ export class GeoJsonPathFinder {
   clear() {
     this.nodes.clear();
     this.nodeList = [];
+    this.nodeBuckets.clear();
   }
 
   load(geojson) {
@@ -243,24 +252,24 @@ export class GeoJsonPathFinder {
     const avoidKey = typeof options?.avoidKey === 'string'
       ? options.avoidKey
       : null;
+    const candidates = this._collectNearbyNodes(rounded);
     let nearestNode = null;
     let nearestDistanceKm = Infinity;
     const toleranceKm = this.nodeConnectionToleranceKm;
 
-    for (let index = 0; index < this.nodeList.length; index += 1) {
-      const candidate = this.nodeList[index];
+    candidates.forEach((candidate) => {
       if (!candidate || !Array.isArray(candidate.coord)) {
-        continue;
+        return;
       }
       const distanceKm = haversineDistanceKm(candidate.coord, rounded);
       if (avoidKey && candidate.key === avoidKey && distanceKm > DUPLICATE_NODE_DISTANCE_KM) {
-        continue;
+        return;
       }
       if (distanceKm < toleranceKm && distanceKm < nearestDistanceKm) {
         nearestNode = candidate;
         nearestDistanceKm = distanceKm;
       }
-    }
+    });
 
     if (nearestNode) {
       return nearestNode;
@@ -273,7 +282,73 @@ export class GeoJsonPathFinder {
     };
     this.nodes.set(key, node);
     this.nodeList.push(node);
+    this._addNodeToBuckets(node);
     return node;
+  }
+
+  _getBucketIndices(coord) {
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return null;
+    }
+    const size = this.nodeBucketSizeDegrees;
+    if (!Number.isFinite(size) || size <= 0) {
+      return null;
+    }
+    const lngIndex = Math.round(coord[0] / size);
+    const latIndex = Math.round(coord[1] / size);
+    if (!Number.isFinite(lngIndex) || !Number.isFinite(latIndex)) {
+      return null;
+    }
+    return { lngIndex, latIndex };
+  }
+
+  _getBucketKeyFromIndices({ lngIndex, latIndex }) {
+    if (!Number.isFinite(lngIndex) || !Number.isFinite(latIndex)) {
+      return null;
+    }
+    return `${lngIndex}:${latIndex}`;
+  }
+
+  _addNodeToBuckets(node) {
+    if (!node || !Array.isArray(node.coord)) {
+      return;
+    }
+    const indices = this._getBucketIndices(node.coord);
+    if (!indices) {
+      return;
+    }
+    const key = this._getBucketKeyFromIndices(indices);
+    if (!key) {
+      return;
+    }
+    if (!this.nodeBuckets.has(key)) {
+      this.nodeBuckets.set(key, []);
+    }
+    this.nodeBuckets.get(key).push(node);
+  }
+
+  _collectNearbyNodes(coord) {
+    const indices = this._getBucketIndices(coord);
+    if (!indices) {
+      return this.nodeList;
+    }
+    const neighbors = [];
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const key = this._getBucketKeyFromIndices({
+          lngIndex: indices.lngIndex + dx,
+          latIndex: indices.latIndex + dy
+        });
+        if (!key) {
+          continue;
+        }
+        const bucket = this.nodeBuckets.get(key);
+        if (Array.isArray(bucket) && bucket.length) {
+          bucket.forEach((node) => neighbors.push(node));
+        }
+      }
+    }
+    return neighbors.length ? neighbors : this.nodeList;
   }
 
   _addDirectedEdge(source, target, edge) {
