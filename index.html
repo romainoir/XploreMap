@@ -76,31 +76,79 @@
   <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
     <div class="directions-header">
       <div class="transport-modes" role="group" aria-label="Travel mode">
-        <button class="btn btn--icon active" type="button" data-mode="foot-hiking">
+        <button
+          class="btn btn--icon btn--icon-only active"
+          type="button"
+          data-mode="foot-hiking"
+          aria-label="Hike"
+          title="Hike"
+        >
           <img src="./data/walk.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span>Hike</span>
+          <span class="sr-only">Hike</span>
         </button>
-        <button class="btn btn--icon" type="button" data-mode="cycling-regular">
+        <button
+          class="btn btn--icon btn--icon-only"
+          type="button"
+          data-mode="cycling-regular"
+          aria-label="Cycle"
+          title="Cycle"
+        >
           <img src="./data/bike.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span>Cycle</span>
+          <span class="sr-only">Cycle</span>
         </button>
-        <button class="btn btn--icon" type="button" data-mode="driving-car">
+        <button
+          class="btn btn--icon btn--icon-only"
+          type="button"
+          data-mode="driving-car"
+          aria-label="Drive"
+          title="Drive"
+        >
           <img src="./data/car.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span>Drive</span>
+          <span class="sr-only">Drive</span>
         </button>
       </div>
       <div class="directions-actions">
-        <button id="swapDirectionsButton" class="btn btn--icon" type="button">
+        <button
+          id="swapDirectionsButton"
+          class="btn btn--icon btn--icon-only"
+          type="button"
+          aria-label="Swap A and B"
+          title="Swap A and B"
+        >
           <img src="./data/swap.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span>Swap A/B</span>
+          <span class="sr-only">Swap A and B</span>
         </button>
-        <button id="undoDirectionsButton" class="btn btn--icon" type="button" disabled>
+        <button
+          id="undoDirectionsButton"
+          class="btn btn--icon btn--icon-only"
+          type="button"
+          aria-label="Undo"
+          title="Undo"
+          disabled
+        >
           <img src="./data/undo.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span>Undo</span>
+          <span class="sr-only">Undo</span>
         </button>
-        <button id="clearDirectionsButton" class="btn btn--icon" type="button">
+        <button
+          id="redoDirectionsButton"
+          class="btn btn--icon btn--icon-only"
+          type="button"
+          aria-label="Redo"
+          title="Redo"
+          disabled
+        >
+          <img src="./data/redo.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span class="sr-only">Redo</span>
+        </button>
+        <button
+          id="clearDirectionsButton"
+          class="btn btn--icon btn--icon-only"
+          type="button"
+          aria-label="Clear"
+          title="Clear"
+        >
           <img src="./data/clear.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span>Clear</span>
+          <span class="sr-only">Clear</span>
         </button>
       </div>
     </div>
