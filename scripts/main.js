@@ -712,7 +712,6 @@ async function init() {
     }
 
     try {
-      const enableWaypointLogging = searchParams.has('directionsDebug');
       directionsManager = new DirectionsManager(map, [
         directionsToggle,
         directionsDock,
@@ -725,8 +724,7 @@ async function init() {
         directionsInfoButton,
         directionsHint
       ], {
-        router: offlineRouter,
-        enableWaypointLogging
+        router: offlineRouter
       });
       directionsManager.setRouteSegmentsListener((payload) => {
         const isObject = payload && typeof payload === 'object';
