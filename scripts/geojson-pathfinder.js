@@ -12,6 +12,7 @@ const DUPLICATE_NODE_DISTANCE_KM = 1e-6;
 const SNAP_DISTANCE_EPSILON_KM = 1e-9;
 const EDGE_SNAP_ENDPOINT_TOLERANCE_METERS = 0.1;
 const METERS_PER_LATITUDE_DEGREE = 111132;
+const RECENT_NODE_HISTORY_LIMIT = 16;
 
 export function haversineDistanceKm(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
@@ -256,6 +257,9 @@ export class GeoJsonPathFinder {
     const avoidKey = typeof options?.avoidKey === 'string'
       ? options.avoidKey
       : null;
+    const blockedKeys = options?.blockedKeys instanceof Set
+      ? options.blockedKeys
+      : null;
     const candidates = this._collectNearbyNodes(rounded);
     let nearestNode = null;
     let nearestDistanceKm = Infinity;
@@ -267,6 +271,11 @@ export class GeoJsonPathFinder {
       }
       const distanceKm = haversineDistanceKm(candidate.coord, rounded);
       if (avoidKey && candidate.key === avoidKey && distanceKm > DUPLICATE_NODE_DISTANCE_KM) {
+        return;
+      }
+      if (blockedKeys
+        && blockedKeys.has(candidate.key)
+        && distanceKm > DUPLICATE_NODE_DISTANCE_KM) {
         return;
       }
       if (distanceKm < toleranceKm && distanceKm < nearestDistanceKm) {
@@ -395,11 +404,35 @@ export class GeoJsonPathFinder {
       if (!Array.isArray(coords) || coords.length < 2) {
         return;
       }
+      const recentKeyOrder = [];
+      const recentKeySet = new Set();
+      const rememberKey = (node) => {
+        if (!node || !node.key) {
+          return;
+        }
+        if (recentKeySet.has(node.key)) {
+          return;
+        }
+        recentKeyOrder.push(node.key);
+        recentKeySet.add(node.key);
+        if (recentKeyOrder.length > RECENT_NODE_HISTORY_LIMIT) {
+          const removed = recentKeyOrder.shift();
+          if (removed) {
+            recentKeySet.delete(removed);
+          }
+        }
+      };
+
       for (let index = 0; index < coords.length - 1; index += 1) {
-        const start = this._getOrCreateNode(coords[index]);
-        const end = this._getOrCreateNode(coords[index + 1], {
-          avoidKey: start?.key
+        const start = this._getOrCreateNode(coords[index], {
+          blockedKeys: recentKeySet
         });
+        rememberKey(start);
+        const end = this._getOrCreateNode(coords[index + 1], {
+          avoidKey: start?.key,
+          blockedKeys: recentKeySet
+        });
+        rememberKey(end);
         if (!start || !end) {
           continue;
         }
