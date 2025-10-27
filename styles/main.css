@@ -542,6 +542,11 @@ html, body { margin:0; height:100%; }
   display: block;
 }
 
+.elevation-marker.bivouac .elevation-marker__icon {
+  width: calc(22px / 3);
+  height: calc(22px / 3);
+}
+
 .elevation-marker__label {
   padding: 2px 8px;
   border-radius: 999px;

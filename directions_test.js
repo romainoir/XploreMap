@@ -720,11 +720,11 @@ export class DirectionsManager {
           ['linear'],
           ['zoom'],
           8,
-          ['match', ['get', 'type'], 'bivouac', 0.45, 0.55],
+          ['match', ['get', 'type'], 'bivouac', 0.15, 0.55],
           12,
-          ['match', ['get', 'type'], 'bivouac', 0.65, 0.75],
+          ['match', ['get', 'type'], 'bivouac', 0.2167, 0.75],
           16,
-          ['match', ['get', 'type'], 'bivouac', 0.85, 0.95]
+          ['match', ['get', 'type'], 'bivouac', 0.2833, 0.95]
         ],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
@@ -1305,6 +1305,10 @@ export class DirectionsManager {
     if (marker.type === 'bivouac') {
       const segmentIndex = Number(marker.segmentIndex);
       if (Number.isInteger(segmentIndex) && segmentIndex > 0) {
+        const nextSegment = this.cutSegments?.[segmentIndex];
+        if (nextSegment && Number.isFinite(nextSegment.startKm)) {
+          return Number(nextSegment.startKm);
+        }
         const prevSegment = this.cutSegments?.[segmentIndex - 1];
         if (prevSegment && Number.isFinite(prevSegment.endKm)) {
           return Number(prevSegment.endKm);
