@@ -38,6 +38,134 @@ const UI_ICON_SOURCES = Object.freeze({
 const ROUTING_ICON_OFFLINE = UI_ICON_SOURCES['routing-offline'];
 const ROUTING_ICON_ONLINE = UI_ICON_SOURCES['routing-online'];
 
+const IGN_ATTRIBUTION = '<a href="https://www.ign.fr/">© IGN</a>';
+const EOX_ATTRIBUTION = '<a href="https://www.eox.at/">© EOX</a>';
+const WMTS_PREVIEW_COORDS = Object.freeze({ z: 14, x: 8508, y: 5911 });
+
+function createIgnTileTemplate(layerName, format = 'image/png') {
+  const encodedFormat = encodeURIComponent(format);
+  const encodedLayer = encodeURIComponent(layerName);
+  return `https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=${encodedLayer}&STYLE=normal&FORMAT=${encodedFormat}&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
+}
+
+function createTilePreviewUrl(template, coords = WMTS_PREVIEW_COORDS) {
+  if (typeof template !== 'string' || !template.length) {
+    return null;
+  }
+  const replacements = [
+    { token: /\{z\}/gi, value: coords?.z ?? WMTS_PREVIEW_COORDS.z },
+    { token: /\{x\}/gi, value: coords?.x ?? WMTS_PREVIEW_COORDS.x },
+    { token: /\{y\}/gi, value: coords?.y ?? WMTS_PREVIEW_COORDS.y }
+  ];
+  return replacements.reduce((acc, entry) => acc.replace(entry.token, entry.value), template);
+}
+
+const IMAGERY_OPTIONS = Object.freeze([
+  {
+    id: 'eox-s2',
+    label: 'EOX Satellite',
+    sourceId: 's2cloudless',
+    layerId: 's2cloudless',
+    tileTemplate: S2C_URL,
+    tileSize: 256,
+    attribution: EOX_ATTRIBUTION,
+    paint: {
+      'raster-opacity': S2_OPACITY,
+      'raster-fade-duration': S2_FADE_DURATION
+    }
+  },
+  {
+    id: 'ign-lidar-hd-mns-shadow',
+    label: 'IGN LiDAR MNS Shadow',
+    sourceId: 'ign-lidar-hd-mns-shadow',
+    layerId: 'ign-lidar-hd-mns-shadow',
+    tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNS_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION
+  },
+  {
+    id: 'ign-lidar-hd-mnt-shadow',
+    label: 'IGN LiDAR MNT Shadow',
+    sourceId: 'ign-lidar-hd-mnt-shadow',
+    layerId: 'ign-lidar-hd-mnt-shadow',
+    tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION
+  },
+  {
+    id: 'ign-orthophotos',
+    label: 'IGN Orthophotos',
+    sourceId: 'ign-orthophotos',
+    layerId: 'ign-orthophotos',
+    tileTemplate: createIgnTileTemplate('ORTHOIMAGERY.ORTHOPHOTOS.BDORTHO', 'image/jpeg'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION
+  },
+  {
+    id: 'ign-forest-inventory',
+    label: 'IGN Forest Inventory',
+    sourceId: 'ign-forest-inventory',
+    layerId: 'ign-forest-inventory',
+    tileTemplate: createIgnTileTemplate('LANDCOVER.FORESTINVENTORY.V2', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION
+  },
+  {
+    id: 'ign-cosia',
+    label: 'IGN COSIA 2021-2023',
+    sourceId: 'ign-cosia',
+    layerId: 'ign-cosia',
+    tileTemplate: createIgnTileTemplate('IGNF_COSIA_2021-2023', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION
+  }
+]);
+
+const IMAGERY_LAYER_IDS = new Set(IMAGERY_OPTIONS.map((option) => option.layerId));
+
+function getAvailableHillshadeMethods() {
+  const styleSpec = typeof maplibregl !== 'undefined' ? maplibregl?.styleSpec : null;
+  const methodDefinition = styleSpec?.paint_hillshade?.['hillshade-method'];
+  const { values } = methodDefinition ?? {};
+  if (!values) {
+    return [];
+  }
+  if (Array.isArray(values)) {
+    return values
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        if (entry && typeof entry === 'object' && 'value' in entry) return entry.value;
+        return null;
+      })
+      .filter((value) => typeof value === 'string' && value.length);
+  }
+  if (typeof values === 'object') {
+    return Object.keys(values).filter((key) => typeof key === 'string' && key.length);
+  }
+  return [];
+}
+
+function formatHillshadeMethodName(method) {
+  if (typeof method !== 'string' || !method.length) {
+    return '';
+  }
+  const normalized = method.toLowerCase();
+  const overrides = {
+    igor: 'Igor',
+    combined: 'Combined',
+    traditional: 'Traditional',
+    'multi-directional': 'Multi-directional',
+    mapbox: 'Mapbox',
+    default: 'Default'
+  };
+  if (overrides[normalized]) {
+    return overrides[normalized];
+  }
+  return method
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function applyUiIconSources(root = document) {
   if (!root || typeof root.querySelectorAll !== 'function') {
     return;
@@ -144,7 +272,7 @@ function setBaseStyleOpacity(map, alpha) {
     const id = layer.id;
     const type = layer.type;
 
-    if (['s2cloudless', 'color-relief', 'hillshade', 'contours', 'contour-text'].includes(id)) continue;
+    if (IMAGERY_LAYER_IDS.has(id) || ['color-relief', 'hillshade', 'contours', 'contour-text'].includes(id)) continue;
 
     const setIf = (prop, value) => {
       try {
@@ -1227,6 +1355,150 @@ async function init() {
   }
   updateViewToggle(currentViewMode);
 
+  const imageryToggle = document.getElementById('imageryToggle');
+  const imageryButtons = new Map();
+  let activeImageryId = IMAGERY_OPTIONS[0]?.id ?? null;
+
+  function ensureActiveImageryId() {
+    if (!IMAGERY_OPTIONS.length) {
+      activeImageryId = null;
+      return;
+    }
+    if (!activeImageryId || !IMAGERY_OPTIONS.some((option) => option.id === activeImageryId)) {
+      activeImageryId = IMAGERY_OPTIONS[0].id;
+    }
+  }
+
+  function updateImageryButtonStates() {
+    imageryButtons.forEach((button, id) => {
+      const isActive = id === activeImageryId;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-pressed', String(isActive));
+    });
+  }
+
+  function applyImageryVisibility() {
+    ensureActiveImageryId();
+    IMAGERY_OPTIONS.forEach((option) => {
+      if (!map.getLayer(option.layerId)) return;
+      const visibility = option.id === activeImageryId ? 'visible' : 'none';
+      map.setLayoutProperty(option.layerId, 'visibility', visibility);
+    });
+  }
+
+  if (imageryToggle) {
+    imageryToggle.textContent = '';
+    if (!IMAGERY_OPTIONS.length) {
+      imageryToggle.setAttribute('hidden', 'true');
+      imageryToggle.setAttribute('aria-hidden', 'true');
+    } else {
+      imageryToggle.removeAttribute('hidden');
+      imageryToggle.setAttribute('aria-hidden', 'false');
+      IMAGERY_OPTIONS.forEach((option) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'imagery-option';
+        button.dataset.imageryId = option.id;
+        button.setAttribute('aria-pressed', 'false');
+        button.setAttribute('title', option.label);
+
+        const previewUrl = createTilePreviewUrl(option.tileTemplate);
+        if (previewUrl) {
+          const thumb = document.createElement('span');
+          thumb.className = 'imagery-option__thumb';
+          const img = document.createElement('img');
+          img.src = previewUrl;
+          img.alt = '';
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          thumb.appendChild(img);
+          button.appendChild(thumb);
+        }
+
+        const label = document.createElement('span');
+        label.className = 'imagery-option__label';
+        label.textContent = option.label;
+        button.appendChild(label);
+
+        button.addEventListener('click', () => {
+          if (activeImageryId === option.id) return;
+          activeImageryId = option.id;
+          applyImageryVisibility();
+          updateImageryButtonStates();
+        });
+
+        imageryButtons.set(option.id, button);
+        imageryToggle.appendChild(button);
+      });
+      updateImageryButtonStates();
+    }
+  }
+
+  const hillshadeMethodButton = document.getElementById('cycleHillshadeMethod');
+  const hillshadeMethodLabel = hillshadeMethodButton?.querySelector('.hillshade-method-button__label') ?? null;
+  const hillshadeMethods = (() => {
+    const available = Array.from(new Set(getAvailableHillshadeMethods()));
+    if (!available.length) {
+      return ['igor', 'combined'];
+    }
+    ['igor', 'combined'].forEach((method) => {
+      if (!available.includes(method)) {
+        available.push(method);
+      }
+    });
+    return available;
+  })();
+
+  let currentHillshadeMethod = hillshadeMethods.includes('igor')
+    ? 'igor'
+    : (hillshadeMethods[0] ?? 'combined');
+  let hillshadeMethodIndex = Math.max(0, hillshadeMethods.indexOf(currentHillshadeMethod));
+
+  function updateHillshadeControl(method) {
+    if (!hillshadeMethodButton || !hillshadeMethodLabel) return;
+    const readable = formatHillshadeMethodName(method);
+    hillshadeMethodLabel.textContent = `Hillshade: ${readable}`;
+    hillshadeMethodButton.setAttribute('aria-label', `Cycle hillshade rendering (current: ${readable})`);
+    hillshadeMethodButton.setAttribute('title', `Cycle hillshade rendering (current: ${readable})`);
+  }
+
+  function setHillshadeMethodOnMap(method) {
+    if (!map.getLayer('hillshade')) return;
+
+    map.setPaintProperty('hillshade', 'hillshade-illumination-anchor', 'map');
+    map.setPaintProperty('hillshade', 'hillshade-illumination-direction', [270, 315, 0, 45]);
+    map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', [30, 30, 30, 30]);
+    map.setPaintProperty('hillshade', 'hillshade-method', method);
+
+    if (method === 'combined') {
+      map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.23);
+      map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.88)');
+      map.setPaintProperty('hillshade', 'hillshade-shadow-color', 'rgba(0,0,0,0.58)');
+    } else {
+      map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.24);
+      map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.9)');
+      map.setPaintProperty('hillshade', 'hillshade-shadow-color', 'rgba(0,0,0,0.6)');
+    }
+  }
+
+  function applyHillshadeMethod(method) {
+    currentHillshadeMethod = method;
+    hillshadeMethodIndex = Math.max(0, hillshadeMethods.indexOf(method));
+    updateHillshadeControl(method);
+    setHillshadeMethodOnMap(method);
+  }
+
+  if (hillshadeMethodButton) {
+    hillshadeMethodButton.disabled = hillshadeMethods.length <= 1;
+    updateHillshadeControl(currentHillshadeMethod);
+    hillshadeMethodButton.addEventListener('click', () => {
+      if (hillshadeMethods.length <= 1) return;
+      hillshadeMethodIndex = (hillshadeMethodIndex + 1) % hillshadeMethods.length;
+      const nextMethod = hillshadeMethods[hillshadeMethodIndex];
+      applyHillshadeMethod(nextMethod);
+    });
+  }
+
   async function applyOverlays() {
     const rmL = id => { if (map.getLayer(id)) map.removeLayer(id); };
     const rmS = id => { if (map.getSource(id)) map.removeSource(id); };
@@ -1241,12 +1513,12 @@ async function init() {
     rmL('contours');
     rmL('hillshade');
     rmL('color-relief');
-    rmL('s2cloudless');
+    IMAGERY_OPTIONS.forEach(option => rmL(option.layerId));
     rmS('contours');
     rmS('hillshadeSource');
     rmS('reliefDem');
     rmS('terrainSource');
-    rmS('s2cloudless');
+    IMAGERY_OPTIONS.forEach(option => rmS(option.sourceId));
 
     map.addSource('terrainSource', {
       type: 'raster-dem',
@@ -1298,22 +1570,38 @@ async function init() {
       }
     }, topLabelId || undefined);
 
-    map.addSource('s2cloudless', {
-      type: 'raster',
-      tiles: [S2C_URL],
-      tileSize: 256,
-      attribution: '<a href="https://www.eox.at/">© EOX</a>'
+    ensureActiveImageryId();
+
+    IMAGERY_OPTIONS.forEach((option) => {
+      map.addSource(option.sourceId, {
+        type: 'raster',
+        tiles: [option.tileTemplate],
+        tileSize: option.tileSize ?? 256,
+        attribution: option.attribution,
+        maxzoom: option.maxzoom ?? 19
+      });
+
+      const paint = {
+        'raster-opacity': 1,
+        'raster-fade-duration': TILE_FADE_DURATION
+      };
+      if (option.paint && typeof option.paint === 'object') {
+        Object.assign(paint, option.paint);
+      }
+
+      map.addLayer({
+        id: option.layerId,
+        type: 'raster',
+        source: option.sourceId,
+        paint,
+        layout: {
+          visibility: option.id === activeImageryId ? 'visible' : 'none'
+        }
+      }, topLabelId || undefined);
     });
 
-    map.addLayer({
-      id: 's2cloudless',
-      type: 'raster',
-      source: 's2cloudless',
-      paint: {
-        'raster-opacity': S2_OPACITY,
-        'raster-fade-duration': S2_FADE_DURATION
-      }
-    }, topLabelId || undefined);
+    applyImageryVisibility();
+    updateImageryButtonStates();
 
     map.addLayer({
       id: 'hillshade',
@@ -1326,6 +1614,8 @@ async function init() {
         'hillshade-shadow-color': 'rgba(0,0,0,0.55)'
       }
     }, topLabelId || undefined);
+
+    applyHillshadeMethod(currentHillshadeMethod);
 
     map.addSource('contours', {
       type: 'vector',
@@ -1390,54 +1680,14 @@ async function init() {
 
     syncTerrainAndSky();
 
-    const s2Btn = document.getElementById('toggleS2');
-    if (s2Btn) {
-      const vis = (map.getLayoutProperty('s2cloudless', 'visibility') || 'visible') !== 'none';
-      s2Btn.classList.toggle('active', vis);
-    }
-
     setBaseStyleOpacity(map, BASE_STYLE_RELIEF_OPACITY);
     updatePeakLabels(map);
   }
 
   map.on('style.load', applyOverlays);
-
-  const methodButtons = Array.from(document.querySelectorAll('.terrain-controls .btns .btn'));
-  const DEFAULT_METHOD = 'igor';
-  function setHillshadeMethod(method) {
-    methodButtons.forEach(b => b.classList.toggle('active', b.dataset.method === method));
-    if (!map.getLayer('hillshade')) return;
-
-    map.setPaintProperty('hillshade', 'hillshade-illumination-anchor', 'map');
-    map.setPaintProperty('hillshade', 'hillshade-illumination-direction', [270, 315, 0, 45]);
-    map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', [30, 30, 30, 30]);
-    map.setPaintProperty('hillshade', 'hillshade-method', method);
-
-    if (method === 'combined') {
-      map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.23);
-      map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.88)');
-      map.setPaintProperty('hillshade', 'hillshade-shadow-color', 'rgba(0,0,0,0.58)');
-    } else {
-      map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.24);
-      map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.9)');
-      map.setPaintProperty('hillshade', 'hillshade-shadow-color', 'rgba(0,0,0,0.6)');
-    }
-  }
-  methodButtons.forEach(btn => btn.addEventListener('click', () => setHillshadeMethod(btn.dataset.method)));
-  map.once('style.load', () => setHillshadeMethod(DEFAULT_METHOD));
+  map.once('style.load', () => applyHillshadeMethod(currentHillshadeMethod));
 
   map.once('style.load', () => applyViewMode(currentViewMode, { animate: false }));
-
-  const s2Btn = document.getElementById('toggleS2');
-  if (s2Btn) {
-    s2Btn.addEventListener('click', () => {
-      if (!map.getLayer('s2cloudless')) return;
-      const vis = map.getLayoutProperty('s2cloudless', 'visibility') || 'visible';
-      const next = vis === 'none' ? 'visible' : 'none';
-      map.setLayoutProperty('s2cloudless', 'visibility', next);
-      s2Btn.classList.toggle('active', next === 'visible');
-    });
-  }
 }
 
 init().catch((error) => {

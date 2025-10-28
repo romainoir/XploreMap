@@ -1035,10 +1035,9 @@ html, body { margin:0; height:100%; }
 }
 .hs-title { font-weight: 600; margin-bottom: 6px; }
 .terrain-controls { display:flex; flex-direction: column; align-items: stretch; gap:8px; }
-.btns { display:flex; gap:6px; flex-direction: column; }
-.terrain-controls .btns { flex: 1 1 auto; }
-.btns .btn { width: 100%; }
 .toggle-3d { width: 100%; }
+.hillshade-method-button { width: 100%; text-align: center; }
+.hillshade-method-button__label { font-size: 12px; font-weight: 600; }
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1130,16 +1129,65 @@ html, body { margin:0; height:100%; }
 .imagery-toggle {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index:2;
   background: rgba(255,255,255,.92); border-radius: 999px; padding: 6px 8px;
-  display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
   font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   box-shadow: 0 6px 18px rgba(0,0,0,.12);
   max-width: calc(100% - 20px);
 }
-.pill {
-  padding: 6px 10px; border-radius: 999px; border: 1px solid #ccc;
-  background:#fff; cursor:pointer; font-size:12px;
+.imagery-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(17, 34, 48, 0.16);
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(17, 34, 48, 0.82);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
-.pill.active { background:#111; color:#fff; border-color:#111; }
+.imagery-option:hover,
+.imagery-option:focus-visible {
+  background: rgba(17, 34, 48, 0.06);
+  border-color: rgba(17, 34, 48, 0.28);
+  outline: none;
+  box-shadow: 0 6px 16px rgba(17, 34, 48, 0.12);
+}
+.imagery-option.active {
+  background: rgba(17, 34, 48, 0.92);
+  color: #fff;
+  border-color: rgba(17, 34, 48, 0.92);
+  box-shadow: 0 8px 20px rgba(17, 34, 48, 0.2);
+}
+.imagery-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  background: #f1f3f5;
+  color: rgba(17, 34, 48, 0.45);
+  border-color: rgba(17, 34, 48, 0.18);
+}
+.imagery-option__thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(17, 34, 48, 0.12);
+}
+.imagery-option__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.imagery-option.active .imagery-option__thumb img {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.65);
+}
+.imagery-option__label { white-space: nowrap; }
 
 .vignette {
   position: absolute;
