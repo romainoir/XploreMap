@@ -1,4 +1,26 @@
 html, body { margin:0; height:100%; }
+
+:root {
+  --ui-scale: 1;
+}
+
+@media (max-resolution: 1dppx) {
+  :root {
+    --ui-scale: 0.95;
+  }
+}
+
+@media (min-resolution: 1.5dppx) {
+  :root {
+    --ui-scale: 1.1;
+  }
+}
+
+@media (min-resolution: 2.5dppx) {
+  :root {
+    --ui-scale: 1.25;
+  }
+}
 #map { position:absolute; inset:0; }
 
 .sr-only {
@@ -37,6 +59,8 @@ html, body { margin:0; height:100%; }
   background: rgba(5, 14, 22, 0.65);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   pointer-events: auto;
+  transform: scale(var(--ui-scale));
+  transform-origin: center;
 }
 
 .maplibre-preload__spinner {
@@ -69,19 +93,21 @@ html, body { margin:0; height:100%; }
 
 .ui {
   position: absolute;
-  top: 16px;
-  left: 16px;
+  top: calc(16px / var(--ui-scale));
+  left: calc(16px / var(--ui-scale));
   z-index: 3;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(320px, calc(100vw - 32px));
+  width: min(320px, calc((100vw - 32px) / var(--ui-scale)));
   padding: 18px 20px;
   border-radius: 18px;
   background: rgba(245, 248, 252, 0.94);
   box-shadow: 0 22px 44px rgba(13, 30, 45, 0.26);
   font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   backdrop-filter: blur(14px);
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
 }
 
 .ui__row {
@@ -452,17 +478,19 @@ html, body { margin:0; height:100%; }
 }
 
 .directions-control {
-    display: none;
-    width: min(100%, 960px);
-    max-width: 100%;
-    background: rgba(245, 248, 252, 0.94);
-    border-radius: 18px 18px 0 0;
-    padding: 22px 24px 26px;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
-    pointer-events: auto;
-    backdrop-filter: blur(10px);
-  }
+  display: none;
+  width: min(960px, calc((100% - 32px) / var(--ui-scale)));
+  max-width: 100%;
+  background: rgba(245, 248, 252, 0.94);
+  border-radius: 18px 18px 0 0;
+  padding: 22px 24px 26px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
+  transform: scale(var(--ui-scale));
+  transform-origin: bottom center;
+}
 
 .directions-dock[aria-hidden="false"] {
   pointer-events: auto;
