@@ -979,20 +979,19 @@ export class DirectionsManager {
       }
     };
 
-    if (this.routeLineGradientSupported) {
-      routeLineLayer.paint['line-gradient'] = this.getRouteLineGradientExpression();
-    }
-
     try {
       this.map.addLayer(routeLineLayer);
     } catch (error) {
       if (this.routeLineGradientSupported && this.isLineGradientUnsupportedError(error)) {
         this.disableRouteLineGradient();
-        delete routeLineLayer.paint['line-gradient'];
         this.map.addLayer(routeLineLayer);
       } else {
         throw error;
       }
+    }
+
+    if (this.routeLineGradientSupported) {
+      this.setRouteLineGradient();
     }
 
     this.map.addLayer({
