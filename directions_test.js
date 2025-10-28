@@ -859,6 +859,7 @@ export class DirectionsManager {
     this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
     this.elevationDomain = null;
+    this.routeLineGradientSupported = true;
     this.elevationChartContainer = null;
     this.elevationHoverReadout = null;
     this.highlightedElevationBar = null;
@@ -934,7 +935,8 @@ export class DirectionsManager {
 
     this.map.addSource('route-line-source', {
       type: 'geojson',
-      data: EMPTY_COLLECTION
+      data: EMPTY_COLLECTION,
+      lineMetrics: true
     });
 
     this.map.addSource('route-segments-source', {
@@ -962,7 +964,7 @@ export class DirectionsManager {
       data: EMPTY_COLLECTION
     });
 
-    this.map.addLayer({
+    const routeLineLayer = {
       id: 'route-line',
       type: 'line',
       source: 'route-line-source',
@@ -973,10 +975,25 @@ export class DirectionsManager {
       paint: {
         'line-color': ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]],
         'line-width': 4,
-        'line-opacity': 0.95,
-        'line-gradient': this.getRouteLineGradientExpression()
+        'line-opacity': 0.95
       }
-    });
+    };
+
+    if (this.routeLineGradientSupported) {
+      routeLineLayer.paint['line-gradient'] = this.getRouteLineGradientExpression();
+    }
+
+    try {
+      this.map.addLayer(routeLineLayer);
+    } catch (error) {
+      if (this.routeLineGradientSupported && this.isLineGradientUnsupportedError(error)) {
+        this.disableRouteLineGradient();
+        delete routeLineLayer.paint['line-gradient'];
+        this.map.addLayer(routeLineLayer);
+      } else {
+        throw error;
+      }
+    }
 
     this.map.addLayer({
       id: 'route-segment-hover',
@@ -2590,6 +2607,42 @@ export class DirectionsManager {
     ];
   }
 
+  isLineGradientUnsupportedError(error) {
+    if (!error || typeof error.message !== 'string') {
+      return false;
+    }
+    return error.message.includes('line-gradient') || error.message.includes('lineMetrics');
+  }
+
+  disableRouteLineGradient() {
+    if (!this.routeLineGradientSupported) {
+      return;
+    }
+    this.routeLineGradientSupported = false;
+    if (this.map.getLayer('route-line')) {
+      try {
+        this.map.setPaintProperty('route-line', 'line-gradient', null);
+      } catch (setError) {
+        // Ignore failures when clearing unsupported properties.
+      }
+    }
+  }
+
+  setRouteLineGradient() {
+    if (!this.routeLineGradientSupported || !this.map.getLayer('route-line')) {
+      return;
+    }
+    try {
+      this.map.setPaintProperty('route-line', 'line-gradient', this.getRouteLineGradientExpression());
+    } catch (error) {
+      if (this.isLineGradientUnsupportedError(error)) {
+        this.disableRouteLineGradient();
+      } else {
+        throw error;
+      }
+    }
+  }
+
   updateRouteLineSource() {
     const source = this.map.getSource('route-line-source');
     if (!source) {
@@ -2673,9 +2726,7 @@ export class DirectionsManager {
       features
     });
 
-    if (this.map.getLayer('route-line')) {
-      this.map.setPaintProperty('route-line', 'line-gradient', this.getRouteLineGradientExpression());
-    }
+    this.setRouteLineGradient();
 
     this.updateSegmentMarkers();
   }
@@ -4980,7 +5031,7 @@ export class DirectionsManager {
         'line-color',
         ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
       );
-      this.map.setPaintProperty('route-line', 'line-gradient', this.getRouteLineGradientExpression());
+      this.setRouteLineGradient();
     }
     if (this.map.getLayer('route-hover-point')) {
       this.map.setPaintProperty('route-hover-point', 'circle-stroke-color', this.modeColors[this.currentMode]);
