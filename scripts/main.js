@@ -181,6 +181,58 @@ function cloneExpression(expression) {
 }
 
 function scaleExpression(expression, factor) {
+  if (typeof expression === 'number') {
+    return expression * factor;
+  }
+
+  if (!Array.isArray(expression) || expression.length === 0) {
+    return ['*', cloneExpression(expression), factor];
+  }
+
+  const [operator, ...rest] = expression;
+
+  if (operator === 'interpolate') {
+    if (rest.length < 2) {
+      return ['*', cloneExpression(expression), factor];
+    }
+
+    const [curve, input, ...stops] = rest;
+    const scaledStops = stops.map((value, index) => {
+      if (index % 2 === 0) {
+        return cloneExpression(value);
+      }
+      return scaleExpression(value, factor);
+    });
+
+    return ['interpolate', cloneExpression(curve), cloneExpression(input), ...scaledStops];
+  }
+
+  if (operator === 'step') {
+    if (rest.length < 1) {
+      return ['*', cloneExpression(expression), factor];
+    }
+
+    const [input, ...stops] = rest;
+    if (!stops.length) {
+      return ['*', cloneExpression(expression), factor];
+    }
+
+    const [baseOutput, ...remaining] = stops;
+    const scaledStops = [scaleExpression(baseOutput, factor)];
+
+    for (let i = 0; i < remaining.length; i += 2) {
+      const stopInput = remaining[i];
+      const stopOutput = remaining[i + 1];
+      if (typeof stopInput === 'undefined' || typeof stopOutput === 'undefined') {
+        break;
+      }
+      scaledStops.push(cloneExpression(stopInput));
+      scaledStops.push(scaleExpression(stopOutput, factor));
+    }
+
+    return ['step', cloneExpression(input), ...scaledStops];
+  }
+
   return ['*', cloneExpression(expression), factor];
 }
 
@@ -1750,6 +1802,42 @@ async function init() {
         slider.value = String(state.opacity);
         slider.className = 'imagery-option__opacity';
         slider.setAttribute('aria-label', `${option.label} opacity`);
+
+        const restoreContainerDrag = () => {
+          if (container.dataset.dragDisabled === 'true') {
+            delete container.dataset.dragDisabled;
+            container.draggable = true;
+          }
+        };
+
+        const handlePointerEnd = (event) => {
+          if (event) {
+            event.stopPropagation();
+          }
+          restoreContainerDrag();
+          document.removeEventListener('pointerup', handlePointerEnd);
+          document.removeEventListener('pointercancel', handlePointerEnd);
+        };
+
+        slider.addEventListener('pointerdown', (event) => {
+          event.stopPropagation();
+          container.dataset.dragDisabled = 'true';
+          container.draggable = false;
+          document.addEventListener('pointerup', handlePointerEnd);
+          document.addEventListener('pointercancel', handlePointerEnd);
+        });
+
+        slider.addEventListener('click', (event) => {
+          event.stopPropagation();
+        });
+
+        slider.addEventListener('dragstart', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+
+        slider.addEventListener('blur', restoreContainerDrag);
+
         slider.addEventListener('input', () => {
           const current = imageryState.get(option.id);
           if (!current) return;
