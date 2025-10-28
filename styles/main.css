@@ -1220,19 +1220,27 @@ html, body { margin:0; height:100%; }
 }
 
 .imagery-option {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px 14px;
-  border-radius: 18px;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 20px;
   background: rgba(17, 34, 48, 0.05);
-  transition: background 0.2s ease, box-shadow 0.2s ease;
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .imagery-option.active {
   background: rgba(17, 34, 48, 0.12);
-  box-shadow: 0 12px 28px rgba(17, 34, 48, 0.22);
+  box-shadow: 0 14px 32px rgba(17, 34, 48, 0.24);
+}
+
+.imagery-option__preview {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
 .imagery-option__toggle {
@@ -1240,36 +1248,51 @@ html, body { margin:0; height:100%; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  height: 72px;
-  border-radius: 18px;
-  border: 1px solid rgba(17, 34, 48, 0.16);
+  width: 84px;
+  height: 84px;
+  border-radius: 22px;
+  border: 1px solid rgba(17, 34, 48, 0.18);
   background: rgba(255, 255, 255, 0.98);
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   padding: 0;
+  outline: none;
+}
+
+.imagery-option__toggle::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 28px;
+  border: 2px solid transparent;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  pointer-events: none;
 }
 
 .imagery-option__toggle:hover,
 .imagery-option__toggle:focus-visible {
   border-color: rgba(17, 34, 48, 0.32);
-  box-shadow: 0 10px 20px rgba(17, 34, 48, 0.18);
-  outline: none;
+  box-shadow: 0 12px 24px rgba(17, 34, 48, 0.2);
 }
 
 .imagery-option.active .imagery-option__toggle {
-  border-color: rgba(17, 34, 48, 0.45);
+  border-color: rgba(58, 183, 198, 0.75);
+}
+
+.imagery-option.active .imagery-option__toggle::after {
+  border-color: rgba(58, 183, 198, 0.9);
+  box-shadow: 0 0 0 4px rgba(58, 183, 198, 0.25);
 }
 
 .imagery-option__thumb {
-  width: 64px;
-  height: 64px;
-  border-radius: 14px;
+  width: 76px;
+  height: 76px;
+  border-radius: 18px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(17, 34, 48, 0.1);
+  background: rgba(17, 34, 48, 0.12);
 }
 
 .imagery-option__thumb img {
@@ -1279,19 +1302,67 @@ html, body { margin:0; height:100%; }
   display: block;
 }
 
+.imagery-option__opacity-wrapper {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(17, 34, 48, 0.62);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 12px 26px rgba(17, 34, 48, 0.28);
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.imagery-option__opacity-wrapper:hover,
+.imagery-option__opacity-wrapper:focus-within {
+  background: rgba(17, 34, 48, 0.75);
+}
+
+.imagery-option__opacity-wrapper.active {
+  background: rgba(58, 183, 198, 0.82);
+  box-shadow: 0 16px 32px rgba(17, 34, 48, 0.32);
+}
+
 .imagery-option__opacity {
   width: 100%;
   accent-color: #3ab7c6;
   cursor: pointer;
+  background: transparent;
 }
 
 .imagery-option__opacity:focus-visible {
-  outline: 2px solid rgba(58, 183, 198, 0.55);
-  outline-offset: 2px;
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 4px;
 }
 
-.imagery-option:not(.active) .imagery-option__opacity {
-  opacity: 0.75;
+.imagery-option--dragging {
+  opacity: 0.6;
+  transform: scale(0.97);
+}
+
+.imagery-option--drag-over-before::before,
+.imagery-option--drag-over-after::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  height: 0;
+  border-top: 2px solid rgba(58, 183, 198, 0.95);
+  box-shadow: 0 0 6px rgba(58, 183, 198, 0.45);
+}
+
+.imagery-option--drag-over-before::before {
+  top: -4px;
+}
+
+.imagery-option--drag-over-after::before {
+  bottom: -4px;
 }
 
 @media (max-width: 720px) {

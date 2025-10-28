@@ -131,6 +131,7 @@ const IMAGERY_OPTIONS = Object.freeze([
 ]);
 
 const IMAGERY_LAYER_IDS = new Set(IMAGERY_OPTIONS.map((option) => option.layerId));
+const IMAGERY_OPTIONS_BY_ID = new Map(IMAGERY_OPTIONS.map((option) => [option.id, option]));
 
 function getAvailableHillshadeMethods() {
   const styleSpec = typeof maplibregl !== 'undefined' ? maplibregl?.styleSpec : null;
@@ -1369,6 +1370,8 @@ async function init() {
   const imageryPanelDrawer = document.getElementById('imageryPanelDrawer');
   const imageryToggle = document.getElementById('imageryToggle');
   const imageryControls = new Map();
+  let imageryOrder = IMAGERY_OPTIONS.map((option) => option.id);
+  let dragSourceImageryId = null;
 
   function clampOpacity(value) {
     if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -1390,6 +1393,94 @@ async function init() {
       opacity: defaultOpacity
     });
   });
+
+  function updateImageryDomOrder() {
+    if (!imageryToggle) return;
+    imageryOrder.forEach((id) => {
+      const control = imageryControls.get(id);
+      if (!control?.container) return;
+      imageryToggle.appendChild(control.container);
+    });
+  }
+
+  function applyImageryLayerOrder() {
+    if (!map || typeof map.moveLayer !== 'function') return;
+    const style = typeof map.getStyle === 'function' ? map.getStyle() : null;
+    const layers = style?.layers;
+    if (!Array.isArray(layers)) {
+      return;
+    }
+    let topLabelId = null;
+    for (let i = layers.length - 1; i >= 0; i -= 1) {
+      const layer = layers[i];
+      if (!layer) continue;
+      if (layer.type === 'symbol') {
+        topLabelId = layer.id;
+        break;
+      }
+    }
+
+    const orderedLayerIds = imageryOrder
+      .map((id) => IMAGERY_OPTIONS_BY_ID.get(id)?.layerId)
+      .filter((layerId) => typeof layerId === 'string' && map.getLayer(layerId));
+
+    let beforeId = topLabelId ?? undefined;
+    for (let i = orderedLayerIds.length - 1; i >= 0; i -= 1) {
+      const layerId = orderedLayerIds[i];
+      if (!layerId) continue;
+      if (beforeId) {
+        if (beforeId !== layerId) {
+          map.moveLayer(layerId, beforeId);
+        }
+      } else {
+        map.moveLayer(layerId);
+      }
+      beforeId = layerId;
+    }
+  }
+
+  function moveImageryOption(sourceId, targetId, placeBeforeTarget) {
+    if (sourceId === targetId) {
+      return;
+    }
+    const sourceIndex = imageryOrder.indexOf(sourceId);
+    const targetIndex = imageryOrder.indexOf(targetId);
+    if (sourceIndex === -1 || targetIndex === -1) {
+      return;
+    }
+    imageryOrder.splice(sourceIndex, 1);
+    const updatedTargetIndex = imageryOrder.indexOf(targetId);
+    if (updatedTargetIndex === -1) {
+      return;
+    }
+    const insertionIndex = placeBeforeTarget ? updatedTargetIndex : updatedTargetIndex + 1;
+    imageryOrder.splice(insertionIndex, 0, sourceId);
+    updateImageryDomOrder();
+    applyImageryLayerOrder();
+  }
+
+  function moveImageryOptionToBoundary(sourceId, toStart) {
+    const index = imageryOrder.indexOf(sourceId);
+    if (index === -1) {
+      return;
+    }
+    imageryOrder.splice(index, 1);
+    if (toStart) {
+      imageryOrder.unshift(sourceId);
+    } else {
+      imageryOrder.push(sourceId);
+    }
+    updateImageryDomOrder();
+    applyImageryLayerOrder();
+  }
+
+  function resetDragIndicators() {
+    if (!imageryToggle) return;
+    const dragNodes = imageryToggle.querySelectorAll('.imagery-option--dragging, .imagery-option--drag-over-before, .imagery-option--drag-over-after');
+    dragNodes.forEach((node) => {
+      node.classList.remove('imagery-option--dragging', 'imagery-option--drag-over-before', 'imagery-option--drag-over-after');
+    });
+  }
 
   function setImageryPanelOpen(isOpen) {
     if (!imageryPanelDrawer) return;
@@ -1417,6 +1508,9 @@ async function init() {
       }
       if (control.slider && state) {
         control.slider.value = String(state.opacity);
+      }
+      if (control.sliderWrapper) {
+        control.sliderWrapper.classList.toggle('active', isActive);
       }
     });
   }
@@ -1467,6 +1561,52 @@ async function init() {
         container.className = 'imagery-option';
         container.dataset.imageryId = option.id;
 
+        container.setAttribute('draggable', 'true');
+
+        container.addEventListener('dragstart', (event) => {
+          dragSourceImageryId = option.id;
+          resetDragIndicators();
+          container.classList.add('imagery-option--dragging');
+          if (event?.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', option.id);
+          }
+        });
+
+        container.addEventListener('dragend', () => {
+          dragSourceImageryId = null;
+          resetDragIndicators();
+        });
+
+        container.addEventListener('dragover', (event) => {
+          if (!dragSourceImageryId || dragSourceImageryId === option.id) return;
+          event.preventDefault();
+          if (event?.dataTransfer) {
+            event.dataTransfer.dropEffect = 'move';
+          }
+          const rect = container.getBoundingClientRect();
+          const before = event.clientY < rect.top + (rect.height / 2);
+          container.classList.toggle('imagery-option--drag-over-before', before);
+          container.classList.toggle('imagery-option--drag-over-after', !before);
+        });
+
+        container.addEventListener('dragleave', () => {
+          container.classList.remove('imagery-option--drag-over-before', 'imagery-option--drag-over-after');
+        });
+
+        container.addEventListener('drop', (event) => {
+          if (!dragSourceImageryId || dragSourceImageryId === option.id) return;
+          event.preventDefault();
+          const rect = container.getBoundingClientRect();
+          const before = event.clientY < rect.top + (rect.height / 2);
+          moveImageryOption(dragSourceImageryId, option.id, before);
+          dragSourceImageryId = null;
+          resetDragIndicators();
+        });
+
+        const preview = document.createElement('div');
+        preview.className = 'imagery-option__preview';
+
         const toggleButton = document.createElement('button');
         toggleButton.type = 'button';
         toggleButton.className = 'imagery-option__toggle';
@@ -1504,7 +1644,13 @@ async function init() {
           }
           applyImageryState();
           updateImageryControlStates();
+          applyImageryLayerOrder();
         });
+
+        preview.appendChild(toggleButton);
+
+        const sliderWrapper = document.createElement('div');
+        sliderWrapper.className = 'imagery-option__opacity-wrapper';
 
         const slider = document.createElement('input');
         slider.type = 'range';
@@ -1522,14 +1668,47 @@ async function init() {
           current.enabled = value > 0;
           applyImageryState();
           updateImageryControlStates();
+          applyImageryLayerOrder();
         });
 
-        container.appendChild(toggleButton);
-        container.appendChild(slider);
-        imageryControls.set(option.id, { container, button: toggleButton, slider });
+        sliderWrapper.appendChild(slider);
+        preview.appendChild(sliderWrapper);
+        container.appendChild(preview);
+
+        imageryControls.set(option.id, { container, button: toggleButton, slider, sliderWrapper });
         imageryToggle.appendChild(container);
       });
       updateImageryControlStates();
+      updateImageryDomOrder();
+      if (!imageryToggle.dataset.dragHandlersBound) {
+        imageryToggle.addEventListener('dragover', (event) => {
+          if (!dragSourceImageryId) return;
+          const targetOption = event.target?.closest?.('.imagery-option');
+          if (targetOption) {
+            return;
+          }
+          event.preventDefault();
+          if (event?.dataTransfer) {
+            event.dataTransfer.dropEffect = 'move';
+          }
+        });
+
+        imageryToggle.addEventListener('drop', (event) => {
+          if (!dragSourceImageryId) return;
+          const targetOption = event.target?.closest?.('.imagery-option');
+          if (targetOption) {
+            return;
+          }
+          event.preventDefault();
+          const rect = imageryToggle.getBoundingClientRect();
+          const toStart = event.clientY < rect.top + (rect.height / 2);
+          moveImageryOptionToBoundary(dragSourceImageryId, toStart);
+          dragSourceImageryId = null;
+          resetDragIndicators();
+        });
+
+        imageryToggle.dataset.dragHandlersBound = 'true';
+      }
     }
   }
 
@@ -1701,6 +1880,7 @@ async function init() {
       }, topLabelId || undefined);
     });
 
+    applyImageryLayerOrder();
     applyImageryState();
     updateImageryControlStates();
 
