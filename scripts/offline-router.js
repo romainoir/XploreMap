@@ -1009,6 +1009,16 @@ export class OfflineRouter {
         const distanceKm = Number(entry.distanceKm) || 0;
         const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
         const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
+        const hiking = entry.hiking && typeof entry.hiking === 'object'
+          ? { ...entry.hiking }
+          : null;
+        const sacScaleValue = typeof entry.sacScale === 'string' ? entry.sacScale : hiking?.sacScale;
+        const surfaceValue = typeof entry.surface === 'string' ? entry.surface : hiking?.surface;
+        const trailValue = typeof entry.trailVisibility === 'string'
+          ? entry.trailVisibility
+          : hiking?.trailVisibility;
+        const smoothnessValue = typeof entry.smoothness === 'string' ? entry.smoothness : hiking?.smoothness;
+        const trackTypeValue = typeof entry.trackType === 'string' ? entry.trackType : hiking?.trackType;
         coordinateMetadata.push({
           distanceKm,
           ascent: Number(entry.ascent) || 0,
@@ -1020,7 +1030,13 @@ export class OfflineRouter {
           start: Array.isArray(entry.start) ? entry.start.slice() : null,
           end: Array.isArray(entry.end) ? entry.end.slice() : null,
           startDistanceKm: startKm,
-          endDistanceKm: endKm
+          endDistanceKm: endKm,
+          ...(hiking ? { hiking } : {}),
+          ...(typeof sacScaleValue === 'string' && sacScaleValue ? { sacScale: sacScaleValue } : {}),
+          ...(typeof surfaceValue === 'string' && surfaceValue ? { surface: surfaceValue } : {}),
+          ...(typeof trailValue === 'string' && trailValue ? { trailVisibility: trailValue } : {}),
+          ...(typeof smoothnessValue === 'string' && smoothnessValue ? { smoothness: smoothnessValue } : {}),
+          ...(typeof trackTypeValue === 'string' && trackTypeValue ? { trackType: trackTypeValue } : {})
         });
       });
       segments.push({
