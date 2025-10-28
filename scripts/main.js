@@ -165,6 +165,17 @@ const ROUTE_LAYER_IDS = new Set([
   'segment-markers'
 ]);
 
+const ROUTE_LAYER_ORDER_TOP_TO_BOTTOM = Object.freeze([
+  'route-hover-point',
+  'waypoint-hover-drag',
+  'waypoints',
+  'segment-markers',
+  'waypoints-hit-area',
+  'distance-markers',
+  'route-segment-hover',
+  'route-line'
+]);
+
 const CONTOUR_LINE_BASE_OPACITY = Object.freeze([
   'interpolate', ['linear'], ['zoom'],
   13.4, 0,
@@ -1581,6 +1592,21 @@ async function init() {
         beforeId = layerId;
       }
     }
+
+    const routeLayers = ROUTE_LAYER_ORDER_TOP_TO_BOTTOM.filter((layerId) => map.getLayer(layerId));
+    let previousTopLayerId = null;
+    for (let i = 0; i < routeLayers.length; i += 1) {
+      const layerId = routeLayers[i];
+      if (!layerId) continue;
+      if (!previousTopLayerId) {
+        map.moveLayer(layerId);
+      } else if (layerId !== previousTopLayerId) {
+        map.moveLayer(layerId, previousTopLayerId);
+      }
+      previousTopLayerId = layerId;
+    }
+
+    bringDebugNetworkToFront();
   }
 
   function moveImageryOption(sourceId, targetId, placeBeforeTarget) {
@@ -1771,15 +1797,14 @@ async function init() {
           ? option.previewImage
           : createTilePreviewUrl(option.tileTemplate);
         if (previewUrl) {
-          const thumb = document.createElement('span');
-          thumb.className = 'imagery-option__thumb';
           const img = document.createElement('img');
           img.src = previewUrl;
           img.alt = '';
           img.loading = 'lazy';
           img.decoding = 'async';
-          thumb.appendChild(img);
-          toggleButton.appendChild(thumb);
+          img.draggable = false;
+          img.className = 'imagery-option__thumb';
+          toggleButton.appendChild(img);
         }
 
         const srLabel = document.createElement('span');
