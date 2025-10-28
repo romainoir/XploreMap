@@ -3,6 +3,53 @@ const PATH_CLASSES = new Set(['path', 'footway', 'pedestrian', 'steps']);
 const PATH_SUBCLASSES = new Set(['path', 'footway', 'trail', 'steps', 'bridleway', 'via_ferrata']);
 const CYCLE_CLASSES = new Set(['cycleway']);
 const ROAD_CLASSES = new Set(['service', 'residential', 'unclassified', 'minor', 'track', 'tertiary', 'secondary', 'primary', 'trunk', 'motorway']);
+const SAC_SCALE_RANK = Object.freeze({
+  hiking: 1,
+  mountain_hiking: 2,
+  demanding_mountain_hiking: 3,
+  alpine_hiking: 4,
+  demanding_alpine_hiking: 5,
+  difficult_alpine_hiking: 6
+});
+
+const TRAIL_VISIBILITY_RANK = Object.freeze({
+  excellent: 1,
+  good: 2,
+  intermediate: 3,
+  bad: 4,
+  horrible: 5,
+  no: 6
+});
+
+const SURFACE_RANK = Object.freeze({
+  paved: 1,
+  asphalt: 1,
+  concrete: 1,
+  'concrete:lanes': 1,
+  paving_stones: 1,
+  sett: 1,
+  cobblestone: 1,
+  compacted: 2,
+  fine_gravel: 2,
+  gravel_turf: 2,
+  dirt: 3,
+  earth: 3,
+  ground: 3,
+  gravel: 3,
+  grass: 3,
+  mud: 3,
+  sand: 3,
+  scree: 4,
+  rock: 4,
+  stone: 4,
+  pebblestone: 4,
+  shingle: 4,
+  bare_rock: 4,
+  glacier: 5,
+  snow: 5,
+  ice: 5
+});
+
 const DEFAULT_OPTIONS = Object.freeze({
   sourceId: 'openmaptiles',
   sourceLayer: 'transportation',
@@ -220,6 +267,123 @@ function determineCostMultiplier(properties) {
   return 1;
 }
 
+function normalizeTagString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed;
+}
+
+function normalizeSacScaleValue(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  if (SAC_SCALE_RANK[lower]) {
+    return lower;
+  }
+  const alias = {
+    t1: 'hiking',
+    t2: 'mountain_hiking',
+    t3: 'demanding_mountain_hiking',
+    t4: 'alpine_hiking',
+    t5: 'demanding_alpine_hiking',
+    t6: 'difficult_alpine_hiking'
+  }[lower];
+  return alias || null;
+}
+
+function normalizeTrailVisibilityValue(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  return TRAIL_VISIBILITY_RANK[lower] ? lower : null;
+}
+
+function normalizeSurfaceValue(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  return SURFACE_RANK[lower] ? lower : lower;
+}
+
+function collectHikingAttributes(properties) {
+  if (!properties || typeof properties !== 'object') {
+    return null;
+  }
+  const sacScale = normalizeSacScaleValue(properties.sacScale ?? properties.sac_scale);
+  const trailVisibility = normalizeTrailVisibilityValue(properties.trailVisibility ?? properties.trail_visibility);
+  const surface = normalizeSurfaceValue(properties.surface);
+  const smoothness = normalizeTagString(properties.smoothness);
+  const trackType = normalizeTagString(properties.trackType ?? properties.tracktype ?? properties.track_type);
+  const attributes = {};
+  if (sacScale) {
+    attributes.sacScale = sacScale;
+  }
+  if (trailVisibility) {
+    attributes.trailVisibility = trailVisibility;
+  }
+  if (surface) {
+    attributes.surface = surface;
+  }
+  if (smoothness) {
+    attributes.smoothness = smoothness;
+  }
+  if (trackType) {
+    attributes.trackType = trackType;
+  }
+  return Object.keys(attributes).length ? attributes : null;
+}
+
+function mergeHikingAttributes(current, next) {
+  if (!current) {
+    return next ? { ...next } : null;
+  }
+  if (!next) {
+    return { ...current };
+  }
+  const merged = { ...current };
+  const currentSac = current.sacScale;
+  const nextSac = next.sacScale;
+  if (nextSac) {
+    const currentRank = currentSac ? (SAC_SCALE_RANK[currentSac] || 0) : 0;
+    const nextRank = SAC_SCALE_RANK[nextSac] || 0;
+    if (!currentSac || nextRank > currentRank) {
+      merged.sacScale = nextSac;
+    }
+  }
+  if (next.trailVisibility) {
+    const currentRank = merged.trailVisibility ? (TRAIL_VISIBILITY_RANK[merged.trailVisibility] || 0) : 0;
+    const nextRank = TRAIL_VISIBILITY_RANK[next.trailVisibility] || 0;
+    if (!merged.trailVisibility || nextRank > currentRank) {
+      merged.trailVisibility = next.trailVisibility;
+    }
+  }
+  if (next.surface) {
+    const currentRank = merged.surface ? (SURFACE_RANK[merged.surface] || 0) : 0;
+    const nextRank = SURFACE_RANK[next.surface] || 0;
+    if (!merged.surface || nextRank > currentRank) {
+      merged.surface = next.surface;
+    }
+  }
+  if (next.smoothness && !merged.smoothness) {
+    merged.smoothness = next.smoothness;
+  }
+  if (next.trackType && !merged.trackType) {
+    merged.trackType = next.trackType;
+  }
+  return merged;
+}
+
 function determineSupportedModes(properties) {
   const modes = new Set();
   const cls = normalizeValue(properties?.class);
@@ -294,6 +458,12 @@ function addLineFeature(collectionMap, coords, baseProps, precision) {
     if (baseProps.name && !existing.properties.name) {
       existing.properties.name = baseProps.name;
     }
+    if (baseProps.hiking) {
+      const merged = mergeHikingAttributes(existing.properties?.hiking, baseProps.hiking);
+      if (merged) {
+        existing.properties.hiking = merged;
+      }
+    }
     collectionMap.set(key, existing);
     return;
   }
@@ -303,6 +473,9 @@ function addLineFeature(collectionMap, coords, baseProps, precision) {
   }
   if (Number.isFinite(baseProps.costMultiplier) && baseProps.costMultiplier !== 1) {
     properties.costMultiplier = Number(baseProps.costMultiplier.toFixed ? baseProps.costMultiplier.toFixed(3) : baseProps.costMultiplier);
+  }
+  if (baseProps.hiking) {
+    properties.hiking = { ...baseProps.hiking };
   }
   collectionMap.set(key, {
     type: 'Feature',
@@ -372,7 +545,8 @@ export async function extractOpenFreeMapNetwork(map, options = {}) {
     const name = typeof properties?.name === 'string' && properties.name.trim().length
       ? properties.name.trim()
       : null;
-    const baseProps = { modes, costMultiplier, name };
+    const hiking = collectHikingAttributes(properties || {});
+    const baseProps = { modes, costMultiplier, name, hiking };
 
     if (geometry.type === 'LineString') {
       addLineFeature(featuresByGeometry, geometry.coordinates, baseProps, coordinatePrecision);

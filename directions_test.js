@@ -115,6 +115,100 @@ const SEGMENT_MARKER_ICONS = {
   end: END_MARKER_ICON_ID
 };
 
+const SAC_SCALE_RANK = Object.freeze({
+  hiking: 1,
+  mountain_hiking: 2,
+  demanding_mountain_hiking: 3,
+  alpine_hiking: 4,
+  demanding_alpine_hiking: 5,
+  difficult_alpine_hiking: 6
+});
+
+const TRAIL_VISIBILITY_RANK = Object.freeze({
+  excellent: 1,
+  good: 2,
+  intermediate: 3,
+  bad: 4,
+  horrible: 5,
+  no: 6
+});
+
+const SURFACE_SEVERITY_RANK = Object.freeze({
+  paved: 1,
+  asphalt: 1,
+  concrete: 1,
+  'concrete:lanes': 1,
+  paving_stones: 1,
+  sett: 1,
+  cobblestone: 1,
+  compacted: 2,
+  fine_gravel: 2,
+  gravel_turf: 2,
+  dirt: 3,
+  earth: 3,
+  ground: 3,
+  gravel: 3,
+  grass: 3,
+  mud: 3,
+  sand: 3,
+  scree: 4,
+  rock: 4,
+  stone: 4,
+  pebblestone: 4,
+  shingle: 4,
+  bare_rock: 4,
+  glacier: 5,
+  snow: 5,
+  ice: 5
+});
+
+const TRAIL_VISIBILITY_VALUES = new Set(Object.keys(TRAIL_VISIBILITY_RANK));
+
+function normalizeTagString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeSacScale(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  if (SAC_SCALE_RANK[lower]) {
+    return lower;
+  }
+  const alias = {
+    t1: 'hiking',
+    t2: 'mountain_hiking',
+    t3: 'demanding_mountain_hiking',
+    t4: 'alpine_hiking',
+    t5: 'demanding_alpine_hiking',
+    t6: 'difficult_alpine_hiking'
+  }[lower];
+  return alias || null;
+}
+
+function normalizeTrailVisibility(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  return TRAIL_VISIBILITY_VALUES.has(lower) ? lower : null;
+}
+
+function normalizeSurfaceType(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  return normalized.toLowerCase().replace(/\s+/g, '_');
+}
+
 const SLOPE_CLASSIFICATIONS = Object.freeze([
   { key: 'slope-very-steep-descent', label: 'Very steep descent (<-18%)', color: '#0b3d91', maxGrade: -18, maxInclusive: false },
   { key: 'slope-steep-descent', label: 'Steep descent (-18% to -12%)', color: '#1f5fa5', minGrade: -18, minInclusive: true, maxGrade: -12, maxInclusive: false },
@@ -126,19 +220,92 @@ const SLOPE_CLASSIFICATIONS = Object.freeze([
 ]);
 
 const SURFACE_CLASSIFICATIONS = Object.freeze([
-  { key: 'surface-paved', label: 'Paved road', color: '#5d6d7e', maxMultiplier: 0.95, maxInclusive: true },
-  { key: 'surface-compact', label: 'Compact surface', color: '#2ecc71', minMultiplier: 0.95, minInclusive: false, maxMultiplier: 1.05, maxInclusive: true },
-  { key: 'surface-dirt', label: 'Dirt / gravel', color: '#d4ac0d', minMultiplier: 1.05, minInclusive: false, maxMultiplier: 1.15, maxInclusive: true },
-  { key: 'surface-rocky', label: 'Rocky trail', color: '#e67e22', minMultiplier: 1.15, minInclusive: false, maxMultiplier: 1.3, maxInclusive: true },
-  { key: 'surface-alpine', label: 'Glacier / alpine', color: '#c0392b', minMultiplier: 1.3, minInclusive: false }
+  {
+    key: 'surface-paved',
+    label: 'Paved road',
+    color: '#5d6d7e',
+    maxMultiplier: 0.95,
+    maxInclusive: true,
+    surfaceValues: Object.freeze(['paved', 'asphalt', 'concrete', 'concrete:lanes', 'paving_stones', 'sett', 'cobblestone'])
+  },
+  {
+    key: 'surface-compact',
+    label: 'Compact surface',
+    color: '#2ecc71',
+    minMultiplier: 0.95,
+    minInclusive: false,
+    maxMultiplier: 1.05,
+    maxInclusive: true,
+    surfaceValues: Object.freeze(['compacted', 'fine_gravel', 'gravel_turf'])
+  },
+  {
+    key: 'surface-dirt',
+    label: 'Dirt / gravel',
+    color: '#d4ac0d',
+    minMultiplier: 1.05,
+    minInclusive: false,
+    maxMultiplier: 1.15,
+    maxInclusive: true,
+    surfaceValues: Object.freeze(['dirt', 'earth', 'ground', 'gravel', 'grass', 'mud', 'sand'])
+  },
+  {
+    key: 'surface-rocky',
+    label: 'Rocky trail',
+    color: '#e67e22',
+    minMultiplier: 1.15,
+    minInclusive: false,
+    maxMultiplier: 1.3,
+    maxInclusive: true,
+    surfaceValues: Object.freeze(['scree', 'rock', 'stone', 'pebblestone', 'shingle', 'bare_rock'])
+  },
+  {
+    key: 'surface-alpine',
+    label: 'Glacier / alpine',
+    color: '#c0392b',
+    minMultiplier: 1.3,
+    minInclusive: false,
+    surfaceValues: Object.freeze(['glacier', 'snow', 'ice'])
+  }
 ]);
 
 const CATEGORY_CLASSIFICATIONS = Object.freeze([
-  { key: 'category-t1', label: 'T1 · Easy hike', color: '#2ecc71', maxMultiplier: 1, maxGrade: 8 },
-  { key: 'category-t2', label: 'T2 · Mountain trail', color: '#27ae60', maxMultiplier: 1.1, maxGrade: 12 },
-  { key: 'category-t3', label: 'T3 · Alpine hike', color: '#f39c12', maxMultiplier: 1.2, maxGrade: 18 },
-  { key: 'category-t4', label: 'T4 · Alpine route', color: '#e67e22', maxMultiplier: 1.35 },
-  { key: 'category-t5', label: 'T5+ · Technical alpine', color: '#c0392b' }
+  {
+    key: 'category-t1',
+    label: 'T1 · Easy hike',
+    color: '#2ecc71',
+    maxMultiplier: 1,
+    maxGrade: 8,
+    sacScaleValues: Object.freeze(['hiking'])
+  },
+  {
+    key: 'category-t2',
+    label: 'T2 · Mountain trail',
+    color: '#27ae60',
+    maxMultiplier: 1.1,
+    maxGrade: 12,
+    sacScaleValues: Object.freeze(['mountain_hiking'])
+  },
+  {
+    key: 'category-t3',
+    label: 'T3 · Alpine hike',
+    color: '#f39c12',
+    maxMultiplier: 1.2,
+    maxGrade: 18,
+    sacScaleValues: Object.freeze(['demanding_mountain_hiking'])
+  },
+  {
+    key: 'category-t4',
+    label: 'T4 · Alpine route',
+    color: '#e67e22',
+    maxMultiplier: 1.35,
+    sacScaleValues: Object.freeze(['alpine_hiking'])
+  },
+  {
+    key: 'category-t5',
+    label: 'T5+ · Technical alpine',
+    color: '#c0392b',
+    sacScaleValues: Object.freeze(['demanding_alpine_hiking', 'difficult_alpine_hiking'])
+  }
 ]);
 
 const PROFILE_MODE_DEFINITIONS = Object.freeze({
@@ -1148,12 +1315,53 @@ export class DirectionsManager {
     const metadata = segment.metadata && typeof segment.metadata === 'object'
       ? segment.metadata
       : null;
+    const metadataEntries = Array.isArray(segment.metadata)
+      ? segment.metadata
+          .map((entry) => (entry && typeof entry === 'object' ? entry : null))
+          .filter(Boolean)
+      : [];
     const distanceKm = Number(segment.distanceKm ?? metadata?.distanceKm);
-    const startDistanceKm = Number(metadata?.startDistanceKm ?? segment.startDistanceKm);
-    const endDistanceKm = Number(metadata?.endDistanceKm ?? segment.endDistanceKm);
+    const startDistanceKm = Number(metadata?.startDistanceKm ?? metadata?.cumulativeStartKm ?? segment.startDistanceKm);
+    const endDistanceKm = Number(metadata?.endDistanceKm ?? metadata?.cumulativeEndKm ?? segment.endDistanceKm);
     const ascent = Number(metadata?.ascent ?? segment.ascent ?? 0);
     const descent = Number(metadata?.descent ?? segment.descent ?? 0);
     const costMultiplier = Number(metadata?.costMultiplier);
+
+    let sacScale = null;
+    let sacRank = -Infinity;
+    let surface = null;
+    let surfaceRank = -Infinity;
+    let trailVisibility = null;
+    let trailRank = -Infinity;
+
+    metadataEntries.forEach((entry) => {
+      const hiking = entry.hiking && typeof entry.hiking === 'object' ? entry.hiking : null;
+      const normalizedSacScale = normalizeSacScale(hiking?.sacScale ?? entry.sacScale);
+      const normalizedSurface = normalizeSurfaceType(hiking?.surface ?? entry.surface);
+      const normalizedTrail = normalizeTrailVisibility(hiking?.trailVisibility ?? entry.trailVisibility);
+      if (normalizedSacScale) {
+        const rank = SAC_SCALE_RANK[normalizedSacScale] || 0;
+        if (rank > sacRank) {
+          sacRank = rank;
+          sacScale = normalizedSacScale;
+        }
+      }
+      if (normalizedSurface) {
+        const rank = SURFACE_SEVERITY_RANK[normalizedSurface] || 0;
+        if (rank > surfaceRank) {
+          surfaceRank = rank;
+          surface = normalizedSurface;
+        }
+      }
+      if (normalizedTrail) {
+        const rank = TRAIL_VISIBILITY_RANK[normalizedTrail] || 0;
+        if (rank > trailRank) {
+          trailRank = rank;
+          trailVisibility = normalizedTrail;
+        }
+      }
+    });
+
     return {
       distanceKm: Number.isFinite(distanceKm) ? distanceKm : Math.max(0, (endDistanceKm ?? 0) - (startDistanceKm ?? 0)),
       startDistanceKm: Number.isFinite(startDistanceKm) ? startDistanceKm : null,
@@ -1161,7 +1369,10 @@ export class DirectionsManager {
       ascent: Number.isFinite(ascent) ? ascent : 0,
       descent: Number.isFinite(descent) ? descent : 0,
       costMultiplier: Number.isFinite(costMultiplier) && costMultiplier > 0 ? costMultiplier : 1,
-      source: metadata?.source ?? 'network'
+      source: metadata?.source ?? 'network',
+      sacScale,
+      surface,
+      trailVisibility
     };
   }
 
@@ -1206,6 +1417,14 @@ export class DirectionsManager {
 
   classifySurfaceSegment(segment) {
     const metadata = this.getSegmentMetadata(segment);
+    const surfaceTag = normalizeSurfaceType(metadata?.surface);
+    if (surfaceTag) {
+      for (const entry of SURFACE_CLASSIFICATIONS) {
+        if (Array.isArray(entry.surfaceValues) && entry.surfaceValues.includes(surfaceTag)) {
+          return cloneClassificationEntry(entry);
+        }
+      }
+    }
     const multiplier = Number(metadata?.costMultiplier) || 1;
     for (const entry of SURFACE_CLASSIFICATIONS) {
       const min = Number.isFinite(entry.minMultiplier) ? entry.minMultiplier : -Infinity;
@@ -1229,6 +1448,14 @@ export class DirectionsManager {
 
   classifyCategorySegment(segment) {
     const metadata = this.getSegmentMetadata(segment);
+    const sacScale = normalizeSacScale(metadata?.sacScale);
+    if (sacScale) {
+      for (const entry of CATEGORY_CLASSIFICATIONS) {
+        if (Array.isArray(entry.sacScaleValues) && entry.sacScaleValues.includes(sacScale)) {
+          return cloneClassificationEntry(entry);
+        }
+      }
+    }
     const multiplier = Number(metadata?.costMultiplier) || 1;
     const grade = Math.abs(this.computeSegmentGrade(segment));
     for (const entry of CATEGORY_CLASSIFICATIONS) {
