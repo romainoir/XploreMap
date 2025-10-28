@@ -388,17 +388,116 @@ function appendCoordinateSequence(target, sequence) {
   });
 }
 
+function buildSegmentFromPortions(portions = []) {
+  const coordinates = [];
+  const metadata = [];
+  let cumulativeDistanceKm = 0;
+
+  const appendPortion = (coords, attributes) => {
+    if (!Array.isArray(coords)) {
+      return;
+    }
+    coords.forEach((coord) => {
+      const normalized = sanitizeCoordinate(coord);
+      if (!normalized) {
+        return;
+      }
+      if (!coordinates.length) {
+        coordinates.push(normalized);
+        return;
+      }
+      const last = coordinates[coordinates.length - 1];
+      if (coordinatesAlmostEqual(last, normalized, COORDINATE_DUPLICATE_TOLERANCE_METERS)) {
+        return;
+      }
+      const metrics = computeSegmentMetrics(last, normalized);
+      if (!metrics || !Number.isFinite(metrics.distanceKm) || metrics.distanceKm <= 0) {
+        coordinates[coordinates.length - 1] = metrics?.start ?? last;
+        coordinates.push(metrics?.end ?? normalized);
+        return;
+      }
+      const startCoord = metrics.start ?? last;
+      const endCoord = metrics.end ?? normalized;
+      coordinates[coordinates.length - 1] = startCoord;
+      coordinates.push(endCoord);
+      const costMultiplier = Number.isFinite(attributes?.costMultiplier) && attributes.costMultiplier > 0
+        ? attributes.costMultiplier
+        : 1;
+      metadata.push({
+        start: startCoord,
+        end: endCoord,
+        distanceKm: metrics.distanceKm,
+        ascent: metrics.ascent,
+        descent: metrics.descent,
+        costMultiplier,
+        source: attributes?.source ?? 'network',
+        cumulativeStartKm: cumulativeDistanceKm,
+        cumulativeEndKm: cumulativeDistanceKm + metrics.distanceKm
+      });
+      cumulativeDistanceKm += metrics.distanceKm;
+    });
+  };
+
+  portions.forEach((portion) => {
+    if (!portion || !Array.isArray(portion.coordinates) || portion.coordinates.length < 2) {
+      return;
+    }
+    appendPortion(portion.coordinates, portion);
+  });
+
+  if (coordinates.length < 2) {
+    return null;
+  }
+
+  const distanceKm = metadata.reduce((sum, entry) => sum + (entry.distanceKm ?? 0), 0);
+  const ascent = metadata.reduce((sum, entry) => sum + (entry.ascent ?? 0), 0);
+  const descent = metadata.reduce((sum, entry) => sum + (entry.descent ?? 0), 0);
+
+  return {
+    coordinates,
+    distanceKm,
+    ascent,
+    descent,
+    metadata
+  };
+}
+
 function buildDirectSegment(startCoord, endCoord) {
   const metrics = computeSegmentMetrics(startCoord, endCoord);
   if (!metrics) {
     return null;
   }
 
+  const segment = buildSegmentFromPortions([
+    {
+      coordinates: [metrics.start, metrics.end],
+      costMultiplier: 1,
+      source: 'direct'
+    }
+  ]);
+
+  if (segment) {
+    return segment;
+  }
+
   return {
     coordinates: [metrics.start, metrics.end],
     distanceKm: metrics.distanceKm,
     ascent: metrics.ascent,
-    descent: metrics.descent
+    descent: metrics.descent,
+    metadata: [
+      {
+        start: metrics.start,
+        end: metrics.end,
+        distanceKm: metrics.distanceKm,
+        ascent: metrics.ascent,
+        descent: metrics.descent,
+        costMultiplier: 1,
+        source: 'direct',
+        cumulativeStartKm: 0,
+        cumulativeEndKm: metrics.distanceKm
+      }
+    ]
   };
 }
 
@@ -669,12 +768,16 @@ export class OfflineRouter {
         if (!Number.isInteger(startIndex) || endIndex !== startIndex + 1 || !coords) {
           return;
         }
-        preservedMap.set(startIndex, { endIndex, coordinates: coords });
+        const metadata = Array.isArray(segment.metadata)
+          ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
+          : [];
+        preservedMap.set(startIndex, { endIndex, coordinates: coords, metadata });
       });
     }
 
     const coordinates = [];
     const segments = [];
+    const coordinateMetadata = [];
     let totalDistanceKm = 0;
     let totalAscent = 0;
     let totalDescent = 0;
@@ -704,13 +807,39 @@ export class OfflineRouter {
             totalDistanceKm += metrics.distanceKm;
             totalAscent += metrics.ascent;
             totalDescent += metrics.descent;
+            const segmentMetadata = Array.isArray(preserved.metadata)
+              ? preserved.metadata.map((entry) => ({ ...entry }))
+              : [];
+            const offsetKm = totalDistanceKm - metrics.distanceKm;
+            segmentMetadata.forEach((entry) => {
+              if (!entry) {
+                return;
+              }
+              const distanceKm = Number(entry.distanceKm) || 0;
+              const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
+              const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
+              coordinateMetadata.push({
+                distanceKm,
+                ascent: Number(entry.ascent) || 0,
+                descent: Number(entry.descent) || 0,
+                costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
+                  ? entry.costMultiplier
+                  : 1,
+                source: entry.source ?? 'preserved',
+                start: Array.isArray(entry.start) ? entry.start.slice() : null,
+                end: Array.isArray(entry.end) ? entry.end.slice() : null,
+                startDistanceKm: startKm,
+                endDistanceKm: endKm
+              });
+            });
             segments.push({
               distance: metrics.distanceKm * 1000,
               duration: this.estimateDurationSeconds(metrics.distanceKm, travelMode),
               ascent: metrics.ascent,
               descent: metrics.descent,
               start_index: index,
-              end_index: index + 1
+              end_index: index + 1,
+              metadata: segmentMetadata
             });
             if (this.debugLoggingEnabled) {
               logPreservedSegmentDebug({
@@ -734,13 +863,39 @@ export class OfflineRouter {
       totalDistanceKm += segment.distanceKm;
       totalAscent += segment.ascent;
       totalDescent += segment.descent;
+      const offsetKm = totalDistanceKm - segment.distanceKm;
+      const segmentMetadata = Array.isArray(segment.metadata)
+        ? segment.metadata.map((entry) => ({ ...entry }))
+        : [];
+      segmentMetadata.forEach((entry) => {
+        if (!entry) {
+          return;
+        }
+        const distanceKm = Number(entry.distanceKm) || 0;
+        const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
+        const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
+        coordinateMetadata.push({
+          distanceKm,
+          ascent: Number(entry.ascent) || 0,
+          descent: Number(entry.descent) || 0,
+          costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
+            ? entry.costMultiplier
+            : 1,
+          source: entry.source ?? 'network',
+          start: Array.isArray(entry.start) ? entry.start.slice() : null,
+          end: Array.isArray(entry.end) ? entry.end.slice() : null,
+          startDistanceKm: startKm,
+          endDistanceKm: endKm
+        });
+      });
       segments.push({
         distance: segment.distanceKm * 1000,
         duration: this.estimateDurationSeconds(segment.distanceKm, travelMode),
         ascent: segment.ascent,
         descent: segment.descent,
         start_index: index,
-        end_index: index + 1
+        end_index: index + 1,
+        metadata: segmentMetadata
       });
     }
 
@@ -767,7 +922,9 @@ export class OfflineRouter {
       properties: {
         profile: travelMode,
         summary,
-        segments
+        segments,
+        segment_metadata: segments.map((segment) => Array.isArray(segment.metadata) ? segment.metadata : []),
+        coordinate_metadata: coordinateMetadata
       },
       geometry: {
         type: 'LineString',
@@ -909,54 +1066,56 @@ export class OfflineRouter {
           sharedEdge: true
         };
 
-        const totalDistanceKm = baseMetrics.distanceKm
-          + (startConnector?.distanceKm || 0)
-          + (endConnector?.distanceKm || 0);
-        const totalAscent = baseMetrics.ascent
-          + (startConnector?.ascent || 0)
-          + (endConnector?.ascent || 0);
-        const totalDescent = baseMetrics.descent
-          + (startConnector?.descent || 0)
-          + (endConnector?.descent || 0);
-
-        const coordinates = [];
-        if (startConnector) {
-          appendCoordinateSequence(coordinates, [startConnector.start, startConnector.end]);
-        } else if (Array.isArray(startCoord) && startCoord.length >= 2) {
-          const fallbackStart = startPoint || endPoint || startCoord;
-          appendCoordinateSequence(coordinates, [mergeCoordinates(startCoord, fallbackStart)]);
+        let sharedEdgeMultiplier = 1;
+        if (startSnap.edgeStart && startSnap.edgeEnd) {
+          const edge = startSnap.edgeStart.edges?.get(startSnap.edgeEnd.key);
+          if (edge && Number.isFinite(edge.distanceKm) && edge.distanceKm > 0) {
+            const derived = edge.weight / edge.distanceKm;
+            if (Number.isFinite(derived) && derived > 0) {
+              sharedEdgeMultiplier = derived;
+            }
+          }
         }
 
-        appendCoordinateSequence(coordinates, [baseMetrics.start, baseMetrics.end]);
-
-        if (endConnector) {
-          appendCoordinateSequence(coordinates, [endConnector.start, endConnector.end]);
-        } else if (Array.isArray(endCoord) && endCoord.length >= 2) {
-          const fallbackEnd = endPoint || coordinates[coordinates.length - 1] || endCoord;
-          appendCoordinateSequence(coordinates, [mergeCoordinates(endCoord, fallbackEnd)]);
+        const portions = [];
+        if (startConnector && startConnector.distanceKm > 0) {
+          portions.push({
+            coordinates: [startConnector.start, startConnector.end],
+            costMultiplier: 1,
+            source: 'connector'
+          });
+        } else if (Array.isArray(startCoord) && Array.isArray(startPoint)) {
+          const mergedStart = mergeCoordinates(startCoord, startPoint);
+          portions.push({
+            coordinates: [mergedStart, startPoint],
+            costMultiplier: 1,
+            source: 'connector'
+          });
         }
 
-        const uniqueCoordinates = coordinates.filter((coord, index) => {
-          if (!Array.isArray(coord) || coord.length < 2) {
-            return false;
-          }
-          if (index === 0) {
-            return true;
-          }
-          return !coordinatesAlmostEqual(
-            coord,
-            coordinates[index - 1],
-            COORDINATE_DUPLICATE_TOLERANCE_METERS
-          );
+        portions.push({
+          coordinates: [baseMetrics.start, baseMetrics.end],
+          costMultiplier: sharedEdgeMultiplier,
+          source: 'network'
         });
 
-        if (uniqueCoordinates.length >= 2) {
-          const segment = {
-            coordinates: uniqueCoordinates,
-            distanceKm: totalDistanceKm,
-            ascent: totalAscent,
-            descent: totalDescent
-          };
+        if (endConnector && endConnector.distanceKm > 0) {
+          portions.push({
+            coordinates: [endConnector.start, endConnector.end],
+            costMultiplier: 1,
+            source: 'connector'
+          });
+        } else if (Array.isArray(endCoord) && Array.isArray(endPoint)) {
+          const mergedEnd = mergeCoordinates(endPoint, endCoord);
+          portions.push({
+            coordinates: [mergedEnd, endCoord],
+            costMultiplier: 1,
+            source: 'connector'
+          });
+        }
+
+        const segment = buildSegmentFromPortions(portions);
+        if (segment) {
           return returnWithDebug({
             type: 'shared-edge',
             segment
@@ -1059,8 +1218,6 @@ export class OfflineRouter {
       return null;
     }
 
-    const coordinates = [];
-
     debugInfo.plan = {
       startNodeKey: bestPlan.startOption?.key,
       endNodeKey: bestPlan.endOption?.key,
@@ -1071,57 +1228,93 @@ export class OfflineRouter {
       endApproach: bestPlan.endApproach
     };
 
-    if (startConnector) {
-      appendCoordinateSequence(coordinates, [startConnector.start, startConnector.end]);
-    } else if (Array.isArray(startCoord) && startCoord.length >= 2) {
-      const fallbackStart = startPoint || endPoint || startCoord;
-      appendCoordinateSequence(coordinates, [mergeCoordinates(startCoord, fallbackStart)]);
+    const portions = [];
+
+    if (startConnector && startConnector.distanceKm > 0) {
+      portions.push({
+        coordinates: [startConnector.start, startConnector.end],
+        costMultiplier: 1,
+        source: 'connector'
+      });
+    } else if (Array.isArray(startCoord) && startCoord.length >= 2 && Array.isArray(startPoint)) {
+      const mergedStart = mergeCoordinates(startCoord, startPoint);
+      portions.push({
+        coordinates: [mergedStart, startPoint],
+        costMultiplier: 1,
+        source: 'connector'
+      });
     }
 
-    appendCoordinateSequence(coordinates, bestPlan.startOption.segment.coordinates);
-
-    const pathCoordinates = bestPlan.path.coordinates
-      .map((coord) => (Array.isArray(coord) ? coord.slice(0, 3) : null))
-      .filter((coord) => Array.isArray(coord) && coord.length >= 2);
-    appendCoordinateSequence(coordinates, pathCoordinates);
-
-    appendCoordinateSequence(coordinates, bestPlan.endOption.segment.coordinates);
-
-    if (endConnector) {
-      appendCoordinateSequence(coordinates, [endConnector.start, endConnector.end]);
-    } else if (Array.isArray(endCoord) && endCoord.length >= 2) {
-      const fallbackEnd = endPoint || coordinates[coordinates.length - 1] || endCoord;
-      appendCoordinateSequence(coordinates, [mergeCoordinates(endCoord, fallbackEnd)]);
+    if (Array.isArray(bestPlan.startApproach?.coordinates)) {
+      portions.push({
+        coordinates: bestPlan.startApproach.coordinates,
+        costMultiplier: 1,
+        source: 'approach'
+      });
     }
 
-    const uniqueCoordinates = coordinates.filter((coord, index) => {
-      if (!Array.isArray(coord) || coord.length < 2) {
-        return false;
+    if (Array.isArray(bestPlan.path?.edges)) {
+      bestPlan.path.edges.forEach((edge) => {
+        if (!edge) {
+          return;
+        }
+        const coords = [edge.start, edge.end].filter((coord) => Array.isArray(coord));
+        if (coords.length < 2) {
+          return;
+        }
+        portions.push({
+          coordinates: coords,
+          costMultiplier: Number.isFinite(edge.costMultiplier) && edge.costMultiplier > 0
+            ? edge.costMultiplier
+            : 1,
+          source: 'network'
+        });
+      });
+    } else {
+      const fallbackPath = bestPlan.path.coordinates
+        .map((coord) => (Array.isArray(coord) ? coord.slice(0, 3) : null))
+        .filter((coord) => Array.isArray(coord) && coord.length >= 2);
+      if (fallbackPath.length >= 2) {
+        portions.push({
+          coordinates: fallbackPath,
+          costMultiplier: 1,
+          source: 'network'
+        });
       }
-      if (index === 0) {
-        return true;
-      }
-      return !coordinatesAlmostEqual(
-        coord,
-        coordinates[index - 1],
-        COORDINATE_DUPLICATE_TOLERANCE_METERS
-      );
-    });
+    }
 
-    if (uniqueCoordinates.length < 2) {
+    if (Array.isArray(bestPlan.endApproach?.coordinates)) {
+      portions.push({
+        coordinates: bestPlan.endApproach.coordinates,
+        costMultiplier: 1,
+        source: 'approach'
+      });
+    }
+
+    if (endConnector && endConnector.distanceKm > 0) {
+      portions.push({
+        coordinates: [endConnector.start, endConnector.end],
+        costMultiplier: 1,
+        source: 'connector'
+      });
+    } else if (Array.isArray(endCoord) && endCoord.length >= 2 && Array.isArray(endPoint)) {
+      const mergedEnd = mergeCoordinates(endPoint, endCoord);
+      portions.push({
+        coordinates: [mergedEnd, endCoord],
+        costMultiplier: 1,
+        source: 'connector'
+      });
+    }
+
+    const result = buildSegmentFromPortions(portions);
+
+    if (!result || !Array.isArray(result.coordinates) || result.coordinates.length < 2) {
       const fallback = returnDirectOrFailure('insufficient-coordinates');
       if (fallback) {
         return fallback;
       }
       return null;
     }
-
-    const result = {
-      coordinates: uniqueCoordinates,
-      distanceKm: bestPlan.totalDistanceKm,
-      ascent: bestPlan.totalAscent,
-      descent: bestPlan.totalDescent
-    };
 
     return returnWithDebug({
       type: 'network',

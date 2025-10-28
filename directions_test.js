@@ -117,6 +117,15 @@ const SEGMENT_MARKER_ICONS = {
 
 let bivouacMarkerImagePromise = null;
 
+const PROFILE_MODE_DEFINITIONS = Object.freeze({
+  slope: { key: 'slope', label: 'Slope' },
+  surface: { key: 'surface', label: 'Surface' },
+  category: { key: 'category', label: 'Category' }
+});
+
+const DEFAULT_PROFILE_MODE = PROFILE_MODE_DEFINITIONS.category.key;
+const MIN_PROFILE_SEGMENT_DISTANCE_KM = 1e-6;
+
 function loadBivouacMarkerImageElement() {
   if (bivouacMarkerImagePromise) {
     return bivouacMarkerImagePromise;
@@ -498,7 +507,9 @@ export class DirectionsManager {
       routeStats,
       elevationChart,
       directionsInfoButton,
-      directionsHint
+      directionsHint,
+      profileModeToggle,
+      profileModeMenu
     ] = uiElements;
 
     const { router = null } = options ?? {};
@@ -517,6 +528,14 @@ export class DirectionsManager {
     this.elevationChart = elevationChart ?? null;
     this.infoButton = directionsInfoButton ?? null;
     this.directionsHint = directionsHint ?? null;
+    this.profileModeToggle = profileModeToggle ?? null;
+    this.profileModeMenu = profileModeMenu ?? null;
+    this.profileModeOptions = this.profileModeMenu
+      ? Array.from(this.profileModeMenu.querySelectorAll('[data-profile-mode]'))
+      : [];
+    this.profileModeLabel = this.profileModeToggle
+      ? this.profileModeToggle.querySelector('.profile-mode-button__label')
+      : null;
 
     if (this.routeStats) {
       this.routeStats.setAttribute('aria-live', 'polite');
@@ -544,6 +563,7 @@ export class DirectionsManager {
     this.segmentLegLookup = [];
     this.cachedLegSegments = [];
     this.routeProfile = null;
+    this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
     this.elevationDomain = null;
     this.elevationChartContainer = null;
@@ -574,6 +594,9 @@ export class DirectionsManager {
 
     this.routeCutDistances = [];
     this.cutSegments = [];
+    this.profileSegments = [];
+    this.profileMode = DEFAULT_PROFILE_MODE;
+    this.profileMenuOpen = false;
     this.routeSegmentsListener = null;
     this.networkPreparationCallback = null;
     this.elevationResizeObserver = null;
@@ -582,6 +605,7 @@ export class DirectionsManager {
     this.setupRouteLayers();
     this.setupUIHandlers();
     this.setupMapHandlers();
+    this.setProfileMode(this.profileMode, { silent: true });
     this.setRouter(router ?? null);
     this.updateUndoAvailability();
     this.updatePanelVisibilityState();
@@ -885,6 +909,50 @@ export class DirectionsManager {
     this.clearButton?.addEventListener('click', () => {
       this.clearDirections();
     });
+
+    if (this.profileModeToggle) {
+      this.profileModeToggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleProfileMenu();
+      });
+    }
+
+    if (this.profileModeMenu) {
+      this.profileModeMenu.setAttribute('aria-hidden', this.profileMenuOpen ? 'false' : 'true');
+      this.profileModeMenu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          this.closeProfileMenu({ restoreFocus: true });
+        }
+      });
+    }
+
+    if (this.profileModeOptions.length) {
+      this.profileModeOptions.forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          const mode = button.dataset.profileMode;
+          this.setProfileMode(mode);
+          this.closeProfileMenu();
+        });
+      });
+    }
+
+    this.handleDocumentClickForProfileMenu = (event) => {
+      if (!this.profileMenuOpen) {
+        return;
+      }
+      const target = event.target;
+      if (this.profileModeMenu?.contains(target)) {
+        return;
+      }
+      if (this.profileModeToggle && target === this.profileModeToggle) {
+        return;
+      }
+      this.closeProfileMenu();
+    };
+    document.addEventListener('click', this.handleDocumentClickForProfileMenu);
   }
 
   setupMapHandlers() {
@@ -897,6 +965,291 @@ export class DirectionsManager {
     this.map.on('click', this.handleMapClick);
     this.map.on('dblclick', 'waypoints-hit-area', this.handleWaypointDoubleClick);
     this.map.on('contextmenu', this.handleRouteContextMenu);
+  }
+
+  getProfileModeDefinition(mode) {
+    const definition = PROFILE_MODE_DEFINITIONS?.[mode];
+    return definition || PROFILE_MODE_DEFINITIONS[DEFAULT_PROFILE_MODE];
+  }
+
+  updateProfileModeUI() {
+    const definition = this.getProfileModeDefinition(this.profileMode);
+    const label = definition?.label ?? this.profileMode;
+    if (this.profileModeLabel) {
+      this.profileModeLabel.textContent = label;
+    }
+    if (this.profileModeToggle) {
+      this.profileModeToggle.setAttribute('aria-expanded', this.profileMenuOpen ? 'true' : 'false');
+    }
+    if (this.profileModeMenu) {
+      this.profileModeMenu.classList.toggle('profile-mode-menu__list--open', this.profileMenuOpen);
+      this.profileModeMenu.setAttribute('aria-hidden', this.profileMenuOpen ? 'false' : 'true');
+    }
+    this.profileModeOptions.forEach((button) => {
+      const mode = button?.dataset?.profileMode;
+      const isActive = mode === this.profileMode;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+    });
+  }
+
+  openProfileMenu() {
+    if (this.profileMenuOpen) {
+      return;
+    }
+    this.profileMenuOpen = true;
+    this.updateProfileModeUI();
+    if (this.profileModeMenu && typeof this.profileModeMenu.focus === 'function') {
+      this.profileModeMenu.focus();
+    }
+  }
+
+  closeProfileMenu({ restoreFocus = false } = {}) {
+    if (!this.profileMenuOpen) {
+      return;
+    }
+    this.profileMenuOpen = false;
+    this.updateProfileModeUI();
+    if (restoreFocus && this.profileModeToggle && typeof this.profileModeToggle.focus === 'function') {
+      this.profileModeToggle.focus();
+    }
+  }
+
+  toggleProfileMenu() {
+    if (this.profileMenuOpen) {
+      this.closeProfileMenu();
+    } else {
+      this.openProfileMenu();
+    }
+  }
+
+  setProfileMode(mode, { silent = false } = {}) {
+    const normalized = typeof mode === 'string' && PROFILE_MODE_DEFINITIONS[mode]
+      ? mode
+      : DEFAULT_PROFILE_MODE;
+    this.profileMode = normalized;
+    this.updateProfileModeUI();
+    if (silent) {
+      return;
+    }
+    this.updateProfileSegments();
+    if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
+      && this.routeGeojson.geometry.coordinates.length >= 2) {
+      this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
+    }
+  }
+
+  getSegmentMetadata(segment) {
+    if (!segment || typeof segment !== 'object') {
+      return null;
+    }
+    const metadata = segment.metadata && typeof segment.metadata === 'object'
+      ? segment.metadata
+      : null;
+    const distanceKm = Number(segment.distanceKm ?? metadata?.distanceKm);
+    const startDistanceKm = Number(metadata?.startDistanceKm ?? segment.startDistanceKm);
+    const endDistanceKm = Number(metadata?.endDistanceKm ?? segment.endDistanceKm);
+    const ascent = Number(metadata?.ascent ?? segment.ascent ?? 0);
+    const descent = Number(metadata?.descent ?? segment.descent ?? 0);
+    const costMultiplier = Number(metadata?.costMultiplier);
+    return {
+      distanceKm: Number.isFinite(distanceKm) ? distanceKm : Math.max(0, (endDistanceKm ?? 0) - (startDistanceKm ?? 0)),
+      startDistanceKm: Number.isFinite(startDistanceKm) ? startDistanceKm : null,
+      endDistanceKm: Number.isFinite(endDistanceKm) ? endDistanceKm : null,
+      ascent: Number.isFinite(ascent) ? ascent : 0,
+      descent: Number.isFinite(descent) ? descent : 0,
+      costMultiplier: Number.isFinite(costMultiplier) && costMultiplier > 0 ? costMultiplier : 1,
+      source: metadata?.source ?? 'network'
+    };
+  }
+
+  computeSegmentGrade(segment) {
+    if (!segment) {
+      return 0;
+    }
+    const distanceKm = Number(segment.distanceKm);
+    const startElevation = Number(segment.startElevation);
+    const endElevation = Number(segment.endElevation);
+    const distanceMeters = Number.isFinite(distanceKm) ? distanceKm * 1000 : 0;
+    if (!Number.isFinite(startElevation) || !Number.isFinite(endElevation) || !(distanceMeters > 0)) {
+      return 0;
+    }
+    return ((endElevation - startElevation) / distanceMeters) * 100;
+  }
+
+  classifySlopeSegment(segment) {
+    const grade = this.computeSegmentGrade(segment);
+    if (!Number.isFinite(grade)) {
+      return null;
+    }
+    if (grade >= 18) {
+      return { key: 'slope-steep-climb', label: 'Steep climb (>18%)', color: '#c0392b' };
+    }
+    if (grade >= 12) {
+      return { key: 'slope-hard-climb', label: 'Climb (12-18%)', color: '#e67e22' };
+    }
+    if (grade >= 6) {
+      return { key: 'slope-moderate-climb', label: 'Moderate climb (6-12%)', color: '#f1c40f' };
+    }
+    if (grade > -6) {
+      return { key: 'slope-rolling', label: 'Rolling (-6% to 6%)', color: '#27ae60' };
+    }
+    if (grade > -12) {
+      return { key: 'slope-moderate-descent', label: 'Moderate descent (-12% to -6%)', color: '#3498db' };
+    }
+    if (grade > -18) {
+      return { key: 'slope-steep-descent', label: 'Steep descent (-18% to -12%)', color: '#2c3e50' };
+    }
+    return { key: 'slope-very-steep-descent', label: 'Very steep descent (<-18%)', color: '#8e44ad' };
+  }
+
+  classifySurfaceSegment(segment) {
+    const metadata = this.getSegmentMetadata(segment);
+    const multiplier = metadata?.costMultiplier ?? 1;
+    if (multiplier <= 0.95) {
+      return { key: 'surface-paved', label: 'Paved road', color: '#566573' };
+    }
+    if (multiplier <= 1.05) {
+      return { key: 'surface-compact', label: 'Compact surface', color: '#2ecc71' };
+    }
+    if (multiplier <= 1.15) {
+      return { key: 'surface-dirt', label: 'Dirt / gravel', color: '#f1c40f' };
+    }
+    if (multiplier <= 1.3) {
+      return { key: 'surface-rocky', label: 'Rocky trail', color: '#e67e22' };
+    }
+    return { key: 'surface-alpine', label: 'Glacier / alpine', color: '#c0392b' };
+  }
+
+  classifyCategorySegment(segment) {
+    const metadata = this.getSegmentMetadata(segment);
+    const multiplier = metadata?.costMultiplier ?? 1;
+    const grade = Math.abs(this.computeSegmentGrade(segment));
+    if (multiplier <= 1 && grade < 8) {
+      return { key: 'category-t1', label: 'T1 · Easy hike', color: '#2ecc71' };
+    }
+    if (multiplier <= 1.1 && grade < 12) {
+      return { key: 'category-t2', label: 'T2 · Mountain trail', color: '#27ae60' };
+    }
+    if (multiplier <= 1.2 && grade < 18) {
+      return { key: 'category-t3', label: 'T3 · Alpine hike', color: '#f39c12' };
+    }
+    if (multiplier <= 1.35) {
+      return { key: 'category-t4', label: 'T4 · Alpine route', color: '#e67e22' };
+    }
+    return { key: 'category-t5', label: 'T5+ · Technical alpine', color: '#c0392b' };
+  }
+
+  classifySegment(segment) {
+    if (!segment) {
+      return null;
+    }
+    switch (this.profileMode) {
+      case 'slope':
+        return this.classifySlopeSegment(segment);
+      case 'surface':
+        return this.classifySurfaceSegment(segment);
+      case 'category':
+      default:
+        return this.classifyCategorySegment(segment);
+    }
+  }
+
+  updateProfileSegments() {
+    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
+      this.profileSegments = [];
+      this.updateRouteLineSource();
+      return;
+    }
+    const segments = [];
+    let current = null;
+    const appendCoordinate = (list, coord) => {
+      if (!Array.isArray(list) || !Array.isArray(coord) || coord.length < 2) {
+        return;
+      }
+      const last = list[list.length - 1];
+      if (last
+        && Math.abs(last[0] - coord[0]) <= COORD_EPSILON
+        && Math.abs(last[1] - coord[1]) <= COORD_EPSILON) {
+        return;
+      }
+      list.push(coord);
+    };
+
+    this.routeSegments.forEach((segment) => {
+      if (!segment) {
+        return;
+      }
+      const classification = this.classifySegment(segment) || {};
+      const color = typeof classification.color === 'string' ? classification.color : this.modeColors[this.currentMode];
+      const name = classification.label ?? '';
+      const key = classification.key ?? `${this.profileMode}-default`;
+      const startKm = Number(segment.startDistanceKm) || 0;
+      const endKm = Number(segment.endDistanceKm) || startKm;
+      const distanceKm = Math.max(0, endKm - startKm);
+      const startCoord = Array.isArray(segment.start) ? segment.start.slice() : null;
+      const endCoord = Array.isArray(segment.end) ? segment.end.slice() : null;
+      if (!startCoord || startCoord.length < 2 || !endCoord || endCoord.length < 2) {
+        return;
+      }
+      const zeroLengthSegment = distanceKm <= MIN_PROFILE_SEGMENT_DISTANCE_KM
+        && Math.abs(startCoord[0] - endCoord[0]) <= COORD_EPSILON
+        && Math.abs(startCoord[1] - endCoord[1]) <= COORD_EPSILON;
+      if (zeroLengthSegment) {
+        return;
+      }
+      if (!current || current.key !== key) {
+        if (current) {
+          if (Array.isArray(current.coordinates) && current.coordinates.length >= 2) {
+            segments.push(current);
+          }
+        }
+        const coordinates = [];
+        appendCoordinate(coordinates, startCoord);
+        appendCoordinate(coordinates, endCoord);
+        current = {
+          key,
+          color,
+          name,
+          startKm,
+          endKm,
+          distanceKm,
+          coordinates,
+          index: segments.length
+        };
+        return;
+      }
+      current.endKm = endKm;
+      current.distanceKm += distanceKm;
+      appendCoordinate(current.coordinates, endCoord);
+    });
+    if (current && Array.isArray(current.coordinates) && current.coordinates.length >= 2) {
+      segments.push(current);
+    }
+    this.profileSegments = segments.map((entry, index) => ({
+      ...entry,
+      index,
+      coordinates: entry.coordinates.filter((coord) => Array.isArray(coord) && coord.length >= 2)
+    })).filter((entry) => entry.coordinates.length >= 2);
+    this.updateRouteLineSource();
+  }
+
+  getProfileSegmentForDistance(distanceKm) {
+    if (!Array.isArray(this.profileSegments) || !this.profileSegments.length) {
+      return null;
+    }
+    const epsilon = 1e-6;
+    return this.profileSegments.find((segment, index) => {
+      if (!segment) {
+        return false;
+      }
+      const startKm = Number(segment.startKm ?? 0);
+      const endKm = Number(segment.endKm ?? startKm);
+      if (index === this.profileSegments.length - 1) {
+        return distanceKm >= startKm - epsilon && distanceKm <= endKm + epsilon;
+      }
+      return distanceKm >= startKm - epsilon && distanceKm < endKm - epsilon * 0.5;
+    }) ?? null;
   }
 
   cloneWaypoints(source = this.waypoints) {
@@ -1806,12 +2159,16 @@ export class DirectionsManager {
       return;
     }
 
-    if (!Array.isArray(this.cutSegments) || !this.cutSegments.length) {
+    const displaySegments = Array.isArray(this.profileSegments) && this.profileSegments.length
+      ? this.profileSegments
+      : this.cutSegments;
+
+    if (!Array.isArray(displaySegments) || !displaySegments.length) {
       source.setData(EMPTY_COLLECTION);
       return;
     }
 
-    const features = this.cutSegments.map((segment) => ({
+    const features = displaySegments.map((segment) => ({
       type: 'Feature',
       properties: {
         color: segment.color,
@@ -1865,6 +2222,10 @@ export class DirectionsManager {
   getColorForDistance(distanceKm) {
     if (!Number.isFinite(distanceKm)) {
       return this.modeColors[this.currentMode];
+    }
+    const profileSegment = this.getProfileSegmentForDistance(distanceKm);
+    if (profileSegment?.color) {
+      return profileSegment.color;
     }
     const segment = this.getCutSegmentForDistance(distanceKm);
     if (segment?.color) {
@@ -3756,6 +4117,7 @@ export class DirectionsManager {
     this.cachedLegSegments = [];
     this.latestMetrics = null;
     this.routeProfile = null;
+    this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
     this.elevationDomain = null;
     this.resetRouteCuts();
@@ -3767,6 +4129,7 @@ export class DirectionsManager {
     this.draggedBivouacIndex = null;
     this.draggedBivouacLngLat = null;
 
+    this.profileSegments = [];
     this.updateRouteLineSource();
     this.map.getSource('distance-markers-source')?.setData(EMPTY_COLLECTION);
     this.map.getSource('route-segments-source')?.setData(EMPTY_COLLECTION);
@@ -3782,6 +4145,9 @@ export class DirectionsManager {
     this.clearRoute();
     this.updateStats(null);
     this.updateElevationProfile([]);
+    this.routeCoordinateMetadata = [];
+    this.profileSegments = [];
+    this.updateRouteLineSource();
     this.draggedWaypointIndex = null;
     this.draggedBivouacIndex = null;
     this.setHoveredWaypointIndex(null);
@@ -4161,6 +4527,9 @@ export class DirectionsManager {
     const segmentMetrics = Array.isArray(this.routeGeojson?.properties?.segments)
       ? this.routeGeojson.properties.segments
       : [];
+    const segmentMetadataSource = Array.isArray(this.routeGeojson?.properties?.segment_metadata)
+      ? this.routeGeojson.properties.segment_metadata
+      : [];
 
     for (let waypointIndex = 0; waypointIndex < normalizedWaypoints.length - 1; waypointIndex += 1) {
       const startWaypoint = normalizedWaypoints[waypointIndex];
@@ -4220,6 +4589,12 @@ export class DirectionsManager {
       const ascent = Number.isFinite(metrics?.ascent) ? Number(metrics.ascent) : null;
       const descent = Number.isFinite(metrics?.descent) ? Number(metrics.descent) : null;
 
+      const metadataEntries = Array.isArray(segmentMetadataSource[waypointIndex])
+        ? segmentMetadataSource[waypointIndex]
+            .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
+            .filter(Boolean)
+        : [];
+
       segments.push({
         startIndex: waypointIndex,
         endIndex: waypointIndex + 1,
@@ -4227,7 +4602,8 @@ export class DirectionsManager {
         distance,
         duration,
         ascent,
-        descent
+        descent,
+        metadata: metadataEntries
       });
 
       searchStart = endIndex;
@@ -4297,7 +4673,10 @@ export class DirectionsManager {
           distance,
           duration,
           ascent,
-          descent
+          descent,
+          metadata: Array.isArray(segment.metadata)
+            ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
+            : []
         };
       })
       .filter(Boolean);
@@ -4310,17 +4689,42 @@ export class DirectionsManager {
       this.segmentLegLookup = [];
       this.map.getSource('route-segments-source')?.setData(EMPTY_COLLECTION);
       this.resetSegmentHover();
+      this.routeCoordinateMetadata = [];
+      this.profileSegments = [];
+      this.updateRouteLineSource();
       return;
     }
 
     const profile = this.routeProfile;
     const cumulative = profile?.cumulativeDistances ?? [];
     const elevations = profile?.elevations ?? [];
+    const coordinateMetadata = Array.isArray(this.routeCoordinateMetadata)
+      ? this.routeCoordinateMetadata
+      : [];
 
     this.routeSegments = coords.slice(0, -1).map((coord, index) => {
       const startDistanceKm = cumulative[index] ?? 0;
       const endDistanceKm = cumulative[index + 1] ?? startDistanceKm;
       const distanceKm = Math.max(0, endDistanceKm - startDistanceKm);
+      const metadataEntry = coordinateMetadata[index];
+      let segmentMetadata = null;
+      if (metadataEntry && typeof metadataEntry === 'object') {
+        const distance = Number(metadataEntry.distanceKm);
+        const startKm = Number(metadataEntry.startDistanceKm);
+        const endKm = Number(metadataEntry.endDistanceKm);
+        const ascent = Number(metadataEntry.ascent);
+        const descent = Number(metadataEntry.descent);
+        const costMultiplier = Number(metadataEntry.costMultiplier);
+        segmentMetadata = {
+          distanceKm: Number.isFinite(distance) ? distance : distanceKm,
+          startDistanceKm: Number.isFinite(startKm) ? startKm : startDistanceKm,
+          endDistanceKm: Number.isFinite(endKm) ? endKm : endDistanceKm,
+          ascent: Number.isFinite(ascent) ? ascent : 0,
+          descent: Number.isFinite(descent) ? descent : 0,
+          costMultiplier: Number.isFinite(costMultiplier) && costMultiplier > 0 ? costMultiplier : 1,
+          source: metadataEntry.source ?? 'network'
+        };
+      }
       return {
         start: coord,
         end: coords[index + 1],
@@ -4329,7 +4733,8 @@ export class DirectionsManager {
         endDistanceKm,
         distanceKm,
         startElevation: elevations[index],
-        endElevation: elevations[index + 1]
+        endElevation: elevations[index + 1],
+        metadata: segmentMetadata
       };
     });
 
@@ -4350,6 +4755,7 @@ export class DirectionsManager {
     });
 
     this.resetSegmentHover();
+    this.updateProfileSegments();
   }
 
   computeSegmentLegLookup(coords) {
@@ -4661,9 +5067,11 @@ export class DirectionsManager {
     const hitTargetsHtml = samples
       .map((sample) => {
         const midDistance = (sample.startDistanceKm + sample.endDistanceKm) / 2;
-        const segment = this.getCutSegmentForDistance(midDistance);
-        const baseColor = typeof segment?.color === 'string' && segment.color.trim()
-          ? segment.color.trim()
+        const profileSegment = this.getProfileSegmentForDistance(midDistance);
+        const cutSegment = this.getCutSegmentForDistance(midDistance);
+        const baseSegment = profileSegment ?? cutSegment;
+        const baseColor = typeof baseSegment?.color === 'string' && baseSegment.color.trim()
+          ? baseSegment.color.trim()
           : fallbackColor;
         addGradientStop(sample.startDistanceKm, baseColor);
         addGradientStop(sample.endDistanceKm, baseColor);
@@ -4677,8 +5085,10 @@ export class DirectionsManager {
         if (Number.isFinite(sample.elevation)) {
           titleParts.push(`${Math.round(sample.elevation)} m`);
         }
-        if (segment?.name) {
-          titleParts.push(segment.name);
+        if (profileSegment?.name) {
+          titleParts.push(profileSegment.name);
+        } else if (cutSegment?.name) {
+          titleParts.push(cutSegment.name);
         }
         const title = titleParts.join(' · ');
         const style = [
@@ -4936,9 +5346,19 @@ export class DirectionsManager {
     const elevation = this.getElevationAtDistance(distanceKm);
     const altitudeLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : 'N/A';
 
+    const profileSegment = this.getProfileSegmentForDistance(distanceKm);
+    let detailMarkup = '';
+    if (profileSegment?.name) {
+      const definition = this.getProfileModeDefinition(this.profileMode);
+      const modeLabel = escapeHtml(definition?.label ?? 'Category');
+      const segmentLabel = escapeHtml(profileSegment.name);
+      detailMarkup = `<span class="profile">${modeLabel}: ${segmentLabel}</span>`;
+    }
+
     this.elevationHoverReadout.innerHTML = `
       <span class="distance">${distanceLabel} km</span>
       <span class="altitude">${altitudeLabel}</span>
+      ${detailMarkup}
     `;
     this.elevationHoverReadout.setAttribute('aria-hidden', 'false');
   }
@@ -5032,6 +5452,12 @@ export class DirectionsManager {
       };
     }
     this.routeGeojson = resolvedRoute;
+    const coordinateMetadata = Array.isArray(resolvedRoute?.properties?.coordinate_metadata)
+      ? resolvedRoute.properties.coordinate_metadata
+          .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
+          .filter(Boolean)
+      : [];
+    this.routeCoordinateMetadata = coordinateMetadata;
     this.latestMetrics = this.calculateRouteMetrics(resolvedRoute);
     this.rebuildSegmentData();
     const snapped = this.snapWaypointsToRoute();
