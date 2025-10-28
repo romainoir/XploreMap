@@ -53,6 +53,70 @@ function createNodeKey(lng, lat, ele) {
   return `${lng},${lat},${ele}`;
 }
 
+const SAC_SCALE_RANK = Object.freeze({
+  hiking: 1,
+  mountain_hiking: 2,
+  demanding_mountain_hiking: 3,
+  alpine_hiking: 4,
+  demanding_alpine_hiking: 5,
+  difficult_alpine_hiking: 6
+});
+
+const TRAIL_VISIBILITY_VALUES = new Set(['excellent', 'good', 'intermediate', 'bad', 'horrible', 'no']);
+
+function normalizeTagString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeSacScale(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  if (SAC_SCALE_RANK[lower]) {
+    return lower;
+  }
+  const alias = {
+    t1: 'hiking',
+    t2: 'mountain_hiking',
+    t3: 'demanding_mountain_hiking',
+    t4: 'alpine_hiking',
+    t5: 'demanding_alpine_hiking',
+    t6: 'difficult_alpine_hiking'
+  }[lower];
+  return alias || null;
+}
+
+function normalizeTrailVisibility(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  return TRAIL_VISIBILITY_VALUES.has(lower) ? lower : null;
+}
+
+function normalizeSurface(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  return normalized.toLowerCase().replace(/\s+/g, '_');
+}
+
+function normalizeTrackType(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  return normalized.toLowerCase().replace(/\s+/g, '_');
+}
+
 function cloneCoordinate(coord) {
   if (!Array.isArray(coord)) {
     return [];
@@ -378,8 +442,38 @@ export class GeoJsonPathFinder {
       distanceKm: edge.distanceKm,
       ascent: edge.ascent,
       descent: edge.descent,
-      modes: edge.modes
+      modes: edge.modes,
+      attributes: edge.attributes ? { ...edge.attributes } : null
     });
+  }
+
+  _extractEdgeAttributes(properties) {
+    if (!properties || typeof properties !== 'object') {
+      return null;
+    }
+    const hiking = properties.hiking && typeof properties.hiking === 'object' ? properties.hiking : null;
+    const sacScale = normalizeSacScale(hiking?.sacScale ?? properties.sacScale ?? properties.sac_scale);
+    const trailVisibility = normalizeTrailVisibility(hiking?.trailVisibility ?? properties.trailVisibility ?? properties.trail_visibility);
+    const surface = normalizeSurface(hiking?.surface ?? properties.surface);
+    const smoothness = normalizeTagString(hiking?.smoothness ?? properties.smoothness);
+    const trackType = normalizeTrackType(hiking?.trackType ?? properties.trackType ?? properties.tracktype ?? properties.track_type);
+    const result = {};
+    if (sacScale) {
+      result.sacScale = sacScale;
+    }
+    if (trailVisibility) {
+      result.trailVisibility = trailVisibility;
+    }
+    if (surface) {
+      result.surface = surface;
+    }
+    if (smoothness) {
+      result.smoothness = smoothness;
+    }
+    if (trackType) {
+      result.trackType = trackType;
+    }
+    return Object.keys(result).length ? result : null;
   }
 
   _processFeature(feature) {
@@ -399,6 +493,7 @@ export class GeoJsonPathFinder {
     const modes = normalizeModes(properties?.[this.modesProperty], this.modeSeparator);
     const multiplier = Number(properties?.[this.costProperty]);
     const costMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+    const attributes = this._extractEdgeAttributes(properties);
 
     segments.forEach((coords) => {
       if (!Array.isArray(coords) || coords.length < 2) {
@@ -445,7 +540,8 @@ export class GeoJsonPathFinder {
           distanceKm,
           ascent,
           descent,
-          modes
+          modes,
+          attributes
         };
         this._addDirectedEdge(start, end, edge);
         this._addDirectedEdge(end, start, {
@@ -453,7 +549,8 @@ export class GeoJsonPathFinder {
           distanceKm,
           ascent: descent,
           descent: ascent,
-          modes
+          modes,
+          attributes
         });
       }
     });
@@ -659,7 +756,8 @@ export class GeoJsonPathFinder {
             weight: edge.weight,
             costMultiplier: Number.isFinite(costMultiplier) && costMultiplier > 0
               ? costMultiplier
-              : 1
+              : 1,
+            attributes: edge.attributes ? { ...edge.attributes } : null
           });
         }
       }

@@ -214,6 +214,98 @@ function sanitizeLineCoordinates(coords) {
   return sanitized.length >= 2 ? sanitized : null;
 }
 
+const SAC_SCALE_RANK = Object.freeze({
+  hiking: 1,
+  mountain_hiking: 2,
+  demanding_mountain_hiking: 3,
+  alpine_hiking: 4,
+  demanding_alpine_hiking: 5,
+  difficult_alpine_hiking: 6
+});
+
+const TRAIL_VISIBILITY_VALUES = new Set(['excellent', 'good', 'intermediate', 'bad', 'horrible', 'no']);
+
+function normalizeTagString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeSacScale(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  if (SAC_SCALE_RANK[lower]) {
+    return lower;
+  }
+  const alias = {
+    t1: 'hiking',
+    t2: 'mountain_hiking',
+    t3: 'demanding_mountain_hiking',
+    t4: 'alpine_hiking',
+    t5: 'demanding_alpine_hiking',
+    t6: 'difficult_alpine_hiking'
+  }[lower];
+  return alias || null;
+}
+
+function normalizeTrailVisibility(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase().replace(/\s+/g, '_');
+  return TRAIL_VISIBILITY_VALUES.has(lower) ? lower : null;
+}
+
+function normalizeSurface(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  return normalized.toLowerCase().replace(/\s+/g, '_');
+}
+
+function normalizeTrackType(value) {
+  const normalized = normalizeTagString(value);
+  if (!normalized) {
+    return null;
+  }
+  return normalized.toLowerCase().replace(/\s+/g, '_');
+}
+
+function collectHikingTags(tags) {
+  if (!tags || typeof tags !== 'object') {
+    return null;
+  }
+  const sacScale = normalizeSacScale(tags.sac_scale ?? tags.sacScale);
+  const trailVisibility = normalizeTrailVisibility(tags.trail_visibility ?? tags.trailVisibility);
+  const surface = normalizeSurface(tags.surface);
+  const smoothness = normalizeTagString(tags.smoothness);
+  const trackType = normalizeTrackType(tags.tracktype ?? tags.track_type ?? tags.trackType);
+  const result = {};
+  if (sacScale) {
+    result.sacScale = sacScale;
+  }
+  if (trailVisibility) {
+    result.trailVisibility = trailVisibility;
+  }
+  if (surface) {
+    result.surface = surface;
+  }
+  if (smoothness) {
+    result.smoothness = smoothness;
+  }
+  if (trackType) {
+    result.trackType = trackType;
+  }
+  return Object.keys(result).length ? result : null;
+}
+
 function buildCoordinatesFromGeometry(geometry) {
   if (!Array.isArray(geometry)) {
     return null;
@@ -263,6 +355,10 @@ function buildFeatureFromWay(way, nodesById) {
   const cost = normalizeNumber(tags['xplore:costMultiplier']);
   if (cost != null && cost > 0 && Math.abs(cost - 1) > 1e-6) {
     properties.costMultiplier = Number(cost.toFixed ? cost.toFixed(3) : cost);
+  }
+  const hiking = collectHikingTags(tags);
+  if (hiking) {
+    properties.hiking = hiking;
   }
   return {
     type: 'Feature',
