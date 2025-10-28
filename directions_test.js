@@ -860,6 +860,9 @@ export class DirectionsManager {
     this.elevationSamples = [];
     this.elevationDomain = null;
     this.routeLineGradientSupported = true;
+    this.routeLineGradientExpression = null;
+    this.routeLineGradientData = EMPTY_COLLECTION;
+    this.routeLineFallbackData = EMPTY_COLLECTION;
     this.elevationChartContainer = null;
     this.elevationHoverReadout = null;
     this.highlightedElevationBar = null;
@@ -2583,27 +2586,145 @@ export class DirectionsManager {
     return collections;
   }
 
+  generateRouteLineGradientExpression(segments) {
+    if (!Array.isArray(segments) || !segments.length) {
+      return null;
+    }
+
+    const totalDistanceKm = segments.reduce((sum, segment) => {
+      const value = Number(segment?.distanceKm);
+      if (!Number.isFinite(value) || value <= 0) {
+        return sum;
+      }
+      return sum + value;
+    }, 0);
+
+    if (!Number.isFinite(totalDistanceKm) || totalDistanceKm <= 0) {
+      return null;
+    }
+
+    const clamp01 = (value) => {
+      if (!Number.isFinite(value)) {
+        return 0;
+      }
+      if (value <= 0) {
+        return 0;
+      }
+      if (value >= 1) {
+        return 1;
+      }
+      return value;
+    };
+
+    const stops = [];
+    let traversed = 0;
+    let previousColor = null;
+    let previousNormalizedColor = null;
+
+    segments.forEach((segment, index) => {
+      if (!segment) {
+        return;
+      }
+      const color = typeof segment.color === 'string' ? segment.color : null;
+      const normalizedColor = typeof segment.normalizedColor === 'string' ? segment.normalizedColor : null;
+      const segmentDistance = Number(segment.distanceKm);
+      const distanceKm = Number.isFinite(segmentDistance) && segmentDistance > 0 ? segmentDistance : 0;
+      const blendPortion = clamp01(Number(segment.blendPortion));
+      const startRatio = traversed / totalDistanceKm;
+      const endRatio = (traversed + distanceKm) / totalDistanceKm;
+      const clampedStart = clamp01(startRatio);
+      const clampedEnd = clamp01(endRatio);
+
+      if (index === 0) {
+        if (color) {
+          stops.push({ offset: 0, color });
+        }
+      } else if (color && normalizedColor && previousColor && previousNormalizedColor && previousNormalizedColor !== normalizedColor) {
+        stops.push({ offset: clampedStart, color: previousColor });
+        if (blendPortion > 0 && distanceKm > 0) {
+          const blendDistance = Math.min(distanceKm * blendPortion, distanceKm);
+          const blendOffset = clamp01((traversed + blendDistance) / totalDistanceKm);
+          if (blendOffset > clampedStart) {
+            stops.push({ offset: blendOffset, color });
+          } else {
+            stops.push({ offset: clampedStart, color });
+          }
+        } else {
+          stops.push({ offset: clampedStart, color });
+        }
+      }
+
+      if (color) {
+        if (distanceKm > 0) {
+          stops.push({ offset: clampedEnd, color });
+        } else if (!stops.length || stops[stops.length - 1].color !== color) {
+          stops.push({ offset: clampedStart, color });
+        }
+      }
+
+      traversed += distanceKm;
+      previousColor = color ?? previousColor;
+      previousNormalizedColor = normalizedColor ?? previousNormalizedColor;
+    });
+
+    if (!stops.length) {
+      return null;
+    }
+
+    const normalizedStops = [];
+    let lastOffset = null;
+
+    stops
+      .filter((stop) => stop && typeof stop.color === 'string')
+      .forEach((stop) => {
+        const color = stop.color.trim();
+        if (!color) {
+          return;
+        }
+        const offset = clamp01(stop.offset);
+        if (lastOffset !== null && Math.abs(offset - lastOffset) <= 1e-6) {
+          if (normalizedStops.length) {
+            normalizedStops[normalizedStops.length - 1].color = color;
+          }
+          lastOffset = offset;
+          return;
+        }
+        lastOffset = offset;
+        normalizedStops.push({ offset, color });
+      });
+
+    if (!normalizedStops.length) {
+      return null;
+    }
+
+    const firstStop = normalizedStops[0];
+    if (firstStop.offset !== 0) {
+      normalizedStops.unshift({ offset: 0, color: firstStop.color });
+    }
+
+    const lastStop = normalizedStops[normalizedStops.length - 1];
+    if (lastStop.offset !== 1) {
+      normalizedStops.push({ offset: 1, color: lastStop.color });
+    }
+
+    if (normalizedStops.length < 2) {
+      return null;
+    }
+
+    const expression = ['interpolate', ['linear'], ['line-progress']];
+    normalizedStops.forEach((stop) => {
+      expression.push(clamp01(stop.offset));
+      expression.push(stop.color);
+    });
+
+    return expression;
+  }
+
   getRouteLineGradientExpression() {
-    const fallbackColor = this.modeColors?.[this.currentMode] ?? '#3ab7c6';
-    const startColorExpression = ['coalesce', ['get', 'gradientStartColor'], ['get', 'color'], fallbackColor];
-    const endColorExpression = ['coalesce', ['get', 'color'], fallbackColor];
-    return [
-      'let',
-      'blendPortion',
-      ['max', 0, ['min', 1, ['coalesce', ['get', 'gradientBlendStop'], 0]]],
-      ['case',
-        ['<=', ['var', 'blendPortion'], 0],
-        endColorExpression,
-        ['interpolate',
-          ['linear'],
-          ['min', 1, ['/', ['line-progress'], ['var', 'blendPortion']]],
-          0,
-          startColorExpression,
-          1,
-          endColorExpression
-        ]
-      ]
-    ];
+    if (!Array.isArray(this.routeLineGradientExpression) || this.routeLineGradientExpression.length <= 4) {
+      return null;
+    }
+    return this.routeLineGradientExpression;
   }
 
   isLineGradientUnsupportedError(error) {
@@ -2618,12 +2739,17 @@ export class DirectionsManager {
       return;
     }
     this.routeLineGradientSupported = false;
+    this.routeLineGradientExpression = null;
     if (this.map.getLayer('route-line')) {
       try {
         this.map.setPaintProperty('route-line', 'line-gradient', null);
       } catch (setError) {
         // Ignore failures when clearing unsupported properties.
       }
+    }
+    const source = this.map.getSource('route-line-source');
+    if (source) {
+      source.setData(this.routeLineFallbackData ?? EMPTY_COLLECTION);
     }
   }
 
@@ -2652,11 +2778,6 @@ export class DirectionsManager {
       ? this.profileSegments
       : this.cutSegments;
 
-    if (!Array.isArray(displaySegments) || !displaySegments.length) {
-      source.setData(EMPTY_COLLECTION);
-      return;
-    }
-
     const useBaseColor = this.profileMode === 'none';
     const fallbackColor = this.modeColors[this.currentMode];
     const normalizeColor = (value) => {
@@ -2667,65 +2788,158 @@ export class DirectionsManager {
       return trimmed.length ? trimmed : null;
     };
 
-    const features = [];
+    const fallbackFeatures = [];
+    const normalizedSegments = [];
+
     let previousColorValue = null;
 
-    displaySegments.forEach((segment) => {
-      if (!segment) {
-        return;
+    const coordinateDistanceKm = (coords) => {
+      if (!Array.isArray(coords) || coords.length < 2) {
+        return 0;
       }
-      const coordinates = Array.isArray(segment.coordinates)
-        ? segment.coordinates.map((coord) => (Array.isArray(coord) ? coord.slice() : null)).filter(Boolean)
-        : [];
-      if (coordinates.length < 2) {
-        return;
-      }
-      const segmentColorValue = normalizeColor(useBaseColor ? fallbackColor : segment.color) ?? fallbackColor;
-      const normalizedCurrent = segmentColorValue.toLowerCase();
-      const normalizedPrevious = typeof previousColorValue === 'string'
-        ? previousColorValue.toLowerCase()
-        : null;
-      const gradientStartColor = (!normalizedPrevious || normalizedPrevious === normalizedCurrent)
-        ? segmentColorValue
-        : previousColorValue;
-
-      let blendPortion = 0;
-      if (!useBaseColor && normalizedPrevious && normalizedPrevious !== normalizedCurrent) {
-        const distanceKm = Number(segment.distanceKm);
-        if (Number.isFinite(distanceKm) && distanceKm > 0) {
-          const ratio = ROUTE_GRADIENT_BLEND_DISTANCE_KM / Math.max(distanceKm, ROUTE_GRADIENT_BLEND_DISTANCE_KM);
-          blendPortion = Math.min(0.4, Math.max(0.05, ratio));
-        } else {
-          blendPortion = 0.2;
+      let totalMeters = 0;
+      for (let index = 1; index < coords.length; index += 1) {
+        const segmentDistance = haversineDistanceMeters(coords[index - 1], coords[index]);
+        if (Number.isFinite(segmentDistance) && segmentDistance > 0) {
+          totalMeters += segmentDistance;
         }
       }
+      return totalMeters / 1000;
+    };
 
-      features.push({
-        type: 'Feature',
-        properties: {
+    if (Array.isArray(displaySegments)) {
+      displaySegments.forEach((segment) => {
+        if (!segment) {
+          return;
+        }
+        const coordinates = Array.isArray(segment.coordinates)
+          ? segment.coordinates.map((coord) => (Array.isArray(coord) ? coord.slice() : null)).filter(Boolean)
+          : [];
+        if (coordinates.length < 2) {
+          return;
+        }
+
+        const segmentColorValue = normalizeColor(useBaseColor ? fallbackColor : segment.color) ?? fallbackColor;
+        const normalizedCurrent = segmentColorValue.toLowerCase();
+        const normalizedPrevious = typeof previousColorValue === 'string'
+          ? previousColorValue.toLowerCase()
+          : null;
+
+        let startKm = Number(segment.startKm);
+        if (!Number.isFinite(startKm)) {
+          startKm = Number(segment.startDistanceKm);
+        }
+        let endKm = Number(segment.endKm);
+        if (!Number.isFinite(endKm)) {
+          endKm = Number(segment.endDistanceKm);
+        }
+
+        let distanceKm = Number(segment.distanceKm);
+        if (!Number.isFinite(distanceKm)) {
+          if (Number.isFinite(startKm) && Number.isFinite(endKm)) {
+            distanceKm = Math.max(0, endKm - startKm);
+          } else {
+            distanceKm = coordinateDistanceKm(coordinates);
+          }
+        }
+        if (!Number.isFinite(distanceKm) || distanceKm < 0) {
+          distanceKm = 0;
+        }
+
+        let blendPortion = 0;
+        if (!useBaseColor && normalizedPrevious && normalizedPrevious !== normalizedCurrent) {
+          if (distanceKm > 0) {
+            const ratio = ROUTE_GRADIENT_BLEND_DISTANCE_KM / Math.max(distanceKm, ROUTE_GRADIENT_BLEND_DISTANCE_KM);
+            blendPortion = Math.min(0.4, Math.max(0.05, ratio));
+          } else {
+            blendPortion = 0.2;
+          }
+        }
+
+        fallbackFeatures.push({
+          type: 'Feature',
+          properties: {
+            color: segmentColorValue,
+            segmentIndex: segment.index,
+            name: segment.name,
+            startKm: Number.isFinite(startKm) ? startKm : null,
+            endKm: Number.isFinite(endKm) ? endKm : null
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates
+          }
+        });
+
+        normalizedSegments.push({
+          coordinates,
           color: segmentColorValue,
-          segmentIndex: segment.index,
-          name: segment.name,
-          startKm: segment.startKm,
-          endKm: segment.endKm,
-          gradientStartColor,
-          gradientBlendStop: blendPortion
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates
-        }
+          normalizedColor: normalizedCurrent,
+          distanceKm,
+          blendPortion
+        });
+
+        previousColorValue = segmentColorValue;
       });
+    }
 
-      previousColorValue = segmentColorValue;
+    this.routeLineFallbackData = fallbackFeatures.length
+      ? {
+        type: 'FeatureCollection',
+        features: fallbackFeatures
+      }
+      : EMPTY_COLLECTION;
+
+    const gradientCoordinates = [];
+    normalizedSegments.forEach((segment) => {
+      if (!Array.isArray(segment.coordinates)) {
+        return;
+      }
+      segment.coordinates.forEach((coord, index) => {
+        if (!Array.isArray(coord) || coord.length < 2) {
+          return;
+        }
+        if (gradientCoordinates.length && index === 0) {
+          const last = gradientCoordinates[gradientCoordinates.length - 1];
+          if (last
+            && Math.abs(last[0] - coord[0]) <= COORD_EPSILON
+            && Math.abs(last[1] - coord[1]) <= COORD_EPSILON) {
+            return;
+          }
+        }
+        gradientCoordinates.push(coord);
+      });
     });
 
-    source.setData({
-      type: 'FeatureCollection',
-      features
-    });
+    this.routeLineGradientExpression = this.generateRouteLineGradientExpression(normalizedSegments);
 
-    this.setRouteLineGradient();
+    this.routeLineGradientData = gradientCoordinates.length >= 2 && this.routeLineGradientExpression
+      ? {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: gradientCoordinates
+            }
+          }
+        ]
+      }
+      : EMPTY_COLLECTION;
+
+    const shouldUseGradient = this.routeLineGradientSupported
+      && Array.isArray(this.routeLineGradientExpression)
+      && this.routeLineGradientExpression.length > 4
+      && this.routeLineGradientData?.features?.length;
+
+    const targetData = shouldUseGradient ? this.routeLineGradientData : this.routeLineFallbackData;
+    source.setData(targetData ?? EMPTY_COLLECTION);
+
+    if (this.routeLineGradientSupported) {
+      this.setRouteLineGradient();
+    }
 
     this.updateSegmentMarkers();
   }
