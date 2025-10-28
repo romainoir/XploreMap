@@ -60,7 +60,15 @@ function buildCoordinate(lng, lat, elevationCandidates = []) {
   return [roundedLng, roundedLat, elevation];
 }
 
-export function getOverpassQuery(lat, lon) {
+function normalizeRadiusMeters(value) {
+  const numeric = normalizeNumber(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return PATH_RADIUS_METERS;
+  }
+  return Math.max(500, Math.round(numeric));
+}
+
+export function getOverpassQuery(lat, lon, radiusMeters = PATH_RADIUS_METERS) {
   const normalizedLat = clampLatitude(lat);
   const normalizedLon = clampLongitude(lon);
   if (normalizedLat == null || normalizedLon == null) {
@@ -68,9 +76,10 @@ export function getOverpassQuery(lat, lon) {
   }
   const latValue = toFixed(normalizedLat, 6);
   const lonValue = toFixed(normalizedLon, 6);
+  const radiusValue = normalizeRadiusMeters(radiusMeters);
   return `[out:json][timeout:180];
 (
-  way["highway"]["highway"!="proposed"]["highway"!="construction"](around:${PATH_RADIUS_METERS},${latValue},${lonValue});
+  way["highway"]["highway"!="proposed"]["highway"!="construction"](around:${radiusValue},${latValue},${lonValue});
 );
 (._;>;);
 out body;`;
@@ -428,8 +437,9 @@ export function computeCoverageBounds({ lat, lon, radiusMeters = Math.max(PATH_R
   if (centerLat == null || centerLon == null) {
     return null;
   }
-  const latDelta = metersToLatitudeDegrees(radiusMeters);
-  const lonDelta = metersToLongitudeDegrees(radiusMeters, centerLat);
+  const normalizedRadius = normalizeRadiusMeters(radiusMeters);
+  const latDelta = metersToLatitudeDegrees(normalizedRadius);
+  const lonDelta = metersToLongitudeDegrees(normalizedRadius, centerLat);
   return {
     west: centerLon - lonDelta,
     east: centerLon + lonDelta,
@@ -438,24 +448,79 @@ export function computeCoverageBounds({ lat, lon, radiusMeters = Math.max(PATH_R
   };
 }
 
-export async function extractOverpassNetwork({ lat, lon, endpoint = OVERPASS_ENDPOINT, signal } = {}) {
-  const query = getOverpassQuery(lat, lon);
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain;charset=UTF-8'
-    },
-    body: query,
-    signal
+function buildRadiusCandidates(baseRadius = PATH_RADIUS_METERS) {
+  const MIN_RADIUS_METERS = 2500;
+  const startRadius = normalizeRadiusMeters(baseRadius);
+  const factors = [1, 0.85, 0.7, 0.55, 0.4];
+  const candidates = new Set();
+  factors.forEach((factor) => {
+    const candidate = Math.max(MIN_RADIUS_METERS, Math.round(startRadius * factor));
+    candidates.add(candidate);
   });
-  if (!response.ok) {
-    throw new Error(`Overpass request failed with status ${response.status}`);
+  candidates.add(MIN_RADIUS_METERS);
+  return Array.from(candidates).sort((a, b) => b - a);
+}
+
+function shouldRetryOverpassError(error) {
+  if (!error) {
+    return false;
   }
-  const payload = await response.json();
-  const elements = Array.isArray(payload?.elements) ? payload.elements : [];
-  const network = convertOverpassElementsToGeoJSON(elements);
-  const coverageBounds = computeCoverageBounds({ lat, lon });
-  return { network, coverageBounds };
+  if (typeof error === 'object') {
+    const status = error.status ?? error.code ?? error.statusCode;
+    if (status === 504 || status === 503 || status === 502 || status === 429) {
+      return true;
+    }
+  }
+  const message = typeof error.message === 'string' ? error.message : '';
+  return /\b(504|429)\b/.test(message);
+}
+
+export async function extractOverpassNetwork({
+  lat,
+  lon,
+  radiusMeters,
+  endpoint = OVERPASS_ENDPOINT,
+  signal
+} = {}) {
+  const radiusCandidates = buildRadiusCandidates(radiusMeters ?? PATH_RADIUS_METERS);
+  let lastError = null;
+
+  for (let index = 0; index < radiusCandidates.length; index += 1) {
+    const candidateRadius = radiusCandidates[index];
+    try {
+      const query = getOverpassQuery(lat, lon, candidateRadius);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=UTF-8'
+        },
+        body: query,
+        signal
+      });
+      if (!response.ok) {
+        const error = new Error(`Overpass request failed with status ${response.status}`);
+        error.status = response.status;
+        error.radiusMeters = candidateRadius;
+        throw error;
+      }
+      const payload = await response.json();
+      const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+      const network = convertOverpassElementsToGeoJSON(elements);
+      const coverageBounds = computeCoverageBounds({ lat, lon, radiusMeters: candidateRadius });
+      return { network, coverageBounds };
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      lastError = error;
+      const isLastAttempt = index === radiusCandidates.length - 1;
+      if (!shouldRetryOverpassError(error) || isLastAttempt) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error('Overpass network extraction failed');
 }
 
 export { OVERPASS_ENDPOINT };
