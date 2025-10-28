@@ -154,6 +154,17 @@ const IMAGERY_LAYER_IDS = new Set(
   })
 );
 
+const ROUTE_LAYER_IDS = new Set([
+  'route-line',
+  'route-segment-hover',
+  'distance-markers',
+  'waypoints',
+  'waypoints-hit-area',
+  'waypoint-hover-drag',
+  'route-hover-point',
+  'segment-markers'
+]);
+
 const CONTOUR_LINE_BASE_OPACITY = Object.freeze([
   'interpolate', ['linear'], ['zoom'],
   13.4, 0,
@@ -387,7 +398,11 @@ function setBaseStyleOpacity(map, alpha) {
     const id = layer.id;
     const type = layer.type;
 
-    if (IMAGERY_LAYER_IDS.has(id) || ['color-relief', 'hillshade', 'contours', 'contour-text'].includes(id)) continue;
+    if (
+      IMAGERY_LAYER_IDS.has(id) ||
+      ROUTE_LAYER_IDS.has(id) ||
+      ['color-relief', 'hillshade', 'contours', 'contour-text'].includes(id)
+    ) continue;
 
     const setIf = (prop, value) => {
       try {
@@ -1542,7 +1557,7 @@ async function init() {
       .filter((option) => option && typeof option.layerId === 'string' && map.getLayer(option.layerId));
 
     let beforeId = topLabelId ?? undefined;
-    for (let i = orderedOptions.length - 1; i >= 0; i -= 1) {
+    for (let i = 0; i < orderedOptions.length; i += 1) {
       const option = orderedOptions[i];
       if (!option) continue;
       const layerSequence = [option.layerId];
