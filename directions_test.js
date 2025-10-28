@@ -19,6 +19,7 @@ const ELEVATION_TICK_TARGET = 5;
 const DISTANCE_TICK_TARGET = 6;
 const ROUTE_CUT_EPSILON_KM = 0.02;
 const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
+const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
 const EARTH_RADIUS_METERS = 6371000;
@@ -326,7 +327,14 @@ const SURFACE_LABELS = Object.freeze(
   }, {})
 );
 
+const UNKNOWN_CATEGORY_CLASSIFICATION = Object.freeze({
+  key: 'category-unknown',
+  label: 'No SAC info',
+  color: '#d0d4db'
+});
+
 const CATEGORY_CLASSIFICATIONS = Object.freeze([
+  UNKNOWN_CATEGORY_CLASSIFICATION,
   {
     key: 'category-t1',
     label: 'T1 · Easy hike',
@@ -965,7 +973,8 @@ export class DirectionsManager {
       paint: {
         'line-color': ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]],
         'line-width': 4,
-        'line-opacity': 0.95
+        'line-opacity': 0.95,
+        'line-gradient': this.getRouteLineGradientExpression()
       }
     });
 
@@ -1538,22 +1547,7 @@ export class DirectionsManager {
         }
       }
     }
-    const multiplier = Number(metadata?.costMultiplier) || 1;
-    const grade = Math.abs(this.computeSegmentGrade(segment));
-    for (const entry of CATEGORY_CLASSIFICATIONS) {
-      const maxMultiplier = Number.isFinite(entry.maxMultiplier) ? entry.maxMultiplier : Infinity;
-      const maxGrade = Number.isFinite(entry.maxGrade) ? entry.maxGrade : Infinity;
-      const multiplierOk = maxMultiplier === Infinity
-        ? true
-        : multiplier <= maxMultiplier + MULTIPLIER_TOLERANCE;
-      const gradeOk = maxGrade === Infinity
-        ? true
-        : grade < maxGrade + GRADE_TOLERANCE;
-      if (multiplierOk && gradeOk) {
-        return cloneClassificationEntry(entry);
-      }
-    }
-    return cloneClassificationEntry(CATEGORY_CLASSIFICATIONS[CATEGORY_CLASSIFICATIONS.length - 1]);
+    return cloneClassificationEntry(UNKNOWN_CATEGORY_CLASSIFICATION);
   }
 
   classifySegment(segment) {
@@ -2573,6 +2567,29 @@ export class DirectionsManager {
     return collections;
   }
 
+  getRouteLineGradientExpression() {
+    const fallbackColor = this.modeColors?.[this.currentMode] ?? '#3ab7c6';
+    const startColorExpression = ['coalesce', ['get', 'gradientStartColor'], ['get', 'color'], fallbackColor];
+    const endColorExpression = ['coalesce', ['get', 'color'], fallbackColor];
+    return [
+      'let',
+      'blendPortion',
+      ['max', 0, ['min', 1, ['coalesce', ['get', 'gradientBlendStop'], 0]]],
+      ['case',
+        ['<=', ['var', 'blendPortion'], 0],
+        endColorExpression,
+        ['interpolate',
+          ['linear'],
+          ['min', 1, ['/', ['line-progress'], ['var', 'blendPortion']]],
+          0,
+          startColorExpression,
+          1,
+          endColorExpression
+        ]
+      ]
+    ];
+  }
+
   updateRouteLineSource() {
     const source = this.map.getSource('route-line-source');
     if (!source) {
@@ -2589,26 +2606,76 @@ export class DirectionsManager {
     }
 
     const useBaseColor = this.profileMode === 'none';
-    const baseColor = this.modeColors[this.currentMode];
-    const features = displaySegments.map((segment) => ({
-      type: 'Feature',
-      properties: {
-        color: useBaseColor ? baseColor : segment.color,
-        segmentIndex: segment.index,
-        name: segment.name,
-        startKm: segment.startKm,
-        endKm: segment.endKm
-      },
-      geometry: {
-        type: 'LineString',
-        coordinates: segment.coordinates.map((coord) => coord.slice())
+    const fallbackColor = this.modeColors[this.currentMode];
+    const normalizeColor = (value) => {
+      if (typeof value !== 'string') {
+        return null;
       }
-    }));
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : null;
+    };
+
+    const features = [];
+    let previousColorValue = null;
+
+    displaySegments.forEach((segment) => {
+      if (!segment) {
+        return;
+      }
+      const coordinates = Array.isArray(segment.coordinates)
+        ? segment.coordinates.map((coord) => (Array.isArray(coord) ? coord.slice() : null)).filter(Boolean)
+        : [];
+      if (coordinates.length < 2) {
+        return;
+      }
+      const segmentColorValue = normalizeColor(useBaseColor ? fallbackColor : segment.color) ?? fallbackColor;
+      const normalizedCurrent = segmentColorValue.toLowerCase();
+      const normalizedPrevious = typeof previousColorValue === 'string'
+        ? previousColorValue.toLowerCase()
+        : null;
+      const gradientStartColor = (!normalizedPrevious || normalizedPrevious === normalizedCurrent)
+        ? segmentColorValue
+        : previousColorValue;
+
+      let blendPortion = 0;
+      if (!useBaseColor && normalizedPrevious && normalizedPrevious !== normalizedCurrent) {
+        const distanceKm = Number(segment.distanceKm);
+        if (Number.isFinite(distanceKm) && distanceKm > 0) {
+          const ratio = ROUTE_GRADIENT_BLEND_DISTANCE_KM / Math.max(distanceKm, ROUTE_GRADIENT_BLEND_DISTANCE_KM);
+          blendPortion = Math.min(0.4, Math.max(0.05, ratio));
+        } else {
+          blendPortion = 0.2;
+        }
+      }
+
+      features.push({
+        type: 'Feature',
+        properties: {
+          color: segmentColorValue,
+          segmentIndex: segment.index,
+          name: segment.name,
+          startKm: segment.startKm,
+          endKm: segment.endKm,
+          gradientStartColor,
+          gradientBlendStop: blendPortion
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates
+        }
+      });
+
+      previousColorValue = segmentColorValue;
+    });
 
     source.setData({
       type: 'FeatureCollection',
       features
     });
+
+    if (this.map.getLayer('route-line')) {
+      this.map.setPaintProperty('route-line', 'line-gradient', this.getRouteLineGradientExpression());
+    }
 
     this.updateSegmentMarkers();
   }
@@ -4913,6 +4980,7 @@ export class DirectionsManager {
         'line-color',
         ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
       );
+      this.map.setPaintProperty('route-line', 'line-gradient', this.getRouteLineGradientExpression());
     }
     if (this.map.getLayer('route-hover-point')) {
       this.map.setPaintProperty('route-hover-point', 'circle-stroke-color', this.modeColors[this.currentMode]);
