@@ -246,6 +246,7 @@ async function init() {
   const debugNetworkControl = document.getElementById('debugNetworkControl');
   const profileModeToggle = document.getElementById('profileModeToggle');
   const profileModeMenu = document.getElementById('profileModeMenuList');
+  const profileLegend = document.getElementById('profileLegend');
 
   applyUiIconSources();
 
@@ -881,7 +882,8 @@ async function init() {
         directionsInfoButton,
         directionsHint,
         profileModeToggle,
-        profileModeMenu
+        profileModeMenu,
+        profileLegend
       ], {
         router: offlineRouter
       });
