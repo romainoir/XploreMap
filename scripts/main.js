@@ -316,6 +316,28 @@ async function init() {
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_INTERSECTIONS_LAYER_ID = 'offline-router-network-debug-intersections';
+  const DEBUG_NETWORK_SAC_SCALE_COLOR_EXPRESSION = Object.freeze([
+    'let',
+    'sacScale',
+    [
+      'coalesce',
+      ['get', 'sacScale', ['get', 'hiking']],
+      ['get', 'sac_scale', ['get', 'hiking']],
+      ['get', 'sacScale'],
+      ['get', 'sac_scale']
+    ],
+    [
+      'match',
+      ['var', 'sacScale'],
+      'difficult_alpine_hiking', '#800026',
+      'demanding_alpine_hiking', '#bd0026',
+      'alpine_hiking', '#f03b20',
+      'demanding_mountain_hiking', '#fd8d3c',
+      'mountain_hiking', '#fecc5c',
+      'hiking', '#31a354',
+      '#2d7bd6'
+    ]
+  ]);
   let debugNetworkVisible = false;
   let debugNetworkData = null;
   let directionsManager = null;
@@ -457,7 +479,7 @@ async function init() {
         type: 'line',
         source: DEBUG_NETWORK_SOURCE_ID,
         paint: {
-          'line-color': '#2d7bd6',
+          'line-color': DEBUG_NETWORK_SAC_SCALE_COLOR_EXPRESSION,
           'line-width': [
             'interpolate',
             ['linear'],
