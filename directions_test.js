@@ -115,16 +115,59 @@ const SEGMENT_MARKER_ICONS = {
   end: END_MARKER_ICON_ID
 };
 
-let bivouacMarkerImagePromise = null;
+const SLOPE_CLASSIFICATIONS = Object.freeze([
+  { key: 'slope-very-steep-descent', label: 'Very steep descent (<-18%)', color: '#0b3d91', maxGrade: -18, maxInclusive: false },
+  { key: 'slope-steep-descent', label: 'Steep descent (-18% to -12%)', color: '#1f5fa5', minGrade: -18, minInclusive: true, maxGrade: -12, maxInclusive: false },
+  { key: 'slope-moderate-descent', label: 'Moderate descent (-12% to -6%)', color: '#4aa3f0', minGrade: -12, minInclusive: true, maxGrade: -6, maxInclusive: false },
+  { key: 'slope-rolling', label: 'Rolling (-6% to 6%)', color: '#27ae60', minGrade: -6, minInclusive: true, maxGrade: 6, maxInclusive: true },
+  { key: 'slope-moderate-climb', label: 'Moderate climb (6% to 12%)', color: '#f4d03f', minGrade: 6, minInclusive: true, maxGrade: 12, maxInclusive: false },
+  { key: 'slope-hard-climb', label: 'Climb (12% to 18%)', color: '#f39c12', minGrade: 12, minInclusive: true, maxGrade: 18, maxInclusive: false },
+  { key: 'slope-steep-climb', label: 'Steep climb (>18%)', color: '#c0392b', minGrade: 18, minInclusive: true }
+]);
+
+const SURFACE_CLASSIFICATIONS = Object.freeze([
+  { key: 'surface-paved', label: 'Paved road', color: '#5d6d7e', maxMultiplier: 0.95, maxInclusive: true },
+  { key: 'surface-compact', label: 'Compact surface', color: '#2ecc71', minMultiplier: 0.95, minInclusive: false, maxMultiplier: 1.05, maxInclusive: true },
+  { key: 'surface-dirt', label: 'Dirt / gravel', color: '#d4ac0d', minMultiplier: 1.05, minInclusive: false, maxMultiplier: 1.15, maxInclusive: true },
+  { key: 'surface-rocky', label: 'Rocky trail', color: '#e67e22', minMultiplier: 1.15, minInclusive: false, maxMultiplier: 1.3, maxInclusive: true },
+  { key: 'surface-alpine', label: 'Glacier / alpine', color: '#c0392b', minMultiplier: 1.3, minInclusive: false }
+]);
+
+const CATEGORY_CLASSIFICATIONS = Object.freeze([
+  { key: 'category-t1', label: 'T1 · Easy hike', color: '#2ecc71', maxMultiplier: 1, maxGrade: 8 },
+  { key: 'category-t2', label: 'T2 · Mountain trail', color: '#27ae60', maxMultiplier: 1.1, maxGrade: 12 },
+  { key: 'category-t3', label: 'T3 · Alpine hike', color: '#f39c12', maxMultiplier: 1.2, maxGrade: 18 },
+  { key: 'category-t4', label: 'T4 · Alpine route', color: '#e67e22', maxMultiplier: 1.35 },
+  { key: 'category-t5', label: 'T5+ · Technical alpine', color: '#c0392b' }
+]);
 
 const PROFILE_MODE_DEFINITIONS = Object.freeze({
+  none: { key: 'none', label: 'None' },
   slope: { key: 'slope', label: 'Slope' },
   surface: { key: 'surface', label: 'Surface' },
   category: { key: 'category', label: 'Category' }
 });
 
-const DEFAULT_PROFILE_MODE = PROFILE_MODE_DEFINITIONS.category.key;
+const PROFILE_MODE_LEGENDS = Object.freeze({
+  slope: SLOPE_CLASSIFICATIONS,
+  surface: SURFACE_CLASSIFICATIONS,
+  category: CATEGORY_CLASSIFICATIONS
+});
+
+const DEFAULT_PROFILE_MODE = PROFILE_MODE_DEFINITIONS.none.key;
 const MIN_PROFILE_SEGMENT_DISTANCE_KM = 1e-6;
+const MULTIPLIER_TOLERANCE = 1e-6;
+const GRADE_TOLERANCE = 1e-4;
+const HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+let bivouacMarkerImagePromise = null;
+
+function cloneClassificationEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+  return { ...entry };
+}
 
 function loadBivouacMarkerImageElement() {
   if (bivouacMarkerImagePromise) {
@@ -509,7 +552,8 @@ export class DirectionsManager {
       directionsInfoButton,
       directionsHint,
       profileModeToggle,
-      profileModeMenu
+      profileModeMenu,
+      profileLegend
     ] = uiElements;
 
     const { router = null } = options ?? {};
@@ -536,6 +580,7 @@ export class DirectionsManager {
     this.profileModeLabel = this.profileModeToggle
       ? this.profileModeToggle.querySelector('.profile-mode-button__label')
       : null;
+    this.profileLegend = profileLegend ?? null;
 
     if (this.routeStats) {
       this.routeStats.setAttribute('aria-live', 'polite');
@@ -972,6 +1017,17 @@ export class DirectionsManager {
     return definition || PROFILE_MODE_DEFINITIONS[DEFAULT_PROFILE_MODE];
   }
 
+  getProfileLegendEntries(mode) {
+    if (!mode || mode === 'none') {
+      return [];
+    }
+    const entries = PROFILE_MODE_LEGENDS?.[mode];
+    if (!Array.isArray(entries)) {
+      return [];
+    }
+    return entries.map((entry) => cloneClassificationEntry(entry)).filter(Boolean);
+  }
+
   updateProfileModeUI() {
     const definition = this.getProfileModeDefinition(this.profileMode);
     const label = definition?.label ?? this.profileMode;
@@ -991,6 +1047,52 @@ export class DirectionsManager {
       button.classList.toggle('active', isActive);
       button.setAttribute('aria-checked', isActive ? 'true' : 'false');
     });
+    const hasRoute = Array.isArray(this.routeGeojson?.geometry?.coordinates)
+      && this.routeGeojson.geometry.coordinates.length >= 2;
+    this.updateProfileLegend(hasRoute);
+  }
+
+  updateProfileLegend(hasRoute = true) {
+    if (!this.profileLegend) {
+      return;
+    }
+    const shouldDisplay = Boolean(hasRoute && this.profileMode !== 'none');
+    if (!shouldDisplay) {
+      this.profileLegend.innerHTML = '';
+      this.profileLegend.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    const entries = this.getProfileLegendEntries(this.profileMode);
+    if (!entries.length) {
+      this.profileLegend.innerHTML = '';
+      this.profileLegend.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    const fallbackColor = this.modeColors?.[this.currentMode] ?? '#3ab7c6';
+    const normalizeColor = (value) => {
+      if (typeof value !== 'string') {
+        return fallbackColor;
+      }
+      const trimmed = value.trim();
+      if (HEX_COLOR_PATTERN.test(trimmed)) {
+        return trimmed;
+      }
+      return fallbackColor;
+    };
+    const items = entries
+      .map((entry) => {
+        const color = normalizeColor(entry.color);
+        const safeLabel = escapeHtml(entry.label ?? entry.key ?? '');
+        return `
+          <li class="profile-legend__item">
+            <span class="profile-legend__swatch" style="--legend-color:${color}"></span>
+            <span class="profile-legend__label">${safeLabel}</span>
+          </li>
+        `.trim();
+      })
+      .join('');
+    this.profileLegend.innerHTML = `<ul class="profile-legend__list">${items}</ul>`;
+    this.profileLegend.setAttribute('aria-hidden', 'false');
   }
 
   openProfileMenu() {
@@ -1082,62 +1184,67 @@ export class DirectionsManager {
     if (!Number.isFinite(grade)) {
       return null;
     }
-    if (grade >= 18) {
-      return { key: 'slope-steep-climb', label: 'Steep climb (>18%)', color: '#c0392b' };
+    for (const entry of SLOPE_CLASSIFICATIONS) {
+      const min = Number.isFinite(entry.minGrade) ? entry.minGrade : -Infinity;
+      const max = Number.isFinite(entry.maxGrade) ? entry.maxGrade : Infinity;
+      const lowerOk = min === -Infinity
+        ? true
+        : entry.minInclusive === false
+          ? grade > min + GRADE_TOLERANCE
+          : grade >= min - GRADE_TOLERANCE;
+      const upperOk = max === Infinity
+        ? true
+        : entry.maxInclusive === true
+          ? grade <= max + GRADE_TOLERANCE
+          : grade < max - GRADE_TOLERANCE;
+      if (lowerOk && upperOk) {
+        return cloneClassificationEntry(entry);
+      }
     }
-    if (grade >= 12) {
-      return { key: 'slope-hard-climb', label: 'Climb (12-18%)', color: '#e67e22' };
-    }
-    if (grade >= 6) {
-      return { key: 'slope-moderate-climb', label: 'Moderate climb (6-12%)', color: '#f1c40f' };
-    }
-    if (grade > -6) {
-      return { key: 'slope-rolling', label: 'Rolling (-6% to 6%)', color: '#27ae60' };
-    }
-    if (grade > -12) {
-      return { key: 'slope-moderate-descent', label: 'Moderate descent (-12% to -6%)', color: '#3498db' };
-    }
-    if (grade > -18) {
-      return { key: 'slope-steep-descent', label: 'Steep descent (-18% to -12%)', color: '#2c3e50' };
-    }
-    return { key: 'slope-very-steep-descent', label: 'Very steep descent (<-18%)', color: '#8e44ad' };
+    return cloneClassificationEntry(SLOPE_CLASSIFICATIONS[SLOPE_CLASSIFICATIONS.length - 1]);
   }
 
   classifySurfaceSegment(segment) {
     const metadata = this.getSegmentMetadata(segment);
-    const multiplier = metadata?.costMultiplier ?? 1;
-    if (multiplier <= 0.95) {
-      return { key: 'surface-paved', label: 'Paved road', color: '#566573' };
+    const multiplier = Number(metadata?.costMultiplier) || 1;
+    for (const entry of SURFACE_CLASSIFICATIONS) {
+      const min = Number.isFinite(entry.minMultiplier) ? entry.minMultiplier : -Infinity;
+      const max = Number.isFinite(entry.maxMultiplier) ? entry.maxMultiplier : Infinity;
+      const lowerOk = min === -Infinity
+        ? true
+        : entry.minInclusive === false
+          ? multiplier > min + MULTIPLIER_TOLERANCE
+          : multiplier >= min - MULTIPLIER_TOLERANCE;
+      const upperOk = max === Infinity
+        ? true
+        : entry.maxInclusive === true
+          ? multiplier <= max + MULTIPLIER_TOLERANCE
+          : multiplier < max - MULTIPLIER_TOLERANCE;
+      if (lowerOk && upperOk) {
+        return cloneClassificationEntry(entry);
+      }
     }
-    if (multiplier <= 1.05) {
-      return { key: 'surface-compact', label: 'Compact surface', color: '#2ecc71' };
-    }
-    if (multiplier <= 1.15) {
-      return { key: 'surface-dirt', label: 'Dirt / gravel', color: '#f1c40f' };
-    }
-    if (multiplier <= 1.3) {
-      return { key: 'surface-rocky', label: 'Rocky trail', color: '#e67e22' };
-    }
-    return { key: 'surface-alpine', label: 'Glacier / alpine', color: '#c0392b' };
+    return cloneClassificationEntry(SURFACE_CLASSIFICATIONS[SURFACE_CLASSIFICATIONS.length - 1]);
   }
 
   classifyCategorySegment(segment) {
     const metadata = this.getSegmentMetadata(segment);
-    const multiplier = metadata?.costMultiplier ?? 1;
+    const multiplier = Number(metadata?.costMultiplier) || 1;
     const grade = Math.abs(this.computeSegmentGrade(segment));
-    if (multiplier <= 1 && grade < 8) {
-      return { key: 'category-t1', label: 'T1 · Easy hike', color: '#2ecc71' };
+    for (const entry of CATEGORY_CLASSIFICATIONS) {
+      const maxMultiplier = Number.isFinite(entry.maxMultiplier) ? entry.maxMultiplier : Infinity;
+      const maxGrade = Number.isFinite(entry.maxGrade) ? entry.maxGrade : Infinity;
+      const multiplierOk = maxMultiplier === Infinity
+        ? true
+        : multiplier <= maxMultiplier + MULTIPLIER_TOLERANCE;
+      const gradeOk = maxGrade === Infinity
+        ? true
+        : grade < maxGrade + GRADE_TOLERANCE;
+      if (multiplierOk && gradeOk) {
+        return cloneClassificationEntry(entry);
+      }
     }
-    if (multiplier <= 1.1 && grade < 12) {
-      return { key: 'category-t2', label: 'T2 · Mountain trail', color: '#27ae60' };
-    }
-    if (multiplier <= 1.2 && grade < 18) {
-      return { key: 'category-t3', label: 'T3 · Alpine hike', color: '#f39c12' };
-    }
-    if (multiplier <= 1.35) {
-      return { key: 'category-t4', label: 'T4 · Alpine route', color: '#e67e22' };
-    }
-    return { key: 'category-t5', label: 'T5+ · Technical alpine', color: '#c0392b' };
+    return cloneClassificationEntry(CATEGORY_CLASSIFICATIONS[CATEGORY_CLASSIFICATIONS.length - 1]);
   }
 
   classifySegment(segment) {
@@ -1145,6 +1252,8 @@ export class DirectionsManager {
       return null;
     }
     switch (this.profileMode) {
+      case 'none':
+        return null;
       case 'slope':
         return this.classifySlopeSegment(segment);
       case 'surface':
@@ -1156,7 +1265,9 @@ export class DirectionsManager {
   }
 
   updateProfileSegments() {
-    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
+    if (this.profileMode === 'none'
+      || !Array.isArray(this.routeSegments)
+      || !this.routeSegments.length) {
       this.profileSegments = [];
       this.updateRouteLineSource();
       return;
@@ -2168,10 +2279,12 @@ export class DirectionsManager {
       return;
     }
 
+    const useBaseColor = this.profileMode === 'none';
+    const baseColor = this.modeColors[this.currentMode];
     const features = displaySegments.map((segment) => ({
       type: 'Feature',
       properties: {
-        color: segment.color,
+        color: useBaseColor ? baseColor : segment.color,
         segmentIndex: segment.index,
         name: segment.name,
         startKm: segment.startKm,
@@ -2221,6 +2334,9 @@ export class DirectionsManager {
 
   getColorForDistance(distanceKm) {
     if (!Number.isFinite(distanceKm)) {
+      return this.modeColors[this.currentMode];
+    }
+    if (this.profileMode === 'none') {
       return this.modeColors[this.currentMode];
     }
     const profileSegment = this.getProfileSegmentForDistance(distanceKm);
@@ -4973,7 +5089,10 @@ export class DirectionsManager {
   }
 
   updateElevationProfile(coordinates) {
-    if (!this.elevationChart) return;
+    if (!this.elevationChart) {
+      this.updateProfileLegend(false);
+      return;
+    }
     this.detachElevationChartEvents();
     this.lastElevationHoverDistance = null;
     if (this.elevationResizeObserver) {
@@ -4987,6 +5106,7 @@ export class DirectionsManager {
       this.elevationChartContainer = null;
       this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
+      this.updateProfileLegend(false);
       return;
     }
 
@@ -5000,6 +5120,7 @@ export class DirectionsManager {
       this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
       this.lastElevationHoverDistance = null;
+      this.updateProfileLegend(false);
       return;
     }
 
@@ -5067,14 +5188,18 @@ export class DirectionsManager {
     const hitTargetsHtml = samples
       .map((sample) => {
         const midDistance = (sample.startDistanceKm + sample.endDistanceKm) / 2;
-        const profileSegment = this.getProfileSegmentForDistance(midDistance);
-        const cutSegment = this.getCutSegmentForDistance(midDistance);
+        const useOverlayColors = this.profileMode !== 'none';
+        const profileSegment = useOverlayColors ? this.getProfileSegmentForDistance(midDistance) : null;
+        const cutSegment = useOverlayColors ? this.getCutSegmentForDistance(midDistance) : null;
         const baseSegment = profileSegment ?? cutSegment;
-        const baseColor = typeof baseSegment?.color === 'string' && baseSegment.color.trim()
+        const baseColor = useOverlayColors
+          && typeof baseSegment?.color === 'string'
+          && baseSegment.color.trim()
           ? baseSegment.color.trim()
           : fallbackColor;
         addGradientStop(sample.startDistanceKm, baseColor);
         addGradientStop(sample.endDistanceKm, baseColor);
+        const segment = baseSegment;
         const accentColor = adjustHexColor(baseColor, 0.18);
         const spanKm = Math.max(0, sample.endDistanceKm - sample.startDistanceKm);
         const fallbackSpan = samples.length
@@ -5248,6 +5373,8 @@ export class DirectionsManager {
       </div>
     `;
 
+    this.updateProfileLegend(true);
+
     this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
     this.elevationHoverReadout = this.elevationChart.querySelector('.elevation-hover-readout');
     this.highlightedElevationBar = null;
@@ -5346,6 +5473,9 @@ export class DirectionsManager {
     const elevation = this.getElevationAtDistance(distanceKm);
     const altitudeLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : 'N/A';
 
+    const gradeValue = this.computeGradeAtDistance(distanceKm);
+    const gradeLabel = escapeHtml(this.formatGrade(gradeValue));
+
     const profileSegment = this.getProfileSegmentForDistance(distanceKm);
     let detailMarkup = '';
     if (profileSegment?.name) {
@@ -5358,6 +5488,7 @@ export class DirectionsManager {
     this.elevationHoverReadout.innerHTML = `
       <span class="distance">${distanceLabel} km</span>
       <span class="altitude">${altitudeLabel}</span>
+      <span class="grade">Slope ${gradeLabel}</span>
       ${detailMarkup}
     `;
     this.elevationHoverReadout.setAttribute('aria-hidden', 'false');
