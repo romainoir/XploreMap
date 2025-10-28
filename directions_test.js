@@ -267,7 +267,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   {
     key: 'surface-paved',
     label: 'Paved road',
-    color: '#5d6d7e',
+    color: '#b8b0a0',
     maxMultiplier: 0.95,
     maxInclusive: true,
     surfaceValues: Object.freeze(['paved', 'asphalt', 'concrete', 'concrete:lanes', 'paving_stones', 'sett', 'cobblestone'])
@@ -285,7 +285,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   {
     key: 'surface-dirt',
     label: 'Dirt / gravel',
-    color: '#d4ac0d',
+    color: '#cfa97a',
     minMultiplier: 1.05,
     minInclusive: false,
     maxMultiplier: 1.15,
@@ -295,7 +295,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   {
     key: 'surface-rocky',
     label: 'Rocky trail',
-    color: '#e67e22',
+    color: '#8f9299',
     minMultiplier: 1.15,
     minInclusive: false,
     maxMultiplier: 1.3,
@@ -305,7 +305,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   {
     key: 'surface-alpine',
     label: 'Glacier / alpine',
-    color: '#c0392b',
+    color: '#f0f4f7',
     minMultiplier: 1.3,
     minInclusive: false,
     surfaceValues: Object.freeze(['glacier', 'snow', 'ice'])
@@ -329,7 +329,7 @@ const SURFACE_LABELS = Object.freeze(
 
 const UNKNOWN_CATEGORY_CLASSIFICATION = Object.freeze({
   key: 'category-unknown',
-  label: 'No SAC info',
+  label: 'No info',
   color: '#d0d4db'
 });
 
@@ -2778,7 +2778,7 @@ export class DirectionsManager {
       ? this.profileSegments
       : this.cutSegments;
 
-    const useBaseColor = this.profileMode === 'none';
+    const useBaseColor = this.profileMode === 'none' && displaySegments !== this.cutSegments;
     const fallbackColor = this.modeColors[this.currentMode];
     const normalizeColor = (value) => {
       if (typeof value !== 'string') {
@@ -2977,6 +2977,10 @@ export class DirectionsManager {
       return this.modeColors[this.currentMode];
     }
     if (this.profileMode === 'none') {
+      const cutSegment = this.getCutSegmentForDistance(distanceKm);
+      if (cutSegment?.color) {
+        return cutSegment.color;
+      }
       return this.modeColors[this.currentMode];
     }
     const profileSegment = this.getProfileSegmentForDistance(distanceKm);
@@ -4817,7 +4821,7 @@ export class DirectionsManager {
     if (metadata) {
       const sacLabel = formatSacScaleLabel(metadata.sacScale);
       if (sacLabel) {
-        detailItems.push(`<span class="tooltip-sac">SAC scale: ${escapeHtml(sacLabel)}</span>`);
+        detailItems.push(`<span class="tooltip-sac">Difficulty: ${escapeHtml(sacLabel)}</span>`);
       }
       const surfaceLabel = formatSurfaceLabel(metadata.surface);
       if (surfaceLabel) {
@@ -4825,7 +4829,7 @@ export class DirectionsManager {
       }
       const trailLabel = formatTrailVisibilityLabel(metadata.trailVisibility);
       if (trailLabel) {
-        detailItems.push(`<span class="tooltip-trail">Trail visibility: ${escapeHtml(trailLabel)}</span>`);
+        detailItems.push(`<span class="tooltip-trail">Visibility: ${escapeHtml(trailLabel)}</span>`);
       }
     }
 
