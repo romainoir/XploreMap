@@ -484,25 +484,13 @@ html, body { margin:0; height:100%; }
 }
 
 .elevation-plot {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   align-items: stretch;
   min-width: 0;
 }
 
-.elevation-y-axis {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 0;
-  font-size: 10px;
-  color: rgba(17, 34, 48, 0.65);
-  line-height: 1;
-}
-
-.elevation-y-axis span,
 .elevation-x-axis span {
   white-space: nowrap;
 }
