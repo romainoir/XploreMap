@@ -1292,7 +1292,7 @@ html, body { margin:0; height:100%; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(17, 34, 48, 0.12);
+  background: none;
 }
 
 .imagery-option__thumb img {
@@ -1309,24 +1309,27 @@ html, body { margin:0; height:100%; }
   bottom: 12px;
   display: flex;
   align-items: center;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: rgba(17, 34, 48, 0.62);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 12px 26px rgba(17, 34, 48, 0.28);
-  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  padding: 5px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(10, 24, 36, 0.76);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 22px rgba(6, 16, 28, 0.34);
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
   pointer-events: auto;
   z-index: 1;
 }
 
 .imagery-option__opacity-wrapper:hover,
 .imagery-option__opacity-wrapper:focus-within {
-  background: rgba(17, 34, 48, 0.75);
+  background: rgba(10, 24, 36, 0.86);
+  border-color: rgba(255, 255, 255, 0.26);
 }
 
 .imagery-option__opacity-wrapper.active {
-  background: rgba(58, 183, 198, 0.82);
-  box-shadow: 0 16px 32px rgba(17, 34, 48, 0.32);
+  background: rgba(10, 24, 36, 0.92);
+  border-color: rgba(255, 255, 255, 0.34);
+  box-shadow: 0 14px 28px rgba(6, 16, 28, 0.38);
 }
 
 .imagery-option__opacity {

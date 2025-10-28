@@ -62,6 +62,14 @@ function createTilePreviewUrl(template, coords = WMTS_PREVIEW_COORDS) {
 
 const IMAGERY_OPTIONS = Object.freeze([
   {
+    id: 'vector-map',
+    label: 'Vector map',
+    type: 'base-style',
+    previewImage: './data/vector-map.svg',
+    defaultOpacity: BASE_STYLE_RELIEF_OPACITY,
+    defaultVisible: true
+  },
+  {
     id: 'eox-s2',
     label: 'EOX Satellite',
     sourceId: 's2cloudless',
@@ -69,6 +77,7 @@ const IMAGERY_OPTIONS = Object.freeze([
     tileTemplate: S2C_URL,
     tileSize: 256,
     attribution: EOX_ATTRIBUTION,
+    defaultVisible: true,
     paint: {
       'raster-opacity': S2_OPACITY,
       'raster-fade-duration': S2_FADE_DURATION
@@ -120,17 +129,61 @@ const IMAGERY_OPTIONS = Object.freeze([
     attribution: IGN_ATTRIBUTION
   },
   {
-    id: 'ign-segmentation',
-    label: 'IGN Segmentation',
-    sourceId: 'ign-segmentation',
-    layerId: 'ign-segmentation',
-    tileTemplate: createIgnTileTemplate('LANDCOVER.SEGMENTATION', 'image/png'),
-    tileSize: 256,
-    attribution: IGN_ATTRIBUTION
+    id: 'contours',
+    label: 'Contours',
+    type: 'contours',
+    sourceId: 'contours',
+    layerId: 'contours',
+    linkedLayerIds: ['contour-text'],
+    previewImage: './data/contours.svg',
+    defaultVisible: true,
+    defaultOpacity: 1
   }
 ]);
 
-const IMAGERY_LAYER_IDS = new Set(IMAGERY_OPTIONS.map((option) => option.layerId));
+const IMAGERY_LAYER_IDS = new Set(
+  IMAGERY_OPTIONS.flatMap((option) => {
+    const ids = [];
+    if (typeof option.layerId === 'string') ids.push(option.layerId);
+    if (Array.isArray(option.linkedLayerIds)) {
+      option.linkedLayerIds.forEach((linkedId) => {
+        if (typeof linkedId === 'string') ids.push(linkedId);
+      });
+    }
+    return ids;
+  })
+);
+
+const CONTOUR_LINE_BASE_OPACITY = Object.freeze([
+  'interpolate', ['linear'], ['zoom'],
+  13.4, 0,
+  13.5, 0.45,
+  15, 0.85,
+  17, 1
+]);
+
+const CONTOUR_TEXT_BASE_OPACITY = Object.freeze([
+  'interpolate', ['linear'], ['zoom'],
+  13.4, 0,
+  13.6, 0.5,
+  14.2, 0.9
+]);
+
+function cloneExpression(expression) {
+  if (Array.isArray(expression)) {
+    return expression.map((item) => cloneExpression(item));
+  }
+  if (expression && typeof expression === 'object') {
+    const entries = Object.entries(expression).map(([key, value]) => [key, cloneExpression(value)]);
+    return Object.fromEntries(entries);
+  }
+  return expression;
+}
+
+function scaleExpression(expression, factor) {
+  return ['*', cloneExpression(expression), factor];
+}
+
 const IMAGERY_OPTIONS_BY_ID = new Map(IMAGERY_OPTIONS.map((option) => [option.id, option]));
 
 function getAvailableHillshadeMethods() {
@@ -1380,6 +1433,18 @@ async function init() {
     return Math.min(Math.max(value, 0), 1);
   }
 
+  function applyContourLayersState(opacity, visible) {
+    const effectiveOpacity = visible ? opacity : 0;
+    if (map.getLayer('contours')) {
+      map.setPaintProperty('contours', 'line-opacity', scaleExpression(CONTOUR_LINE_BASE_OPACITY, effectiveOpacity));
+      map.setLayoutProperty('contours', 'visibility', visible ? 'visible' : 'none');
+    }
+    if (map.getLayer('contour-text')) {
+      map.setPaintProperty('contour-text', 'text-opacity', scaleExpression(CONTOUR_TEXT_BASE_OPACITY, effectiveOpacity));
+      map.setLayoutProperty('contour-text', 'visibility', visible ? 'visible' : 'none');
+    }
+  }
+
   const imageryState = new Map();
   IMAGERY_OPTIONS.forEach((option, index) => {
     const paintOpacity = option?.paint && typeof option.paint['raster-opacity'] === 'number'
@@ -1420,22 +1485,34 @@ async function init() {
       }
     }
 
-    const orderedLayerIds = imageryOrder
-      .map((id) => IMAGERY_OPTIONS_BY_ID.get(id)?.layerId)
-      .filter((layerId) => typeof layerId === 'string' && map.getLayer(layerId));
+    const orderedOptions = imageryOrder
+      .map((id) => IMAGERY_OPTIONS_BY_ID.get(id))
+      .filter((option) => option && typeof option.layerId === 'string' && map.getLayer(option.layerId));
 
     let beforeId = topLabelId ?? undefined;
-    for (let i = orderedLayerIds.length - 1; i >= 0; i -= 1) {
-      const layerId = orderedLayerIds[i];
-      if (!layerId) continue;
-      if (beforeId) {
-        if (beforeId !== layerId) {
-          map.moveLayer(layerId, beforeId);
-        }
-      } else {
-        map.moveLayer(layerId);
+    for (let i = orderedOptions.length - 1; i >= 0; i -= 1) {
+      const option = orderedOptions[i];
+      if (!option) continue;
+      const layerSequence = [option.layerId];
+      if (Array.isArray(option.linkedLayerIds)) {
+        option.linkedLayerIds.forEach((linkedId) => {
+          if (typeof linkedId === 'string' && map.getLayer(linkedId)) {
+            layerSequence.push(linkedId);
+          }
+        });
       }
-      beforeId = layerId;
+      for (let j = layerSequence.length - 1; j >= 0; j -= 1) {
+        const layerId = layerSequence[j];
+        if (!layerId || !map.getLayer(layerId)) continue;
+        if (beforeId) {
+          if (beforeId !== layerId) {
+            map.moveLayer(layerId, beforeId);
+          }
+        } else {
+          map.moveLayer(layerId);
+        }
+        beforeId = layerId;
+      }
     }
   }
 
@@ -1520,7 +1597,15 @@ async function init() {
       const state = imageryState.get(option.id);
       const opacity = clampOpacity(state?.opacity ?? 0);
       const visible = Boolean(state?.enabled && opacity > 0);
-      if (!map.getLayer(option.layerId)) return;
+      if (option.type === 'base-style') {
+        setBaseStyleOpacity(map, visible ? opacity : 0);
+        return;
+      }
+      if (option.type === 'contours') {
+        applyContourLayersState(opacity, visible);
+        return;
+      }
+      if (!option.layerId || !map.getLayer(option.layerId)) return;
       map.setPaintProperty(option.layerId, 'raster-opacity', opacity);
       map.setLayoutProperty(option.layerId, 'visibility', visible ? 'visible' : 'none');
     });
@@ -1615,7 +1700,9 @@ async function init() {
         toggleButton.setAttribute('title', option.label);
         toggleButton.setAttribute('aria-label', option.label);
 
-        const previewUrl = createTilePreviewUrl(option.tileTemplate);
+        const previewUrl = typeof option.previewImage === 'string' && option.previewImage.length
+          ? option.previewImage
+          : createTilePreviewUrl(option.tileTemplate);
         if (previewUrl) {
           const thumb = document.createElement('span');
           thumb.className = 'imagery-option__thumb';
@@ -1640,7 +1727,10 @@ async function init() {
           const nextEnabled = !currentlyActive;
           current.enabled = nextEnabled;
           if (nextEnabled && current.opacity <= 0) {
-            current.opacity = 1;
+            const fallbackOpacity = typeof option.defaultOpacity === 'number'
+              ? clampOpacity(option.defaultOpacity)
+              : 1;
+            current.opacity = fallbackOpacity > 0 ? fallbackOpacity : 1;
           }
           applyImageryState();
           updateImageryControlStates();
@@ -1787,16 +1877,32 @@ async function init() {
       if (liveLayers[i].type === 'symbol') { topLabelId = liveLayers[i].id; break; }
     }
 
-    rmL('contour-text');
-    rmL('contours');
     rmL('hillshade');
     rmL('color-relief');
-    IMAGERY_OPTIONS.forEach(option => rmL(option.layerId));
+    IMAGERY_OPTIONS.forEach((option) => {
+      const layerIds = [];
+      if (typeof option.layerId === 'string') layerIds.push(option.layerId);
+      if (Array.isArray(option.linkedLayerIds)) {
+        option.linkedLayerIds.forEach((linkedId) => {
+          if (typeof linkedId === 'string') layerIds.push(linkedId);
+        });
+      }
+      layerIds.forEach((layerId) => rmL(layerId));
+    });
     rmS('contours');
     rmS('hillshadeSource');
     rmS('reliefDem');
     rmS('terrainSource');
-    IMAGERY_OPTIONS.forEach(option => rmS(option.sourceId));
+    IMAGERY_OPTIONS.forEach((option) => {
+      const sourceIds = [];
+      if (typeof option.sourceId === 'string') sourceIds.push(option.sourceId);
+      if (Array.isArray(option.sourceIds)) {
+        option.sourceIds.forEach((id) => {
+          if (typeof id === 'string') sourceIds.push(id);
+        });
+      }
+      sourceIds.forEach((sourceId) => rmS(sourceId));
+    });
 
     map.addSource('terrainSource', {
       type: 'raster-dem',
@@ -1849,6 +1955,73 @@ async function init() {
     }, topLabelId || undefined);
 
     IMAGERY_OPTIONS.forEach((option) => {
+      if (option.type === 'base-style') {
+        return;
+      }
+
+      if (option.type === 'contours') {
+        const state = imageryState.get(option.id);
+        const opacity = clampOpacity(state?.opacity ?? option.defaultOpacity ?? 1);
+        const visible = Boolean(state?.enabled && opacity > 0);
+
+        map.addSource(option.sourceId, {
+          type: 'vector',
+          tiles: [
+            demSource.contourProtocolUrl({
+              multiplier: 1,
+              thresholds: { 11: [60, 300], 12: [30, 150], 13: [30, 150], 14: [15, 60], 15: [6, 30] },
+              elevationKey: 'ele',
+              levelKey: 'level',
+              contourLayer: 'contours'
+            })
+          ],
+          maxzoom: 16
+        });
+
+        map.addLayer({
+          id: 'contours',
+          type: 'line',
+          source: option.sourceId,
+          'source-layer': 'contours',
+          layout: {
+            'line-join': 'round',
+            visibility: visible ? 'visible' : 'none'
+          },
+          paint: {
+            'line-color': 'rgba(0,0,0,0.55)',
+            'line-width': ['match', ['get', 'level'], 1, 1, 0.5],
+            'line-opacity': scaleExpression(CONTOUR_LINE_BASE_OPACITY, opacity)
+          }
+        }, topLabelId || undefined);
+
+        map.addLayer({
+          id: 'contour-text',
+          type: 'symbol',
+          source: option.sourceId,
+          'source-layer': 'contours',
+          filter: ['>', ['get', 'level'], 0],
+          layout: {
+            'symbol-placement': 'line',
+            'text-anchor': 'center',
+            'text-size': 10,
+            'text-field': ['concat', ['number-format', ['get', 'ele'], { 'maximumFractionDigits': 0 }], ' m'],
+            'text-font': ['Noto Sans Bold'],
+            visibility: visible ? 'visible' : 'none'
+          },
+          paint: {
+            'text-halo-color': 'white',
+            'text-halo-width': 1,
+            'text-opacity': scaleExpression(CONTOUR_TEXT_BASE_OPACITY, opacity)
+          }
+        }, topLabelId || undefined);
+
+        return;
+      }
+
+      if (!option.sourceId || !option.layerId || !option.tileTemplate) {
+        return;
+      }
+
       map.addSource(option.sourceId, {
         type: 'raster',
         tiles: [option.tileTemplate],
@@ -1898,58 +2071,6 @@ async function init() {
 
     applyHillshadeMethod(currentHillshadeMethod);
 
-    map.addSource('contours', {
-      type: 'vector',
-      tiles: [
-        demSource.contourProtocolUrl({
-          multiplier: 1,
-          thresholds: { 11: [60, 300], 12: [30, 150], 13: [30, 150], 14: [15, 60], 15: [6, 30] },
-          elevationKey: 'ele',
-          levelKey: 'level',
-          contourLayer: 'contours'
-        })
-      ],
-      maxzoom: 16
-    });
-
-    map.addLayer({
-      id: 'contours',
-      type: 'line',
-      source: 'contours',
-      'source-layer': 'contours',
-      layout: { 'line-join': 'round' },
-      paint: {
-        'line-color': 'rgba(0,0,0,0.55)',
-        'line-width': ['match', ['get', 'level'], 1, 1, 0.5],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 13.4, 0, 13.5, 0.45, 15, 0.85, 17, 1]
-      }
-    });
-
-    map.addLayer({
-      id: 'contour-text',
-      type: 'symbol',
-      source: 'contours',
-      'source-layer': 'contours',
-      filter: ['>', ['get', 'level'], 0],
-      layout: {
-        'symbol-placement': 'line',
-        'text-anchor': 'center',
-        'text-size': 10,
-        'text-field': ['concat', ['number-format', ['get', 'ele'], { 'maximumFractionDigits': 0 }], ' m'],
-        'text-font': ['Noto Sans Bold']
-      },
-      paint: {
-        'text-halo-color': 'white',
-        'text-halo-width': 1,
-        'text-opacity': ['interpolate', ['linear'], ['zoom'], 13.4, 0, 13.6, 0.5, 14.2, 0.9]
-      }
-    });
-
-    if (topLabelId) {
-      map.moveLayer('contours', topLabelId);
-      map.moveLayer('contour-text', topLabelId);
-    }
-
     ensureGpxLayers(map, currentGpxData, topLabelId);
 
     const symbolLayers = (map.getStyle().layers || []).filter(l => l.type === 'symbol');
@@ -1961,7 +2082,6 @@ async function init() {
 
     syncTerrainAndSky();
 
-    setBaseStyleOpacity(map, BASE_STYLE_RELIEF_OPACITY);
     updatePeakLabels(map);
   }
 
