@@ -4699,8 +4699,11 @@ export class DirectionsManager {
       })
       .join('');
 
-    const yAxisLabels = [...yAxis.ticks]
-      .sort((a, b) => b - a)
+    const yAxisTickValues = [...yAxis.ticks].sort((a, b) => b - a);
+    if (yAxisTickValues.length > 1) {
+      yAxisTickValues.pop();
+    }
+    const yAxisLabels = yAxisTickValues
       .map((value) => `<span>${this.formatElevationLabel(value)}</span>`)
       .join('');
 
