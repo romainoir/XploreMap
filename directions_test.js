@@ -4699,14 +4699,6 @@ export class DirectionsManager {
       })
       .join('');
 
-    const yAxisTickValues = [...yAxis.ticks].sort((a, b) => b - a);
-    if (yAxisTickValues.length > 1) {
-      yAxisTickValues.pop();
-    }
-    const yAxisLabels = yAxisTickValues
-      .map((value) => `<span>${this.formatElevationLabel(value)}</span>`)
-      .join('');
-
     const xTickValues = Array.isArray(xAxis.ticks)
       ? xAxis.ticks.filter((value) => Number.isFinite(value))
       : [];
@@ -4834,7 +4826,6 @@ export class DirectionsManager {
 
     this.elevationChart.innerHTML = `
       <div class="elevation-plot">
-        <div class="elevation-y-axis">${yAxisLabels}</div>
         <div class="elevation-plot-area">
           <div class="elevation-chart-container" role="presentation">
             ${areaSvg}
