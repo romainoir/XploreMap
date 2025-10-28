@@ -286,17 +286,20 @@
       <img data-icon-id="view-toggle" alt="" aria-hidden="true" loading="lazy" decoding="async" />
       <span class="sr-only">Toggle 2D/3D view</span>
     </button>
-    <div class="btns">
-      <button class="btn active" data-method="igor">Igor</button>
-      <button class="btn" data-method="combined">Combined</button>
-    </div>
+    <button
+      id="cycleHillshadeMethod"
+      class="btn hillshade-method-button"
+      type="button"
+      title="Cycle hillshade rendering"
+      aria-label="Cycle hillshade rendering"
+    >
+      <span class="hillshade-method-button__label" aria-live="polite">Hillshade: Igor</span>
+    </button>
   </div>
 </div>
 
 <!-- Imagery toggle -->
-<div class="imagery-toggle">
-  <button class="pill" id="toggleS2">S2 Cloudless</button>
-</div>
+<div class="imagery-toggle" id="imageryToggle" role="group" aria-label="Imagery layers"></div>
 
 <script type="module" src="./scripts/main.js"></script>
 </body>
