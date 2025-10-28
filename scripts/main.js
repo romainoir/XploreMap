@@ -76,7 +76,7 @@ const IMAGERY_OPTIONS = Object.freeze([
   },
   {
     id: 'ign-lidar-hd-mns-shadow',
-    label: 'IGN LiDAR MNS Shadow',
+    label: 'MNS',
     sourceId: 'ign-lidar-hd-mns-shadow',
     layerId: 'ign-lidar-hd-mns-shadow',
     tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNS_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
@@ -85,7 +85,7 @@ const IMAGERY_OPTIONS = Object.freeze([
   },
   {
     id: 'ign-lidar-hd-mnt-shadow',
-    label: 'IGN LiDAR MNT Shadow',
+    label: 'MNT',
     sourceId: 'ign-lidar-hd-mnt-shadow',
     layerId: 'ign-lidar-hd-mnt-shadow',
     tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
@@ -112,10 +112,19 @@ const IMAGERY_OPTIONS = Object.freeze([
   },
   {
     id: 'ign-cosia',
-    label: 'IGN COSIA 2021-2023',
+    label: 'IGN Kosia 2021-2023',
     sourceId: 'ign-cosia',
     layerId: 'ign-cosia',
     tileTemplate: createIgnTileTemplate('IGNF_COSIA_2021-2023', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION
+  },
+  {
+    id: 'ign-segmentation',
+    label: 'IGN Segmentation',
+    sourceId: 'ign-segmentation',
+    layerId: 'ign-segmentation',
+    tileTemplate: createIgnTileTemplate('LANDCOVER.SEGMENTATION', 'image/png'),
     tileSize: 256,
     attribution: IGN_ATTRIBUTION
   }
@@ -1355,34 +1364,90 @@ async function init() {
   }
   updateViewToggle(currentViewMode);
 
+  const imageryPanel = document.getElementById('imageryPanel');
+  const imageryPanelToggle = document.getElementById('imageryPanelToggle');
+  const imageryPanelDrawer = document.getElementById('imageryPanelDrawer');
   const imageryToggle = document.getElementById('imageryToggle');
-  const imageryButtons = new Map();
-  let activeImageryId = IMAGERY_OPTIONS[0]?.id ?? null;
+  const imageryControls = new Map();
 
-  function ensureActiveImageryId() {
-    if (!IMAGERY_OPTIONS.length) {
-      activeImageryId = null;
-      return;
+  function clampOpacity(value) {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return 0;
     }
-    if (!activeImageryId || !IMAGERY_OPTIONS.some((option) => option.id === activeImageryId)) {
-      activeImageryId = IMAGERY_OPTIONS[0].id;
-    }
+    return Math.min(Math.max(value, 0), 1);
   }
 
-  function updateImageryButtonStates() {
-    imageryButtons.forEach((button, id) => {
-      const isActive = id === activeImageryId;
-      button.classList.toggle('active', isActive);
-      button.setAttribute('aria-pressed', String(isActive));
+  const imageryState = new Map();
+  IMAGERY_OPTIONS.forEach((option, index) => {
+    const paintOpacity = option?.paint && typeof option.paint['raster-opacity'] === 'number'
+      ? clampOpacity(option.paint['raster-opacity'])
+      : 1;
+    const defaultOpacity = typeof option.defaultOpacity === 'number'
+      ? clampOpacity(option.defaultOpacity)
+      : paintOpacity;
+    imageryState.set(option.id, {
+      enabled: option.defaultVisible ?? index === 0,
+      opacity: defaultOpacity
+    });
+  });
+
+  function setImageryPanelOpen(isOpen) {
+    if (!imageryPanelDrawer) return;
+    const open = Boolean(isOpen);
+    imageryPanelDrawer.classList.toggle('imagery-panel__drawer--open', open);
+    if (open) {
+      imageryPanelDrawer.removeAttribute('hidden');
+    } else {
+      imageryPanelDrawer.setAttribute('hidden', 'true');
+    }
+    imageryPanelDrawer.setAttribute('aria-hidden', String(!open));
+    imageryPanelToggle?.setAttribute('aria-expanded', String(open));
+  }
+
+  function updateImageryControlStates() {
+    imageryControls.forEach((control, id) => {
+      const state = imageryState.get(id);
+      const isActive = Boolean(state?.enabled && state.opacity > 0);
+      if (control.button) {
+        control.button.classList.toggle('active', isActive);
+        control.button.setAttribute('aria-pressed', String(isActive));
+      }
+      if (control.container) {
+        control.container.classList.toggle('active', isActive);
+      }
+      if (control.slider && state) {
+        control.slider.value = String(state.opacity);
+      }
     });
   }
 
-  function applyImageryVisibility() {
-    ensureActiveImageryId();
+  function applyImageryState() {
     IMAGERY_OPTIONS.forEach((option) => {
+      const state = imageryState.get(option.id);
+      const opacity = clampOpacity(state?.opacity ?? 0);
+      const visible = Boolean(state?.enabled && opacity > 0);
       if (!map.getLayer(option.layerId)) return;
-      const visibility = option.id === activeImageryId ? 'visible' : 'none';
-      map.setLayoutProperty(option.layerId, 'visibility', visibility);
+      map.setPaintProperty(option.layerId, 'raster-opacity', opacity);
+      map.setLayoutProperty(option.layerId, 'visibility', visible ? 'visible' : 'none');
+    });
+  }
+
+  if (imageryPanelToggle && imageryPanelDrawer) {
+    setImageryPanelOpen(false);
+    imageryPanelToggle.addEventListener('click', () => {
+      const nextState = !imageryPanelDrawer.classList.contains('imagery-panel__drawer--open');
+      setImageryPanelOpen(nextState);
+    });
+    document.addEventListener('click', (event) => {
+      if (!imageryPanelDrawer.classList.contains('imagery-panel__drawer--open')) return;
+      if (!imageryPanel) return;
+      if (imageryPanel.contains(event.target)) return;
+      setImageryPanelOpen(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        setImageryPanelOpen(false);
+      }
     });
   }
 
@@ -1391,16 +1456,24 @@ async function init() {
     if (!IMAGERY_OPTIONS.length) {
       imageryToggle.setAttribute('hidden', 'true');
       imageryToggle.setAttribute('aria-hidden', 'true');
+      imageryPanel?.setAttribute('hidden', 'true');
     } else {
       imageryToggle.removeAttribute('hidden');
       imageryToggle.setAttribute('aria-hidden', 'false');
+      imageryPanel?.removeAttribute('hidden');
       IMAGERY_OPTIONS.forEach((option) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'imagery-option';
-        button.dataset.imageryId = option.id;
-        button.setAttribute('aria-pressed', 'false');
-        button.setAttribute('title', option.label);
+        const state = imageryState.get(option.id) ?? { enabled: false, opacity: 0 };
+        const container = document.createElement('div');
+        container.className = 'imagery-option';
+        container.dataset.imageryId = option.id;
+
+        const toggleButton = document.createElement('button');
+        toggleButton.type = 'button';
+        toggleButton.className = 'imagery-option__toggle';
+        toggleButton.dataset.imageryId = option.id;
+        toggleButton.setAttribute('aria-pressed', 'false');
+        toggleButton.setAttribute('title', option.label);
+        toggleButton.setAttribute('aria-label', option.label);
 
         const previewUrl = createTilePreviewUrl(option.tileTemplate);
         if (previewUrl) {
@@ -1412,25 +1485,51 @@ async function init() {
           img.loading = 'lazy';
           img.decoding = 'async';
           thumb.appendChild(img);
-          button.appendChild(thumb);
+          toggleButton.appendChild(thumb);
         }
 
-        const label = document.createElement('span');
-        label.className = 'imagery-option__label';
-        label.textContent = option.label;
-        button.appendChild(label);
+        const srLabel = document.createElement('span');
+        srLabel.className = 'sr-only';
+        srLabel.textContent = option.label;
+        toggleButton.appendChild(srLabel);
 
-        button.addEventListener('click', () => {
-          if (activeImageryId === option.id) return;
-          activeImageryId = option.id;
-          applyImageryVisibility();
-          updateImageryButtonStates();
+        toggleButton.addEventListener('click', () => {
+          const current = imageryState.get(option.id);
+          if (!current) return;
+          const currentlyActive = Boolean(current.enabled && current.opacity > 0);
+          const nextEnabled = !currentlyActive;
+          current.enabled = nextEnabled;
+          if (nextEnabled && current.opacity <= 0) {
+            current.opacity = 1;
+          }
+          applyImageryState();
+          updateImageryControlStates();
         });
 
-        imageryButtons.set(option.id, button);
-        imageryToggle.appendChild(button);
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '1';
+        slider.step = '0.05';
+        slider.value = String(state.opacity);
+        slider.className = 'imagery-option__opacity';
+        slider.setAttribute('aria-label', `${option.label} opacity`);
+        slider.addEventListener('input', () => {
+          const current = imageryState.get(option.id);
+          if (!current) return;
+          const value = clampOpacity(Number.parseFloat(slider.value));
+          current.opacity = value;
+          current.enabled = value > 0;
+          applyImageryState();
+          updateImageryControlStates();
+        });
+
+        container.appendChild(toggleButton);
+        container.appendChild(slider);
+        imageryControls.set(option.id, { container, button: toggleButton, slider });
+        imageryToggle.appendChild(container);
       });
-      updateImageryButtonStates();
+      updateImageryControlStates();
     }
   }
 
@@ -1570,8 +1669,6 @@ async function init() {
       }
     }, topLabelId || undefined);
 
-    ensureActiveImageryId();
-
     IMAGERY_OPTIONS.forEach((option) => {
       map.addSource(option.sourceId, {
         type: 'raster',
@@ -1582,11 +1679,15 @@ async function init() {
       });
 
       const paint = {
-        'raster-opacity': 1,
         'raster-fade-duration': TILE_FADE_DURATION
       };
       if (option.paint && typeof option.paint === 'object') {
         Object.assign(paint, option.paint);
+      }
+      const state = imageryState.get(option.id);
+      paint['raster-opacity'] = clampOpacity(state?.opacity ?? paint['raster-opacity'] ?? 1);
+      if (!Number.isFinite(paint['raster-opacity'])) {
+        paint['raster-opacity'] = 1;
       }
 
       map.addLayer({
@@ -1595,13 +1696,13 @@ async function init() {
         source: option.sourceId,
         paint,
         layout: {
-          visibility: option.id === activeImageryId ? 'visible' : 'none'
+          visibility: state?.enabled && state.opacity > 0 ? 'visible' : 'none'
         }
       }, topLabelId || undefined);
     });
 
-    applyImageryVisibility();
-    updateImageryButtonStates();
+    applyImageryState();
+    updateImageryControlStates();
 
     map.addLayer({
       id: 'hillshade',

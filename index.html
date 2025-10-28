@@ -299,7 +299,23 @@
 </div>
 
 <!-- Imagery toggle -->
-<div class="imagery-toggle" id="imageryToggle" role="group" aria-label="Imagery layers"></div>
+<div class="imagery-panel" id="imageryPanel">
+  <button
+    id="imageryPanelToggle"
+    class="imagery-panel__toggle"
+    type="button"
+    aria-expanded="false"
+    aria-controls="imageryPanelDrawer"
+    aria-haspopup="true"
+    title="Toggle imagery layers"
+  >
+    <span class="imagery-panel__toggle-icon" aria-hidden="true"></span>
+    <span class="sr-only">Toggle imagery layers</span>
+  </button>
+  <div class="imagery-panel__drawer" id="imageryPanelDrawer" hidden aria-hidden="true">
+    <div class="imagery-toggle" id="imageryToggle" role="group" aria-label="Imagery layers"></div>
+  </div>
+</div>
 
 <script type="module" src="./scripts/main.js"></script>
 </body>
