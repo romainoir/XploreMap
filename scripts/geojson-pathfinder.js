@@ -622,6 +622,7 @@ export class GeoJsonPathFinder {
     pathKeys.reverse();
 
     const coordinates = [];
+    const edges = [];
     let totalDistanceKm = 0;
     let totalAscent = 0;
     let totalDescent = 0;
@@ -639,9 +640,27 @@ export class GeoJsonPathFinder {
         const nextKey = pathKeys[index + 1];
         const edge = node.edges.get(nextKey);
         if (edge) {
+          const target = this.nodes.get(nextKey);
+          const startCoord = cloneCoordinate(node.coord);
+          const endCoord = cloneCoordinate(target?.coord ?? []);
+          const costMultiplier = Number.isFinite(edge.distanceKm)
+            && edge.distanceKm > 0
+              ? edge.weight / edge.distanceKm
+              : 1;
           totalDistanceKm += edge.distanceKm;
           totalAscent += edge.ascent;
           totalDescent += edge.descent;
+          edges.push({
+            start: startCoord,
+            end: endCoord,
+            distanceKm: edge.distanceKm,
+            ascent: edge.ascent,
+            descent: edge.descent,
+            weight: edge.weight,
+            costMultiplier: Number.isFinite(costMultiplier) && costMultiplier > 0
+              ? costMultiplier
+              : 1
+          });
         }
       }
     }
@@ -652,7 +671,8 @@ export class GeoJsonPathFinder {
       ascent: totalAscent,
       descent: totalDescent,
       startKey,
-      endKey
+      endKey,
+      edges
     };
   }
 }

@@ -244,6 +244,8 @@ async function init() {
   const routingModeLabel = routingModeToggle?.querySelector('.routing-mode-toggle__text');
   const debugNetworkCheckbox = document.getElementById('debugNetworkCheckbox');
   const debugNetworkControl = document.getElementById('debugNetworkControl');
+  const profileModeToggle = document.getElementById('profileModeToggle');
+  const profileModeMenu = document.getElementById('profileModeMenuList');
 
   applyUiIconSources();
 
@@ -877,7 +879,9 @@ async function init() {
         routeStats,
         elevationChart,
         directionsInfoButton,
-        directionsHint
+        directionsHint,
+        profileModeToggle,
+        profileModeMenu
       ], {
         router: offlineRouter
       });
