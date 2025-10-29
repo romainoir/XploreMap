@@ -6,8 +6,7 @@ export const MAX_NODE_CONNECTION_TOLERANCE_METERS = 100;
 
 const DEFAULT_SPEEDS = Object.freeze({
   'foot-hiking': 4.5,
-  'cycling-regular': 15,
-  'driving-car': 40
+  manual: 4.5
 });
 const DEFAULT_SNAP_TOLERANCE_METERS = 500;
 const MIN_BRIDGE_DISTANCE_METERS = 1500;
@@ -888,6 +887,89 @@ export class OfflineRouter {
     const travelMode = typeof mode === 'string' && this.supportsMode(mode)
       ? mode
       : Array.from(this.supportedModes)[0];
+
+    if (travelMode === 'manual') {
+      const coordinates = [];
+      const segments = [];
+      const coordinateMetadata = [];
+      let totalDistanceKm = 0;
+      let totalAscent = 0;
+      let totalDescent = 0;
+
+      for (let index = 0; index < waypoints.length - 1; index += 1) {
+        const start = waypoints[index];
+        const end = waypoints[index + 1];
+        const segment = buildDirectSegment(start, end);
+        if (!segment || !Array.isArray(segment.coordinates) || segment.coordinates.length < 2) {
+          throw new Error('Manual routing requires at least two valid coordinates');
+        }
+
+        appendCoordinateSequence(coordinates, segment.coordinates);
+        const offsetKm = totalDistanceKm;
+        totalDistanceKm += Number(segment.distanceKm) || 0;
+        totalAscent += Number(segment.ascent) || 0;
+        totalDescent += Number(segment.descent) || 0;
+
+        const segmentMetadata = Array.isArray(segment.metadata)
+          ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
+          : [];
+
+        segmentMetadata.forEach((entry) => {
+          const distanceKm = Number(entry.distanceKm) || 0;
+          const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
+          const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
+          coordinateMetadata.push({
+            distanceKm,
+            ascent: Number(entry.ascent) || 0,
+            descent: Number(entry.descent) || 0,
+            costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
+              ? entry.costMultiplier
+              : 1,
+            source: entry.source ?? 'manual',
+            start: Array.isArray(entry.start) ? entry.start.slice() : null,
+            end: Array.isArray(entry.end) ? entry.end.slice() : null,
+            startDistanceKm: startKm,
+            endDistanceKm: endKm
+          });
+        });
+
+        segments.push({
+          distance: (Number(segment.distanceKm) || 0) * 1000,
+          duration: this.estimateDurationSeconds(Number(segment.distanceKm) || 0, travelMode),
+          ascent: Number(segment.ascent) || 0,
+          descent: Number(segment.descent) || 0,
+          start_index: index,
+          end_index: index + 1,
+          metadata: segmentMetadata
+        });
+      }
+
+      if (coordinates.length < 2) {
+        throw new Error('Manual routing requires at least two valid coordinates');
+      }
+
+      const summary = {
+        distance: totalDistanceKm * 1000,
+        duration: this.estimateDurationSeconds(totalDistanceKm, travelMode),
+        ascent: totalAscent,
+        descent: totalDescent
+      };
+
+      return {
+        type: 'Feature',
+        properties: {
+          profile: travelMode,
+          summary,
+          segments,
+          segment_metadata: segments.map((segment) => Array.isArray(segment.metadata) ? segment.metadata : []),
+          coordinate_metadata: coordinateMetadata
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates
+        }
+      };
+    }
 
     await this.ensureReady();
 

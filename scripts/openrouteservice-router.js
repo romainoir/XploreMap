@@ -6,14 +6,12 @@ const COORDINATE_DUPLICATE_TOLERANCE_METERS = 0.05;
 
 const DEFAULT_MODE_SPEEDS_KMH = Object.freeze({
   'foot-hiking': 4.5,
-  'cycling-regular': 18,
-  'driving-car': 65
+  manual: 4.5
 });
 
 const MODE_PROFILES = Object.freeze({
   'foot-hiking': 'foot-hiking',
-  'cycling-regular': 'cycling-regular',
-  'driving-car': 'driving-car'
+  manual: 'foot-hiking'
 });
 
 const sanitizeCoordinate = (coord) => {
@@ -373,6 +371,57 @@ export class OrsRouter {
     };
   }
 
+  buildManualRoute(coords) {
+    if (!Array.isArray(coords) || coords.length < 2) {
+      throw new Error('Manual routing requires at least two valid coordinates');
+    }
+
+    const geometryCoords = [];
+    const segments = [];
+    let totalDistanceKm = 0;
+    let totalAscent = 0;
+    let totalDescent = 0;
+
+    for (let index = 0; index < coords.length - 1; index += 1) {
+      const start = coords[index];
+      const end = coords[index + 1];
+      const metrics = computeSegmentMetrics(start, end);
+      if (!metrics) {
+        throw new Error('Manual routing requires valid coordinate pairs');
+      }
+      appendCoordinateSequence(geometryCoords, [start, end]);
+      totalDistanceKm += metrics.distanceKm;
+      totalAscent += metrics.ascent;
+      totalDescent += metrics.descent;
+      segments.push({
+        distance: metersFromKm(metrics.distanceKm),
+        duration: this.estimateDurationSeconds(metrics.distanceKm, 'manual'),
+        ascent: metrics.ascent,
+        descent: metrics.descent,
+        start_index: index,
+        end_index: index + 1
+      });
+    }
+
+    return {
+      type: 'Feature',
+      properties: {
+        profile: 'manual',
+        summary: {
+          distance: metersFromKm(totalDistanceKm),
+          duration: this.estimateDurationSeconds(totalDistanceKm, 'manual'),
+          ascent: totalAscent,
+          descent: totalDescent
+        },
+        segments
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: geometryCoords
+      }
+    };
+  }
+
 
   async getRoute(waypoints, { mode, preservedSegments } = {}) {
     const coords = sanitizeWaypointSequence(waypoints);
@@ -381,6 +430,10 @@ export class OrsRouter {
     }
 
     const travelMode = this.supportsMode(mode) ? mode : this.defaultMode;
+
+    if (travelMode === 'manual') {
+      return this.buildManualRoute(coords);
+    }
 
     const preservedMap = new Map();
     const sanitizedPreserved = [];
