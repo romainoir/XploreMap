@@ -2993,6 +2993,44 @@ export class DirectionsManager {
     const fallbackFeatures = [];
     const normalizedSegments = [];
 
+    const waypointCoordinates = Array.isArray(this.waypoints)
+      ? this.waypoints
+          .map((coord) => {
+            if (!Array.isArray(coord) || coord.length < 2) {
+              return null;
+            }
+            const lng = Number(coord[0]);
+            const lat = Number(coord[1]);
+            if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+              return null;
+            }
+            return [lng, lat];
+          })
+          .filter(Boolean)
+      : [];
+
+    const waypointMatchCache = new Map();
+    const coordinatesNearWaypoint = (candidate) => {
+      if (!waypointCoordinates.length) {
+        return false;
+      }
+      if (!Array.isArray(candidate) || candidate.length < 2) {
+        return false;
+      }
+      const lng = Number(candidate[0]);
+      const lat = Number(candidate[1]);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        return false;
+      }
+      const cacheKey = `${lng.toFixed(6)},${lat.toFixed(6)}`;
+      if (waypointMatchCache.has(cacheKey)) {
+        return waypointMatchCache.get(cacheKey);
+      }
+      const matches = waypointCoordinates.some((waypoint) => this.coordinatesMatch(waypoint, candidate));
+      waypointMatchCache.set(cacheKey, matches);
+      return matches;
+    };
+
     let previousColorValue = null;
 
     const coordinateDistanceKm = (coords) => {
@@ -3048,8 +3086,29 @@ export class DirectionsManager {
           distanceKm = 0;
         }
 
+        const previousSegmentEntry = normalizedSegments[normalizedSegments.length - 1];
+        const boundaryNearWaypoint = (() => {
+          if (!allowGradient || useBaseColor || !previousSegmentEntry) {
+            return false;
+          }
+          if (!waypointCoordinates.length) {
+            return false;
+          }
+          const previousCoords = Array.isArray(previousSegmentEntry.coordinates)
+            ? previousSegmentEntry.coordinates
+            : [];
+          const previousEnd = previousCoords.length ? previousCoords[previousCoords.length - 1] : null;
+          const currentStart = coordinates.length ? coordinates[0] : null;
+          return coordinatesNearWaypoint(currentStart) || coordinatesNearWaypoint(previousEnd);
+        })();
+
         let blendPortion = 0;
-        if (allowGradient && !useBaseColor && normalizedPrevious && normalizedPrevious !== normalizedCurrent) {
+        const shouldBlend = allowGradient
+          && !useBaseColor
+          && normalizedPrevious
+          && normalizedPrevious !== normalizedCurrent
+          && !boundaryNearWaypoint;
+        if (shouldBlend) {
           if (distanceKm > 0) {
             const ratio = ROUTE_GRADIENT_BLEND_DISTANCE_KM / Math.max(distanceKm, ROUTE_GRADIENT_BLEND_DISTANCE_KM);
             blendPortion = Math.min(0.4, Math.max(0.05, ratio));
