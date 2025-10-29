@@ -1497,6 +1497,14 @@ export class DirectionsManager {
     const endElevation = Number(segment.endElevation);
     const distanceMeters = Number.isFinite(distanceKm) ? distanceKm * 1000 : 0;
     if (!Number.isFinite(startElevation) || !Number.isFinite(endElevation) || !(distanceMeters > 0)) {
+      const metadata = this.getSegmentMetadata(segment);
+      const metadataDistanceKm = Number.isFinite(metadata?.distanceKm)
+        ? metadata.distanceKm
+        : Number(segment.distanceKm);
+      const netElevation = (Number(metadata?.ascent) || 0) - (Number(metadata?.descent) || 0);
+      if (Number.isFinite(metadataDistanceKm) && metadataDistanceKm > 0 && Number.isFinite(netElevation) && netElevation !== 0) {
+        return (netElevation / (metadataDistanceKm * 1000)) * 100;
+      }
       return 0;
     }
     return ((endElevation - startElevation) / distanceMeters) * 100;
@@ -3756,10 +3764,15 @@ export class DirectionsManager {
       return;
     }
 
-    const snapped = await this.snapLngLatToNetwork(event.lngLat);
-    const targetLngLat = Array.isArray(snapped) && snapped.length >= 2
-      ? [snapped[0], snapped[1]]
-      : [event.lngLat.lng, event.lngLat.lat];
+    let targetLngLat = [event.lngLat.lng, event.lngLat.lat];
+    if (this.currentMode !== 'manual') {
+      const snapped = await this.snapLngLatToNetwork(event.lngLat);
+      if (Array.isArray(snapped) && snapped.length >= 2
+        && Number.isFinite(snapped[0])
+        && Number.isFinite(snapped[1])) {
+        targetLngLat = [snapped[0], snapped[1]];
+      }
+    }
     this.recordWaypointState();
     this.waypoints.push(targetLngLat);
     this.updateWaypoints();
@@ -5558,19 +5571,100 @@ export class DirectionsManager {
     const cumulative = profile?.cumulativeDistances ?? [];
     const elevations = profile?.elevations ?? [];
     const coordinateMetadata = Array.isArray(this.routeCoordinateMetadata)
-      ? this.routeCoordinateMetadata
+      ? this.routeCoordinateMetadata.map((entry) => (entry && typeof entry === 'object' ? entry : null))
       : [];
+
+    const metadataDistanceEntries = coordinateMetadata
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
+        const startKm = Number(entry.startDistanceKm ?? entry.cumulativeStartKm);
+        const endKm = Number(entry.endDistanceKm ?? entry.cumulativeEndKm ?? startKm);
+        if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
+          return null;
+        }
+        return { entry, startKm, endKm };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.startKm - b.startKm);
+
+    const METADATA_DISTANCE_EPSILON = 1e-5;
+
+    const resolveMetadataEntry = (segment, metadataIndex) => {
+      if (!segment) {
+        return null;
+      }
+
+      if (Number.isInteger(metadataIndex)
+        && metadataIndex >= 0
+        && metadataIndex < coordinateMetadata.length) {
+        const direct = coordinateMetadata[metadataIndex];
+        if (direct) {
+          return direct;
+        }
+      }
+
+      const segmentStartKm = Number(segment.startDistanceKm);
+      const segmentEndKm = Number(segment.endDistanceKm);
+      if (Number.isFinite(segmentStartKm) && Number.isFinite(segmentEndKm) && metadataDistanceEntries.length) {
+        for (let index = 0; index < metadataDistanceEntries.length; index += 1) {
+          const candidate = metadataDistanceEntries[index];
+          if (!candidate) {
+            continue;
+          }
+          if (segmentEndKm < candidate.startKm - METADATA_DISTANCE_EPSILON) {
+            break;
+          }
+          if (segmentStartKm > candidate.endKm + METADATA_DISTANCE_EPSILON) {
+            continue;
+          }
+          if (segmentStartKm >= candidate.startKm - METADATA_DISTANCE_EPSILON
+            && segmentEndKm <= candidate.endKm + METADATA_DISTANCE_EPSILON) {
+            return candidate.entry;
+          }
+        }
+      }
+
+      if (coordinateMetadata.length) {
+        for (let index = 0; index < coordinateMetadata.length; index += 1) {
+          const entry = coordinateMetadata[index];
+          if (!entry) {
+            continue;
+          }
+          const startMatch = this.coordinatesMatch(entry.start, segment.start);
+          const endMatch = this.coordinatesMatch(entry.end, segment.end);
+          if (startMatch && endMatch) {
+            return entry;
+          }
+        }
+      }
+
+      return null;
+    };
 
     this.routeSegments = coords.slice(0, -1).map((coord, index) => {
       const startDistanceKm = cumulative[index] ?? 0;
       const endDistanceKm = cumulative[index + 1] ?? startDistanceKm;
       const distanceKm = Math.max(0, endDistanceKm - startDistanceKm);
-      const metadataEntry = coordinateMetadata[index];
-      let segmentMetadata = null;
+
+      const baseSegment = {
+        start: coord,
+        end: coords[index + 1],
+        index,
+        startDistanceKm,
+        endDistanceKm,
+        distanceKm,
+        startElevation: elevations[index],
+        endElevation: elevations[index + 1],
+        metadata: null
+      };
+
+      const metadataEntry = resolveMetadataEntry(baseSegment, index);
       if (metadataEntry && typeof metadataEntry === 'object') {
         const distance = Number(metadataEntry.distanceKm);
-        const startKm = Number(metadataEntry.startDistanceKm);
-        const endKm = Number(metadataEntry.endDistanceKm);
+        const startKm = Number(metadataEntry.startDistanceKm ?? metadataEntry.cumulativeStartKm);
+        const endKm = Number(metadataEntry.endDistanceKm ?? metadataEntry.cumulativeEndKm);
         const ascent = Number(metadataEntry.ascent);
         const descent = Number(metadataEntry.descent);
         const costMultiplier = Number(metadataEntry.costMultiplier);
@@ -5592,7 +5686,8 @@ export class DirectionsManager {
         const trackTypeValue = typeof metadataEntry.trackType === 'string'
           ? metadataEntry.trackType
           : hiking?.trackType;
-        segmentMetadata = {
+
+        const segmentMetadata = {
           distanceKm: Number.isFinite(distance) ? distance : distanceKm,
           startDistanceKm: Number.isFinite(startKm) ? startKm : startDistanceKm,
           endDistanceKm: Number.isFinite(endKm) ? endKm : endDistanceKm,
@@ -5619,18 +5714,11 @@ export class DirectionsManager {
         if (typeof trackTypeValue === 'string' && trackTypeValue) {
           segmentMetadata.trackType = trackTypeValue;
         }
+
+        baseSegment.metadata = segmentMetadata;
       }
-      return {
-        start: coord,
-        end: coords[index + 1],
-        index,
-        startDistanceKm,
-        endDistanceKm,
-        distanceKm,
-        startElevation: elevations[index],
-        endElevation: elevations[index + 1],
-        metadata: segmentMetadata
-      };
+
+      return baseSegment;
     });
 
     this.segmentLegLookup = this.computeSegmentLegLookup(coords);
