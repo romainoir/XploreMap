@@ -1654,11 +1654,73 @@ export class DirectionsManager {
       list.push(coord);
     };
 
-    this.routeSegments.forEach((segment) => {
+    const segmentEntries = this.routeSegments.map((segment) => {
       if (!segment) {
+        return null;
+      }
+      return {
+        segment,
+        classification: this.classifySegment(segment) || null
+      };
+    });
+
+    if (this.profileMode === 'category' && segmentEntries.length) {
+      const unknownKey = UNKNOWN_CATEGORY_CLASSIFICATION?.key;
+      const isUnknownClassification = (classification) => {
+        if (!classification) {
+          return true;
+        }
+        const key = typeof classification.key === 'string' ? classification.key : '';
+        if (unknownKey && key === unknownKey) {
+          return true;
+        }
+        const color = typeof classification.color === 'string' ? classification.color.trim() : '';
+        return !color;
+      };
+
+      const findNeighborClassification = (startIndex, step) => {
+        let index = startIndex + step;
+        while (index >= 0 && index < segmentEntries.length) {
+          const entry = segmentEntries[index];
+          if (!entry || !entry.segment) {
+            index += step;
+            continue;
+          }
+          const classification = entry.classification;
+          if (!classification || isUnknownClassification(classification)) {
+            index += step;
+            continue;
+          }
+          return classification;
+        }
+        return null;
+      };
+
+      segmentEntries.forEach((entry, index) => {
+        if (!entry || !entry.segment) {
+          return;
+        }
+        const metadataSource = entry.segment?.metadata?.source;
+        if (metadataSource !== 'connector' && metadataSource !== 'connector-start' && metadataSource !== 'connector-end') {
+          return;
+        }
+        if (!isUnknownClassification(entry.classification)) {
+          return;
+        }
+        const fallbackClassification = findNeighborClassification(index, -1)
+          ?? findNeighborClassification(index, 1);
+        if (fallbackClassification) {
+          entry.classification = cloneClassificationEntry(fallbackClassification);
+        }
+      });
+    }
+
+    segmentEntries.forEach((entry) => {
+      if (!entry || !entry.segment) {
         return;
       }
-      const classification = this.classifySegment(segment) || {};
+      const { segment } = entry;
+      const classification = entry.classification || {};
       const color = typeof classification.color === 'string' ? classification.color : this.modeColors[this.currentMode];
       const name = classification.label ?? '';
       const key = classification.key ?? `${this.profileMode}-default`;
@@ -1761,13 +1823,72 @@ export class DirectionsManager {
     return Number.isFinite(elevation) ? [lng, lat, elevation] : [lng, lat];
   }
 
+  normalizeRouteCutEntry(entry) {
+    if (entry === null || entry === undefined) {
+      return null;
+    }
+
+    if (typeof entry === 'number') {
+      const distance = Number(entry);
+      return Number.isFinite(distance) ? { distanceKm: distance, lng: null, lat: null } : null;
+    }
+
+    if (typeof entry === 'object') {
+      const distance = Number(entry.distanceKm ?? entry.distance ?? entry.value);
+      if (!Number.isFinite(distance)) {
+        return null;
+      }
+
+      let lng = null;
+      let lat = null;
+
+      if (Array.isArray(entry.coordinates) && entry.coordinates.length >= 2) {
+        const [coordLng, coordLat] = entry.coordinates;
+        lng = Number(coordLng);
+        lat = Number(coordLat);
+      } else {
+        const maybeLng = Number(entry.lng ?? entry.lon ?? entry.longitude);
+        const maybeLat = Number(entry.lat ?? entry.latitude);
+        if (Number.isFinite(maybeLng) && Number.isFinite(maybeLat)) {
+          lng = maybeLng;
+          lat = maybeLat;
+        }
+      }
+
+      return {
+        distanceKm: distance,
+        lng: Number.isFinite(lng) ? lng : null,
+        lat: Number.isFinite(lat) ? lat : null
+      };
+    }
+
+    return null;
+  }
+
   cloneRouteCuts(source = this.routeCutDistances) {
     if (!Array.isArray(source)) {
       return [];
     }
+
     return source
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value));
+      .map((entry) => this.normalizeRouteCutEntry(entry))
+      .filter((entry) => entry && Number.isFinite(entry.distanceKm))
+      .map((entry) => ({ ...entry }));
+  }
+
+  setRouteCutDistances(cuts) {
+    if (!Array.isArray(cuts) || !cuts.length) {
+      this.routeCutDistances = [];
+      return;
+    }
+
+    const normalized = cuts
+      .map((entry) => this.normalizeRouteCutEntry(entry))
+      .filter((entry) => entry && Number.isFinite(entry.distanceKm))
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .map((entry) => ({ ...entry }));
+
+    this.routeCutDistances = normalized;
   }
 
   createHistorySnapshot() {
@@ -1798,7 +1919,7 @@ export class DirectionsManager {
     }
 
     this.waypoints = waypointSnapshot;
-    this.routeCutDistances = routeCutSnapshot;
+    this.setRouteCutDistances(routeCutSnapshot);
     return true;
   }
 
@@ -2029,7 +2150,7 @@ export class DirectionsManager {
 
     const rawCuts = Array.isArray(this.routeCutDistances)
       ? this.routeCutDistances
-          .map((value) => Number(value))
+          .map((entry) => Number(entry?.distanceKm ?? entry))
           .filter((value) => Number.isFinite(value))
       : [];
 
@@ -2216,7 +2337,8 @@ export class DirectionsManager {
         if (prevSegment && Number.isFinite(prevSegment.endKm)) {
           return Number(prevSegment.endKm);
         }
-        const cutValue = this.routeCutDistances?.[segmentIndex - 1];
+        const cutEntry = this.routeCutDistances?.[segmentIndex - 1];
+        const cutValue = Number(cutEntry?.distanceKm ?? cutEntry);
         if (Number.isFinite(cutValue)) {
           return cutValue;
         }
@@ -3521,7 +3643,7 @@ export class DirectionsManager {
     return changed;
   }
 
-  addRouteCut(distanceKm) {
+  addRouteCut(distanceKm, coordinates = null) {
     if (!this.routeProfile) {
       return;
     }
@@ -3536,14 +3658,30 @@ export class DirectionsManager {
       return;
     }
 
-    const exists = this.routeCutDistances.some((cut) => Math.abs(cut - clamped) <= ROUTE_CUT_EPSILON_KM / 2);
+    const exists = Array.isArray(this.routeCutDistances) && this.routeCutDistances.some((cut) => {
+      const value = Number(cut?.distanceKm ?? cut);
+      return Number.isFinite(value) && Math.abs(value - clamped) <= ROUTE_CUT_EPSILON_KM / 2;
+    });
     if (exists) {
       return;
     }
 
     this.recordWaypointState();
-    this.routeCutDistances.push(clamped);
-    this.routeCutDistances.sort((a, b) => a - b);
+    let targetCoordinates = null;
+    if (Array.isArray(coordinates) && coordinates.length >= 2) {
+      targetCoordinates = coordinates;
+    } else {
+      targetCoordinates = this.getCoordinateAtDistance(clamped);
+    }
+    const lng = Number(targetCoordinates?.[0]);
+    const lat = Number(targetCoordinates?.[1]);
+    const nextCuts = Array.isArray(this.routeCutDistances) ? [...this.routeCutDistances] : [];
+    nextCuts.push({
+      distanceKm: clamped,
+      lng: Number.isFinite(lng) ? lng : null,
+      lat: Number.isFinite(lat) ? lat : null
+    });
+    this.setRouteCutDistances(nextCuts);
     this.updateCutDisplays();
   }
 
@@ -3557,17 +3695,24 @@ export class DirectionsManager {
       return;
     }
 
-    const mirrored = this.routeCutDistances
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value))
-      .map((value) => totalDistance - value)
-      .filter((value) => value > ROUTE_CUT_EPSILON_KM && totalDistance - value > ROUTE_CUT_EPSILON_KM)
-      .sort((a, b) => a - b);
+    const mirrored = Array.isArray(this.routeCutDistances)
+      ? this.routeCutDistances
+          .map((entry) => this.normalizeRouteCutEntry(entry))
+          .filter((entry) => entry && Number.isFinite(entry.distanceKm))
+          .map((entry) => ({
+            distanceKm: totalDistance - entry.distanceKm,
+            lng: Number.isFinite(entry.lng) ? entry.lng : null,
+            lat: Number.isFinite(entry.lat) ? entry.lat : null
+          }))
+          .filter((entry) => entry.distanceKm > ROUTE_CUT_EPSILON_KM
+            && totalDistance - entry.distanceKm > ROUTE_CUT_EPSILON_KM)
+          .sort((a, b) => a.distanceKm - b.distanceKm)
+      : [];
 
-    this.routeCutDistances = mirrored;
+    this.setRouteCutDistances(mirrored);
   }
 
-  updateDraggedBivouac(distanceKm) {
+  updateDraggedBivouac(distanceKm, coordinates = null) {
     if (this.draggedBivouacIndex === null) {
       return;
     }
@@ -3585,11 +3730,20 @@ export class DirectionsManager {
       return;
     }
 
-    const prev = index > 0 ? this.routeCutDistances[index - 1] : 0;
-    const next = index < this.routeCutDistances.length - 1 ? this.routeCutDistances[index + 1] : totalDistance;
-    const minDistance = index > 0 ? prev + ROUTE_CUT_EPSILON_KM : ROUTE_CUT_EPSILON_KM;
+    const prevEntry = index > 0 ? this.routeCutDistances[index - 1] : null;
+    const nextEntry = index < this.routeCutDistances.length - 1 ? this.routeCutDistances[index + 1] : null;
+    const prevDistance = index > 0 ? Number(prevEntry?.distanceKm ?? prevEntry) : 0;
+    const nextDistance = index < this.routeCutDistances.length - 1
+      ? Number(nextEntry?.distanceKm ?? nextEntry)
+      : totalDistance;
+    if ((index > 0 && !Number.isFinite(prevDistance))
+      || (index < this.routeCutDistances.length - 1 && !Number.isFinite(nextDistance))) {
+      return;
+    }
+
+    const minDistance = index > 0 ? prevDistance + ROUTE_CUT_EPSILON_KM : ROUTE_CUT_EPSILON_KM;
     const maxDistance = index < this.routeCutDistances.length - 1
-      ? next - ROUTE_CUT_EPSILON_KM
+      ? nextDistance - ROUTE_CUT_EPSILON_KM
       : totalDistance - ROUTE_CUT_EPSILON_KM;
     if (maxDistance <= minDistance) {
       return;
@@ -3600,12 +3754,29 @@ export class DirectionsManager {
       return;
     }
 
-    const current = this.routeCutDistances[index];
-    if (Number.isFinite(current) && Math.abs(current - clamped) <= 1e-5) {
+    const currentEntry = this.routeCutDistances[index];
+    const currentDistance = Number(currentEntry?.distanceKm ?? currentEntry);
+    const hasCoordinateUpdate = Array.isArray(coordinates) && coordinates.length >= 2;
+    if (!hasCoordinateUpdate && Number.isFinite(currentDistance) && Math.abs(currentDistance - clamped) <= 1e-5) {
       return;
     }
 
-    this.routeCutDistances[index] = clamped;
+    let targetCoordinates = null;
+    if (hasCoordinateUpdate) {
+      targetCoordinates = coordinates;
+    } else {
+      targetCoordinates = this.getCoordinateAtDistance(clamped);
+    }
+    const lng = Number(targetCoordinates?.[0]);
+    const lat = Number(targetCoordinates?.[1]);
+
+    const nextCuts = [...this.routeCutDistances];
+    nextCuts[index] = {
+      distanceKm: clamped,
+      lng: Number.isFinite(lng) ? lng : null,
+      lat: Number.isFinite(lat) ? lat : null
+    };
+    this.setRouteCutDistances(nextCuts);
     this.updateCutDisplays();
   }
 
@@ -3634,7 +3805,8 @@ export class DirectionsManager {
     if (target) {
       const projection = this.projectOntoRoute(target, Number.MAX_SAFE_INTEGER);
       if (projection && Number.isFinite(projection.distanceKm)) {
-        this.updateDraggedBivouac(projection.distanceKm);
+        const projectedCoordinates = projection.projection?.coordinates;
+        this.updateDraggedBivouac(projection.distanceKm, projectedCoordinates);
       } else {
         this.updateCutDisplays();
       }
@@ -3659,7 +3831,7 @@ export class DirectionsManager {
     event.preventDefault?.();
     event.originalEvent?.preventDefault?.();
 
-    this.addRouteCut(projection.distanceKm);
+    this.addRouteCut(projection.distanceKm, projection.projection?.coordinates);
   }
 
   setHintVisible(isVisible) {
@@ -6623,8 +6795,20 @@ export class DirectionsManager {
 
   applyRoute(route) {
     this.hideRouteHover();
-    const previousCuts = Array.isArray(this.routeCutDistances) ? [...this.routeCutDistances] : [];
-    const previousTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
+    const previousCuts = this.cloneRouteCuts();
+    if (previousCuts.length && this.routeProfile && Array.isArray(this.routeProfile.coordinates)) {
+      previousCuts.forEach((entry) => {
+        if (!entry || Number.isFinite(entry.lng) && Number.isFinite(entry.lat)) {
+          return;
+        }
+        const coord = this.getCoordinateAtDistance(entry.distanceKm);
+        if (Array.isArray(coord) && coord.length >= 2) {
+          const [lng, lat] = coord;
+          entry.lng = Number.isFinite(lng) ? lng : null;
+          entry.lat = Number.isFinite(lat) ? lat : null;
+        }
+      });
+    }
     const coordinates = route?.geometry?.coordinates ?? [];
     this.routeProfile = this.buildRouteProfile(coordinates);
     const profileCoordinates = Array.isArray(this.routeProfile?.coordinates)
@@ -6657,31 +6841,78 @@ export class DirectionsManager {
     this.cacheRouteLegSegments();
     const newTotalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
     let restoredCuts = [];
-    if (previousCuts.length && previousTotalDistance > ROUTE_CUT_EPSILON_KM && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
+    if (previousCuts.length && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
       restoredCuts = previousCuts
-        .map((value) => {
-          if (!Number.isFinite(value)) return null;
-          const normalized = value / previousTotalDistance;
-          if (!Number.isFinite(normalized)) return null;
-          const projected = normalized * newTotalDistance;
-          return Number.isFinite(projected) ? projected : null;
+        .map((entry) => {
+          if (!entry || !Number.isFinite(entry.distanceKm)) {
+            return null;
+          }
+
+          const hasStoredCoords = Number.isFinite(entry.lng) && Number.isFinite(entry.lat);
+          let projectedDistance = null;
+          let projectedCoords = hasStoredCoords ? [entry.lng, entry.lat] : null;
+
+          if (hasStoredCoords) {
+            try {
+              const projection = this.projectOntoRoute(toLngLat([entry.lng, entry.lat]), Number.MAX_SAFE_INTEGER);
+              if (projection && Number.isFinite(projection.distanceKm)) {
+                projectedDistance = projection.distanceKm;
+                if (Array.isArray(projection.projection?.coordinates)) {
+                  projectedCoords = projection.projection.coordinates;
+                }
+              }
+            } catch (error) {
+              console.warn('Failed to project bivouac onto updated route', error);
+            }
+          }
+
+          if (!Number.isFinite(projectedDistance)) {
+            projectedDistance = entry.distanceKm;
+            if (!projectedCoords) {
+              projectedCoords = this.getCoordinateAtDistance(projectedDistance);
+            }
+          }
+
+          if (!Number.isFinite(projectedDistance)) {
+            return null;
+          }
+
+          const clampedDistance = Math.max(0, Math.min(newTotalDistance, projectedDistance));
+          if (clampedDistance <= ROUTE_CUT_EPSILON_KM || newTotalDistance - clampedDistance <= ROUTE_CUT_EPSILON_KM) {
+            return null;
+          }
+
+          const resolvedCoords = Array.isArray(projectedCoords) && projectedCoords.length >= 2
+            ? projectedCoords
+            : this.getCoordinateAtDistance(clampedDistance);
+          const lng = Number(resolvedCoords?.[0]);
+          const lat = Number(resolvedCoords?.[1]);
+
+          return {
+            distanceKm: clampedDistance,
+            lng: Number.isFinite(lng) ? lng : null,
+            lat: Number.isFinite(lat) ? lat : null
+          };
         })
-        .filter((value) => Number.isFinite(value));
+        .filter((entry) => entry && Number.isFinite(entry.distanceKm))
+        .sort((a, b) => a.distanceKm - b.distanceKm);
     }
 
     this.resetRouteCuts();
-    if (restoredCuts.length && newTotalDistance > ROUTE_CUT_EPSILON_KM) {
-      const clamped = restoredCuts
-        .map((value) => Math.max(0, Math.min(newTotalDistance, value)))
-        .filter((value) => value > ROUTE_CUT_EPSILON_KM && newTotalDistance - value > ROUTE_CUT_EPSILON_KM)
-        .sort((a, b) => a - b);
+    if (restoredCuts.length) {
       const uniqueCuts = [];
-      clamped.forEach((value) => {
-        if (!uniqueCuts.some((existing) => Math.abs(existing - value) <= ROUTE_CUT_EPSILON_KM / 2)) {
-          uniqueCuts.push(value);
+      restoredCuts.forEach((entry) => {
+        if (!entry) {
+          return;
+        }
+        const existingIndex = uniqueCuts.findIndex((candidate) => Math.abs(candidate.distanceKm - entry.distanceKm) <= ROUTE_CUT_EPSILON_KM / 2);
+        if (existingIndex === -1) {
+          uniqueCuts.push(entry);
+        } else {
+          uniqueCuts[existingIndex] = entry;
         }
       });
-      this.routeCutDistances = uniqueCuts;
+      this.setRouteCutDistances(uniqueCuts);
     }
     this.updateCutDisplays();
     this.updateDistanceMarkers(resolvedRoute);
