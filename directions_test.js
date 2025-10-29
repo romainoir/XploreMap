@@ -1706,6 +1706,44 @@ export class DirectionsManager {
         return null;
       };
 
+      const intermediateWaypoints = Array.isArray(this.waypoints)
+        ? this.waypoints
+            .slice(1, -1)
+            .map((coord) => {
+              if (!Array.isArray(coord) || coord.length < 2) {
+                return null;
+              }
+              const lng = Number(coord[0]);
+              const lat = Number(coord[1]);
+              if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+                return null;
+              }
+              return [lng, lat];
+            })
+            .filter(Boolean)
+        : [];
+
+      const touchesIntermediateWaypoint = (segment) => {
+        if (!segment || !intermediateWaypoints.length) {
+          return false;
+        }
+        const start = Array.isArray(segment.start) ? segment.start : null;
+        const end = Array.isArray(segment.end) ? segment.end : null;
+        if (!start && !end) {
+          return false;
+        }
+        return intermediateWaypoints.some((waypoint) => {
+          if (!Array.isArray(waypoint) || waypoint.length < 2) {
+            return false;
+          }
+          const matchesStart = start && this.coordinatesMatch(start, waypoint);
+          if (matchesStart) {
+            return true;
+          }
+          return end ? this.coordinatesMatch(end, waypoint) : false;
+        });
+      };
+
       segmentEntries.forEach((entry, index) => {
         if (!entry || !entry.segment) {
           return;
@@ -1723,6 +1761,25 @@ export class DirectionsManager {
           entry.classification = cloneClassificationEntry(fallbackClassification);
         }
       });
+
+      if (intermediateWaypoints.length) {
+        segmentEntries.forEach((entry, index) => {
+          if (!entry || !entry.segment) {
+            return;
+          }
+          if (!isUnknownClassification(entry.classification)) {
+            return;
+          }
+          if (!touchesIntermediateWaypoint(entry.segment)) {
+            return;
+          }
+          const fallbackClassification = findNeighborClassification(index, -1)
+            ?? findNeighborClassification(index, 1);
+          if (fallbackClassification) {
+            entry.classification = cloneClassificationEntry(fallbackClassification);
+          }
+        });
+      }
     }
 
     segmentEntries.forEach((entry) => {
