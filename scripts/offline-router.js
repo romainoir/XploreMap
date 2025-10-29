@@ -888,6 +888,25 @@ export class OfflineRouter {
       ? mode
       : Array.from(this.supportedModes)[0];
 
+    const preservedMap = new Map();
+    if (Array.isArray(preservedSegments)) {
+      preservedSegments.forEach((segment) => {
+        if (!segment) {
+          return;
+        }
+        const startIndex = Number(segment.startIndex);
+        const endIndex = Number(segment.endIndex);
+        const coords = sanitizeCoordinateSequence(segment.coordinates);
+        if (!Number.isInteger(startIndex) || endIndex !== startIndex + 1 || !coords) {
+          return;
+        }
+        const metadata = Array.isArray(segment.metadata)
+          ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
+          : [];
+        preservedMap.set(startIndex, { endIndex, coordinates: coords, metadata });
+      });
+    }
+
     if (travelMode === 'manual') {
       const coordinates = [];
       const segments = [];
@@ -899,6 +918,61 @@ export class OfflineRouter {
       for (let index = 0; index < waypoints.length - 1; index += 1) {
         const start = waypoints[index];
         const end = waypoints[index + 1];
+        const preserved = preservedMap.get(index);
+        if (preserved && preserved.endIndex === index + 1) {
+          const preservedCoords = preserved.coordinates.map((coord) => coord.slice());
+          if (preservedCoords.length >= 2) {
+            const first = preservedCoords[0];
+            const last = preservedCoords[preservedCoords.length - 1];
+            const normalizedStart = sanitizeCoordinate(start) || first;
+            const normalizedEnd = sanitizeCoordinate(end) || last;
+            if (coordinatesAlmostEqual(first, normalizedStart) && coordinatesAlmostEqual(last, normalizedEnd)) {
+              preservedCoords[0] = mergeCoordinates(start, preservedCoords[0]);
+              preservedCoords[preservedCoords.length - 1] = mergeCoordinates(end, preservedCoords[preservedCoords.length - 1]);
+              const metrics = accumulateSequenceMetrics(preservedCoords);
+              appendCoordinateSequence(coordinates, preservedCoords);
+              const offsetKm = totalDistanceKm;
+              totalDistanceKm += metrics.distanceKm;
+              totalAscent += metrics.ascent;
+              totalDescent += metrics.descent;
+              const segmentMetadata = Array.isArray(preserved.metadata)
+                ? preserved.metadata.map((entry) => ({ ...entry }))
+                : [];
+              segmentMetadata.forEach((entry) => {
+                if (!entry) {
+                  return;
+                }
+                const distanceKm = Number(entry.distanceKm) || 0;
+                const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
+                const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
+                coordinateMetadata.push({
+                  distanceKm,
+                  ascent: Number(entry.ascent) || 0,
+                  descent: Number(entry.descent) || 0,
+                  costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
+                    ? entry.costMultiplier
+                    : 1,
+                  source: entry.source ?? 'preserved',
+                  start: Array.isArray(entry.start) ? entry.start.slice() : null,
+                  end: Array.isArray(entry.end) ? entry.end.slice() : null,
+                  startDistanceKm: startKm,
+                  endDistanceKm: endKm
+                });
+              });
+              segments.push({
+                distance: metrics.distanceKm * 1000,
+                duration: this.estimateDurationSeconds(metrics.distanceKm, travelMode),
+                ascent: metrics.ascent,
+                descent: metrics.descent,
+                start_index: index,
+                end_index: index + 1,
+                metadata: segmentMetadata
+              });
+              continue;
+            }
+          }
+        }
+
         const segment = buildDirectSegment(start, end);
         if (!segment || !Array.isArray(segment.coordinates) || segment.coordinates.length < 2) {
           throw new Error('Manual routing requires at least two valid coordinates');
@@ -972,25 +1046,6 @@ export class OfflineRouter {
     }
 
     await this.ensureReady();
-
-    const preservedMap = new Map();
-    if (Array.isArray(preservedSegments)) {
-      preservedSegments.forEach((segment) => {
-        if (!segment) {
-          return;
-        }
-        const startIndex = Number(segment.startIndex);
-        const endIndex = Number(segment.endIndex);
-        const coords = sanitizeCoordinateSequence(segment.coordinates);
-        if (!Number.isInteger(startIndex) || endIndex !== startIndex + 1 || !coords) {
-          return;
-        }
-        const metadata = Array.isArray(segment.metadata)
-          ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
-          : [];
-        preservedMap.set(startIndex, { endIndex, coordinates: coords, metadata });
-      });
-    }
 
     const coordinates = [];
     const segments = [];
