@@ -67,6 +67,12 @@ const SURFACE_SEVERITY_RANK = Object.freeze({
 
 const TRAIL_VISIBILITY_VALUES = new Set(Object.keys(TRAIL_VISIBILITY_RANK));
 
+const CONNECTOR_METADATA_SOURCES = new Set(['connector', 'connector-start', 'connector-end']);
+const CONNECTOR_DIRECTION_PREFERENCE = Object.freeze({
+  'connector-start': [1, -1],
+  'connector-end': [-1, 1]
+});
+
 function normalizeTagString(value) {
   if (typeof value !== 'string') {
     return null;
@@ -600,6 +606,115 @@ function appendCoordinateSequence(target, sequence) {
   });
 }
 
+const isConnectorMetadataSource = (source) => typeof source === 'string' && CONNECTOR_METADATA_SOURCES.has(source);
+
+function deriveConnectorNeighborAttributes(entries, startIndex, step) {
+  if (!Array.isArray(entries) || !Number.isInteger(startIndex) || !Number.isInteger(step) || step === 0) {
+    return null;
+  }
+
+  let index = startIndex + step;
+  while (index >= 0 && index < entries.length) {
+    const candidate = entries[index];
+    if (!candidate || typeof candidate !== 'object') {
+      index += step;
+      continue;
+    }
+
+    const hiking = candidate.hiking && typeof candidate.hiking === 'object' ? candidate.hiking : null;
+    const sacScale = resolveSacScale(
+      candidate.sacScale,
+      hiking?.sacScale,
+      candidate.category,
+      hiking?.category,
+      candidate.difficulty,
+      hiking?.difficulty
+    );
+    const normalizedCategory = typeof candidate.category === 'string' && candidate.category
+      ? normalizeSacScale(candidate.category) ?? candidate.category
+      : (typeof hiking?.category === 'string' && hiking.category
+        ? normalizeSacScale(hiking.category) ?? hiking.category
+        : sacScale);
+
+    if (sacScale || normalizedCategory) {
+      return {
+        sacScale,
+        category: normalizedCategory,
+        hiking: hiking ? { ...hiking } : null
+      };
+    }
+
+    if (!isConnectorMetadataSource(candidate.source)) {
+      return null;
+    }
+
+    index += step;
+  }
+
+  return null;
+}
+
+function propagateConnectorMetadata(entries) {
+  if (!Array.isArray(entries) || !entries.length) {
+    return;
+  }
+
+  entries.forEach((entry, index) => {
+    if (!entry || !isConnectorMetadataSource(entry.source)) {
+      return;
+    }
+
+    const hiking = entry.hiking && typeof entry.hiking === 'object' ? entry.hiking : null;
+    const hasCategory = typeof entry.category === 'string' && entry.category;
+    const hasSacScale = typeof entry.sacScale === 'string' && entry.sacScale;
+    const hasHikingCategory = typeof hiking?.category === 'string' && hiking.category;
+    if (hasCategory || hasSacScale || hasHikingCategory) {
+      return;
+    }
+
+    const preferredDirections = CONNECTOR_DIRECTION_PREFERENCE[entry.source] ?? [-1, 1];
+    let inherited = null;
+    for (let i = 0; i < preferredDirections.length; i += 1) {
+      const candidate = deriveConnectorNeighborAttributes(entries, index, preferredDirections[i]);
+      if (candidate) {
+        inherited = candidate;
+        break;
+      }
+    }
+
+    if (!inherited) {
+      return;
+    }
+
+    const existingHiking = hiking ? { ...hiking } : {};
+    const mergedHiking = inherited.hiking ? { ...inherited.hiking, ...existingHiking } : { ...existingHiking };
+
+    const inheritedSacScale = inherited.sacScale ?? (inherited.category ? normalizeSacScale(inherited.category) : null);
+    const inheritedCategory = inherited.category ?? inheritedSacScale;
+
+    if (inheritedSacScale) {
+      entry.sacScale = inheritedSacScale;
+      if (!mergedHiking.sacScale) {
+        mergedHiking.sacScale = inheritedSacScale;
+      }
+      if (!mergedHiking.category) {
+        mergedHiking.category = inheritedSacScale;
+      }
+    }
+
+    if (inheritedCategory) {
+      entry.category = inheritedCategory;
+      if (!mergedHiking.category) {
+        mergedHiking.category = inheritedCategory;
+      }
+    }
+
+    if (Object.keys(mergedHiking).length) {
+      entry.hiking = mergedHiking;
+    }
+  });
+}
+
 function buildSegmentFromPortions(portions = []) {
   const coordinates = [];
   const metadata = [];
@@ -661,6 +776,8 @@ function buildSegmentFromPortions(portions = []) {
     }
     appendPortion(portion.coordinates, portion);
   });
+
+  propagateConnectorMetadata(metadata);
 
   if (coordinates.length < 2) {
     return null;
@@ -1413,14 +1530,14 @@ export class OfflineRouter {
           portions.push({
             coordinates: [startConnector.start, startConnector.end],
             costMultiplier: 1,
-            source: 'connector'
+            source: 'connector-start'
           });
         } else if (Array.isArray(startCoord) && Array.isArray(startPoint)) {
           const mergedStart = mergeCoordinates(startCoord, startPoint);
           portions.push({
             coordinates: [mergedStart, startPoint],
             costMultiplier: 1,
-            source: 'connector'
+            source: 'connector-start'
           });
         }
 
@@ -1435,14 +1552,14 @@ export class OfflineRouter {
           portions.push({
             coordinates: [endConnector.start, endConnector.end],
             costMultiplier: 1,
-            source: 'connector'
+            source: 'connector-end'
           });
         } else if (Array.isArray(endCoord) && Array.isArray(endPoint)) {
           const mergedEnd = mergeCoordinates(endPoint, endCoord);
           portions.push({
             coordinates: [mergedEnd, endCoord],
             costMultiplier: 1,
-            source: 'connector'
+            source: 'connector-end'
           });
         }
 
@@ -1566,14 +1683,14 @@ export class OfflineRouter {
       portions.push({
         coordinates: [startConnector.start, startConnector.end],
         costMultiplier: 1,
-        source: 'connector'
+        source: 'connector-start'
       });
     } else if (Array.isArray(startCoord) && startCoord.length >= 2 && Array.isArray(startPoint)) {
       const mergedStart = mergeCoordinates(startCoord, startPoint);
       portions.push({
         coordinates: [mergedStart, startPoint],
         costMultiplier: 1,
-        source: 'connector'
+        source: 'connector-start'
       });
     }
 
@@ -1631,14 +1748,14 @@ export class OfflineRouter {
       portions.push({
         coordinates: [endConnector.start, endConnector.end],
         costMultiplier: 1,
-        source: 'connector'
+        source: 'connector-end'
       });
     } else if (Array.isArray(endCoord) && endCoord.length >= 2 && Array.isArray(endPoint)) {
       const mergedEnd = mergeCoordinates(endPoint, endCoord);
       portions.push({
         coordinates: [mergedEnd, endCoord],
         costMultiplier: 1,
-        source: 'connector'
+        source: 'connector-end'
       });
     }
 
