@@ -722,10 +722,6 @@ async function init() {
     }
   };
 
-  trackOfflineNetworkLoading(offlineRouter.ensureReady()).catch((error) => {
-    console.error('Failed to preload offline routing network', error);
-  });
-
   const loadDebugNetworkData = async () => {
     if (activeRouterKey !== 'offline') {
       return null;
@@ -1086,18 +1082,7 @@ async function init() {
     updateDebugNetworkAvailability();
 
     try {
-      if (targetKey === 'offline') {
-        try {
-          await trackOfflineNetworkLoading(offlineRouter.ensureReady());
-        } catch (ensureError) {
-          console.warn('Offline router initialization failed during router switch', ensureError);
-        }
-        try {
-          await refreshOfflineNetwork();
-        } catch (networkError) {
-          console.warn('Failed to refresh offline routing network during router switch', networkError);
-        }
-      } else {
+      if (targetKey !== 'offline') {
         if (debugNetworkVisible) {
           hideDebugNetworkLayer();
           debugNetworkVisible = false;
@@ -1106,7 +1091,11 @@ async function init() {
       }
 
       if (directionsManager && typeof directionsManager.setRouter === 'function') {
-        directionsManager.setRouter(routers[targetKey], { reroute });
+        const waypointCount = Array.isArray(directionsManager.waypoints)
+          ? directionsManager.waypoints.length
+          : 0;
+        const deferEnsureReady = targetKey === 'offline' && waypointCount === 0;
+        directionsManager.setRouter(routers[targetKey], { reroute, deferEnsureReady });
       }
     } finally {
       if (routingModeToggle) {
@@ -1192,12 +1181,6 @@ async function init() {
 
   map.on('load', async () => {
     try {
-      await refreshOfflineNetwork();
-    } catch (error) {
-      console.warn('Initial offline routing network build failed', error);
-    }
-
-    try {
       directionsManager = new DirectionsManager(map, [
         directionsToggle,
         directionsDock,
@@ -1215,11 +1198,14 @@ async function init() {
         profileModeMenu,
         profileLegend
       ], {
-        router: offlineRouter
+        router: offlineRouter,
+        deferRouterInitialization: true
       });
       const initialRouter = routers[activeRouterKey] ?? offlineRouter;
       if (typeof directionsManager.setRouter === 'function') {
-        directionsManager.setRouter(initialRouter);
+        const deferEnsureReady = initialRouter === offlineRouter
+          && (!Array.isArray(directionsManager.waypoints) || directionsManager.waypoints.length === 0);
+        directionsManager.setRouter(initialRouter, { deferEnsureReady });
       }
       directionsManager.setRouteSegmentsListener((payload) => {
         const isObject = payload && typeof payload === 'object';
@@ -1249,6 +1235,13 @@ async function init() {
           return;
         }
         const coords = Array.isArray(waypoints) ? waypoints : [];
+        if (coords.length) {
+          try {
+            await trackOfflineNetworkLoading(offlineRouter.ensureReady());
+          } catch (error) {
+            console.warn('Offline router initialization deferred until waypoint placement failed', error);
+          }
+        }
         const bounds = computeCoordinateBounds(coords);
 
         const lacksWaypointCoverage = () => {
@@ -1275,7 +1268,11 @@ async function init() {
         };
 
         if (lacksWaypointCoverage() || lacksMapCoverage()) {
-          await refreshOfflineNetwork({ waypointBounds: bounds });
+          try {
+            await refreshOfflineNetwork({ waypointBounds: bounds });
+          } catch (error) {
+            console.warn('Deferred offline routing network refresh failed', error);
+          }
         }
       });
     } catch (error) {

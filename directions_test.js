@@ -804,7 +804,10 @@ export class DirectionsManager {
       profileLegend
     ] = uiElements;
 
-    const { router = null } = options ?? {};
+    const {
+      router = null,
+      deferRouterInitialization = false
+    } = options ?? {};
 
     this.map = map;
     this.mapContainer = map.getContainer?.() ?? null;
@@ -903,7 +906,7 @@ export class DirectionsManager {
     this.setupUIHandlers();
     this.setupMapHandlers();
     this.setProfileMode(this.profileMode, { silent: true });
-    this.setRouter(router ?? null);
+    this.setRouter(router ?? null, { deferEnsureReady: deferRouterInitialization });
     this.updateUndoAvailability();
     this.updatePanelVisibilityState();
   }
@@ -1862,13 +1865,13 @@ export class DirectionsManager {
 
   setRouter(router, options = {}) {
     this.router = router ?? null;
-    if (this.router && typeof this.router.ensureReady === 'function') {
+    const { reroute = false, deferEnsureReady = false } = options ?? {};
+    if (this.router && typeof this.router.ensureReady === 'function' && !deferEnsureReady) {
       this.router.ensureReady().catch((error) => {
         console.error('Router failed to initialize', error);
       });
     }
     this.updateModeAvailability();
-    const { reroute = false } = options;
     if (reroute && this.waypoints.length >= 2) {
       this.getRoute();
     }
