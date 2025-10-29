@@ -253,6 +253,7 @@ html, body { margin:0; height:100%; }
   gap: 12px;
   padding-inline: 16px;
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.06);
+  position: relative;
 }
 
 .routing-mode-toggle.btn--icon-only {
@@ -267,6 +268,44 @@ html, body { margin:0; height:100%; }
   width: 22px;
   height: 22px;
   object-fit: contain;
+}
+
+.routing-mode-toggle__spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(17, 34, 48, 0.24);
+  border-top-color: rgba(17, 34, 48, 0.72);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.2s ease;
+  animation: routing-mode-toggle-spinner 0.8s linear infinite;
+}
+
+.routing-mode-toggle.is-loading .routing-mode-toggle__spinner {
+  opacity: 1;
+}
+
+.routing-mode-toggle.is-loading .routing-mode-toggle__icon {
+  opacity: 0.32;
+}
+
+.routing-mode-toggle[aria-busy="true"] {
+  cursor: progress;
+}
+
+@keyframes routing-mode-toggle-spinner {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
 }
 
 .profile-mode-controls {

@@ -511,6 +511,8 @@ async function init() {
   const routingModeToggle = document.getElementById('routingModeToggle');
   const routingModeIcon = routingModeToggle?.querySelector('.routing-mode-toggle__icon');
   const routingModeLabel = routingModeToggle?.querySelector('.routing-mode-toggle__text');
+  const routingModeSpinner = routingModeToggle?.querySelector('.routing-mode-toggle__spinner');
+  const routingModeLoadingText = routingModeToggle?.querySelector('.routing-mode-toggle__loading-text');
   const debugNetworkCheckbox = document.getElementById('debugNetworkCheckbox');
   const debugNetworkControl = document.getElementById('debugNetworkControl');
   const profileModeToggle = document.getElementById('profileModeToggle');
@@ -539,10 +541,6 @@ async function init() {
   if (typeof offlineRouter.setNodeConnectionToleranceMeters === 'function') {
     offlineRouter.setNodeConnectionToleranceMeters(DEFAULT_NODE_CONNECTION_TOLERANCE_METERS);
   }
-  offlineRouter.ensureReady().catch((error) => {
-    console.error('Failed to preload offline routing network', error);
-  });
-
   const orsOptions = {};
   const globalOrsServiceUrl = typeof window !== 'undefined'
     && typeof window.OPENROUTESERVICE_SERVICE_URL === 'string'
@@ -581,6 +579,7 @@ async function init() {
 
   let offlineNetworkCoverage = null;
   let offlineNetworkRefreshPromise = null;
+  let offlineNetworkLoadingCount = 0;
 
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
@@ -648,9 +647,11 @@ async function init() {
   const updateRoutingModeToggle = () => {
     if (!routingModeToggle) return;
     const offlineActive = activeRouterKey === 'offline';
+    const isLoadingOffline = offlineNetworkLoadingCount > 0;
     routingModeToggle.classList.toggle('active', offlineActive);
     routingModeToggle.classList.toggle('is-offline', offlineActive);
     routingModeToggle.classList.toggle('is-online', !offlineActive);
+    routingModeToggle.classList.toggle('is-loading', isLoadingOffline);
     routingModeToggle.setAttribute('aria-pressed', offlineActive ? 'true' : 'false');
     routingModeToggle.dataset.mode = offlineActive ? 'offline' : 'online';
     const labelText = offlineActive ? 'Offline routing' : 'Online routing';
@@ -658,15 +659,26 @@ async function init() {
     if (routingModeIcon) {
       routingModeIcon.src = offlineActive ? ROUTING_ICON_OFFLINE : ROUTING_ICON_ONLINE;
     }
-    routingModeToggle.title = offlineActive
-      ? 'Switch to online routing'
-      : 'Switch to offline routing';
-    routingModeToggle.setAttribute(
-      'aria-label',
-      offlineActive
+    if (routingModeLoadingText) {
+      routingModeLoadingText.setAttribute('aria-hidden', isLoadingOffline ? 'false' : 'true');
+    }
+    let titleText;
+    let ariaLabel;
+    if (isLoadingOffline) {
+      routingModeToggle.setAttribute('aria-busy', 'true');
+      titleText = 'Loading offline routing network…';
+      ariaLabel = 'Loading offline routing network…';
+    } else {
+      routingModeToggle.setAttribute('aria-busy', 'false');
+      titleText = offlineActive
+        ? 'Switch to online routing'
+        : 'Switch to offline routing';
+      ariaLabel = offlineActive
         ? 'Offline routing enabled. Activate to switch to online routing.'
-        : 'Online routing enabled. Activate to switch to offline routing.'
-    );
+        : 'Online routing enabled. Activate to switch to offline routing.';
+    }
+    routingModeToggle.title = titleText;
+    routingModeToggle.setAttribute('aria-label', ariaLabel);
   };
 
   const updateDebugNetworkAvailability = () => {
@@ -689,6 +701,31 @@ async function init() {
     }
   };
 
+  const beginOfflineNetworkLoading = () => {
+    offlineNetworkLoadingCount += 1;
+    updateRoutingModeToggle();
+  };
+
+  const endOfflineNetworkLoading = () => {
+    if (offlineNetworkLoadingCount > 0) {
+      offlineNetworkLoadingCount -= 1;
+    }
+    updateRoutingModeToggle();
+  };
+
+  const trackOfflineNetworkLoading = async (promise) => {
+    beginOfflineNetworkLoading();
+    try {
+      return await promise;
+    } finally {
+      endOfflineNetworkLoading();
+    }
+  };
+
+  trackOfflineNetworkLoading(offlineRouter.ensureReady()).catch((error) => {
+    console.error('Failed to preload offline routing network', error);
+  });
+
   const loadDebugNetworkData = async () => {
     if (activeRouterKey !== 'offline') {
       return null;
@@ -697,7 +734,7 @@ async function init() {
       return debugNetworkData;
     }
     try {
-      await offlineRouter.ensureReady();
+      await trackOfflineNetworkLoading(offlineRouter.ensureReady());
       const dataset = typeof offlineRouter.getNetworkDebugGeoJSON === 'function'
         ? offlineRouter.getNetworkDebugGeoJSON({ intersectionsOnly: true })
         : offlineRouter.getNetworkGeoJSON();
@@ -710,7 +747,7 @@ async function init() {
       console.warn('Failed to access cached offline network data', error);
     }
     try {
-      const response = await fetch('./data/offline-network.geojson', { cache: 'no-store' });
+      const response = await trackOfflineNetworkLoading(fetch('./data/offline-network.geojson', { cache: 'no-store' }));
       if (!response.ok) {
         throw new Error(`Debug network request failed (${response.status})`);
       }
@@ -961,6 +998,7 @@ async function init() {
     }
     const { waypointBounds = null } = options || {};
     offlineNetworkRefreshPromise = (async () => {
+      beginOfflineNetworkLoading();
       try {
         const mapBounds = typeof map.getBounds === 'function' ? map.getBounds() : null;
         const combinedBounds = mergeBounds(mapBounds, waypointBounds);
@@ -1013,6 +1051,7 @@ async function init() {
         console.error(`Failed to rebuild offline routing network from ${sourceLabel} data`, error);
       } finally {
         offlineNetworkRefreshPromise = null;
+        endOfflineNetworkLoading();
       }
     })();
     return offlineNetworkRefreshPromise;
@@ -1049,7 +1088,7 @@ async function init() {
     try {
       if (targetKey === 'offline') {
         try {
-          await offlineRouter.ensureReady();
+          await trackOfflineNetworkLoading(offlineRouter.ensureReady());
         } catch (ensureError) {
           console.warn('Offline router initialization failed during router switch', ensureError);
         }
