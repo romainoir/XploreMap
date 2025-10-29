@@ -3533,25 +3533,28 @@ export class DirectionsManager {
       return false;
     }
 
-    const normalizedWaypoints = this.waypoints.map((coord) => {
+    const normalizeCoord = (coord) => {
       if (!Array.isArray(coord) || coord.length < 2) {
-        return coord;
+        return null;
       }
       const lng = Number(coord[0]);
       const lat = Number(coord[1]);
       if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-        return coord;
+        return null;
       }
-      if (coord.length > 2 && Number.isFinite(coord[2])) {
-        return [lng, lat, coord[2]];
-      }
-      return [lng, lat];
-    });
+      const elevation = coord.length > 2 && Number.isFinite(coord[2]) ? Number(coord[2]) : null;
+      return Number.isFinite(elevation) ? [lng, lat, elevation] : [lng, lat];
+    };
 
-    let changed = false;
-    normalizedWaypoints.forEach((coord, index) => {
+    const normalizedWaypoints = this.waypoints.map((coord) => normalizeCoord(coord) ?? coord);
+    const routeCoords = Array.isArray(this.routeProfile?.coordinates)
+      ? this.routeProfile.coordinates.filter((coord) => Array.isArray(coord) && coord.length >= 2)
+      : [];
+
+    const shouldSnapToRoute = this.currentMode !== 'manual' && routeCoords.length >= 2;
+    const applyCoordinateUpdate = (coord, index) => {
       if (!Array.isArray(coord) || coord.length < 2) {
-        return;
+        return false;
       }
       const current = this.waypoints[index];
       const hasComparableCurrent = Array.isArray(current) && current.length >= 2;
@@ -3559,6 +3562,67 @@ export class DirectionsManager {
       const differs = hasComparableCurrent ? !this.coordinatesMatch(current, coord) : true;
       if (lengthChanged || differs) {
         this.waypoints[index] = coord.slice();
+        return true;
+      }
+      return false;
+    };
+
+    let changed = false;
+
+    if (shouldSnapToRoute) {
+      const toleranceMeters = Math.max(75, WAYPOINT_MATCH_TOLERANCE_METERS || 0);
+      const lastWaypointIndex = normalizedWaypoints.length - 1;
+      let searchStartIndex = 0;
+
+      normalizedWaypoints.forEach((waypoint, index) => {
+        if (!Array.isArray(waypoint) || waypoint.length < 2) {
+          return;
+        }
+
+        let targetCoord = null;
+        if (index === 0) {
+          targetCoord = routeCoords[0];
+          searchStartIndex = 0;
+        } else if (index === lastWaypointIndex) {
+          targetCoord = routeCoords[routeCoords.length - 1];
+        } else {
+          let bestIndex = null;
+          let bestDistance = Infinity;
+          for (let routeIndex = searchStartIndex; routeIndex < routeCoords.length; routeIndex += 1) {
+            const candidate = routeCoords[routeIndex];
+            if (!Array.isArray(candidate) || candidate.length < 2) {
+              continue;
+            }
+            const distance = this.computeCoordinateDistanceMeters(waypoint, candidate);
+            if (!Number.isFinite(distance)) {
+              continue;
+            }
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestIndex = routeIndex;
+            }
+            if (distance <= toleranceMeters) {
+              break;
+            }
+          }
+
+          if (bestIndex !== null) {
+            targetCoord = routeCoords[bestIndex];
+            searchStartIndex = bestIndex;
+          }
+        }
+
+        const normalizedTarget = normalizeCoord(targetCoord) ?? waypoint;
+        if (applyCoordinateUpdate(normalizedTarget, index)) {
+          changed = true;
+        }
+      });
+
+      return changed;
+    }
+
+    normalizedWaypoints.forEach((coord, index) => {
+      if (applyCoordinateUpdate(normalizeCoord(coord) ?? coord, index)) {
         changed = true;
       }
     });
