@@ -5256,6 +5256,7 @@ export class DirectionsManager {
     if (this.router && typeof this.router.supportsMode === 'function' && !this.router.supportsMode(mode)) {
       return;
     }
+    const previousMode = this.currentMode;
     this.currentMode = mode;
     this.transportModes.forEach((button) => {
       button.classList.toggle('active', button.dataset.mode === mode);
@@ -5281,9 +5282,12 @@ export class DirectionsManager {
     }
     this.updateWaypoints();
     if (this.waypoints.length >= 2) {
-      const lastLegIndex = Math.max(0, this.waypoints.length - 2);
-      this.invalidateCachedLegSegments({ startIndex: lastLegIndex });
-      this.getRoute();
+      const preserveExistingRoute = mode === 'manual' && previousMode !== 'manual';
+      if (!preserveExistingRoute) {
+        const lastLegIndex = Math.max(0, this.waypoints.length - 2);
+        this.invalidateCachedLegSegments({ startIndex: lastLegIndex });
+        this.getRoute();
+      }
     }
   }
 
