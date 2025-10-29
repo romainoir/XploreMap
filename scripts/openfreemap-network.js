@@ -327,7 +327,6 @@ function collectHikingAttributes(properties) {
   const sacScale = normalizeSacScaleValue(
     properties.sacScale
       ?? properties.sac_scale
-      ?? properties.category
       ?? properties.difficulty
   );
   const trailVisibility = normalizeTrailVisibilityValue(properties.trailVisibility ?? properties.trail_visibility);
