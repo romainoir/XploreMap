@@ -6128,9 +6128,6 @@ export class DirectionsManager {
     };
 
     const gradientSegments = (() => {
-      if (this.profileMode === 'none') {
-        return [];
-      }
       if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
         return this.profileSegments;
       }
@@ -6169,21 +6166,26 @@ export class DirectionsManager {
     const hitTargetsHtml = samples
       .map((sample) => {
         const midDistance = (sample.startDistanceKm + sample.endDistanceKm) / 2;
-        const useOverlayColors = this.profileMode !== 'none';
-        const profileSegment = useOverlayColors ? this.getProfileSegmentForDistance(midDistance) : null;
-        const cutSegment = useOverlayColors ? this.getCutSegmentForDistance(midDistance) : null;
+        const profileSegment = this.profileMode !== 'none'
+          ? this.getProfileSegmentForDistance(midDistance)
+          : null;
+        const cutSegment = this.getCutSegmentForDistance(midDistance);
         const baseSegment = profileSegment ?? cutSegment;
-        const baseColor = useOverlayColors
-          && typeof baseSegment?.color === 'string'
-          && baseSegment.color.trim()
+        const baseColor = typeof baseSegment?.color === 'string' && baseSegment.color.trim()
           ? baseSegment.color.trim()
           : fallbackColor;
-        const startColor = this.profileMode === 'none'
-          ? fallbackColor
-          : this.getColorForDistance(sample.startDistanceKm);
-        const endColor = this.profileMode === 'none'
-          ? fallbackColor
-          : this.getColorForDistance(sample.endDistanceKm);
+        const resolveSegmentColor = (distanceKm) => {
+          const color = this.getColorForDistance(distanceKm);
+          if (typeof color === 'string') {
+            const trimmed = color.trim();
+            if (trimmed) {
+              return trimmed;
+            }
+          }
+          return fallbackColor;
+        };
+        const startColor = resolveSegmentColor(sample.startDistanceKm);
+        const endColor = resolveSegmentColor(sample.endDistanceKm);
         addGradientStop(sample.startDistanceKm, startColor);
         addGradientStop(sample.endDistanceKm, endColor);
         const segment = baseSegment;
