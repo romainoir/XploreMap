@@ -413,6 +413,8 @@ const PROFILE_MODE_DEFINITIONS = Object.freeze({
   category: { key: 'category', label: 'Category' }
 });
 
+const PROFILE_GRADIENT_MODES = Object.freeze(['slope', 'surface']);
+
 const PROFILE_MODE_LEGENDS = Object.freeze({
   slope: SLOPE_CLASSIFICATIONS,
   surface: SURFACE_CLASSIFICATIONS,
@@ -424,6 +426,10 @@ const MIN_PROFILE_SEGMENT_DISTANCE_KM = 1e-6;
 const MULTIPLIER_TOLERANCE = 1e-6;
 const GRADE_TOLERANCE = 1e-4;
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+function isProfileGradientMode(mode) {
+  return PROFILE_GRADIENT_MODES.includes(mode);
+}
 
 let bivouacMarkerImagePromise = null;
 
@@ -2973,7 +2979,7 @@ export class DirectionsManager {
       ? this.profileSegments
       : this.cutSegments;
 
-    const allowGradient = this.profileMode !== 'none';
+    const allowGradient = isProfileGradientMode(this.profileMode);
     const useBaseColor = this.profileMode === 'none' && displaySegments !== this.cutSegments;
     const fallbackColor = this.modeColors[this.currentMode];
     const normalizeColor = (value) => {
@@ -6356,6 +6362,7 @@ export class DirectionsManager {
     this.elevationDomain = { min: xMin, max: xMax, span: rawXSpan };
 
     const fallbackColor = this.modeColors[this.currentMode];
+    const gradientEnabled = isProfileGradientMode(this.profileMode);
     const gradientStops = [];
     const addGradientStop = (distanceKm, color) => {
       if (!Number.isFinite(distanceKm) || typeof color !== 'string') {
@@ -6373,41 +6380,43 @@ export class DirectionsManager {
       gradientStops.push({ offset: ratio, color: trimmed });
     };
 
-    const gradientSegments = (() => {
-      if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
-        return this.profileSegments;
-      }
-      if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
-        return this.cutSegments;
-      }
-      return [];
-    })();
+    if (gradientEnabled) {
+      const gradientSegments = (() => {
+        if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
+          return this.profileSegments;
+        }
+        if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
+          return this.cutSegments;
+        }
+        return [];
+      })();
 
-    gradientSegments.forEach((segment) => {
-      if (!segment) {
-        return;
-      }
-      const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
-      if (!segmentColor) {
-        return;
-      }
-      let startKm = Number(segment.startKm);
-      if (!Number.isFinite(startKm)) {
-        startKm = Number(segment.startDistanceKm);
-      }
-      if (!Number.isFinite(startKm)) {
-        startKm = 0;
-      }
-      let endKm = Number(segment.endKm);
-      if (!Number.isFinite(endKm)) {
-        endKm = Number(segment.endDistanceKm);
-      }
-      if (!Number.isFinite(endKm)) {
-        endKm = startKm;
-      }
-      addGradientStop(startKm, segmentColor);
-      addGradientStop(endKm, segmentColor);
-    });
+      gradientSegments.forEach((segment) => {
+        if (!segment) {
+          return;
+        }
+        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
+        if (!segmentColor) {
+          return;
+        }
+        let startKm = Number(segment.startKm);
+        if (!Number.isFinite(startKm)) {
+          startKm = Number(segment.startDistanceKm);
+        }
+        if (!Number.isFinite(startKm)) {
+          startKm = 0;
+        }
+        let endKm = Number(segment.endKm);
+        if (!Number.isFinite(endKm)) {
+          endKm = Number(segment.endDistanceKm);
+        }
+        if (!Number.isFinite(endKm)) {
+          endKm = startKm;
+        }
+        addGradientStop(startKm, segmentColor);
+        addGradientStop(endKm, segmentColor);
+      });
+    }
 
     const hitTargetsHtml = samples
       .map((sample) => {
