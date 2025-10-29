@@ -1702,6 +1702,30 @@ export class DirectionsManager {
     return source.map((coords) => (Array.isArray(coords) ? coords.slice() : []));
   }
 
+  buildWaypointCoordinate(coords) {
+    if (!Array.isArray(coords) || coords.length < 2) {
+      return null;
+    }
+
+    const lng = Number(coords[0]);
+    const lat = Number(coords[1]);
+
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return null;
+    }
+
+    let elevation = coords.length > 2 && Number.isFinite(coords[2]) ? Number(coords[2]) : null;
+
+    if (!Number.isFinite(elevation)) {
+      const terrainElevation = this.queryTerrainElevationValue([lng, lat]);
+      if (Number.isFinite(terrainElevation)) {
+        elevation = terrainElevation;
+      }
+    }
+
+    return Number.isFinite(elevation) ? [lng, lat, elevation] : [lng, lat];
+  }
+
   cloneRouteCuts(source = this.routeCutDistances) {
     if (!Array.isArray(source)) {
       return [];
@@ -3692,7 +3716,8 @@ export class DirectionsManager {
     if (!this.isPanelVisible()) return;
 
     if (this.isDragging && this.draggedWaypointIndex !== null) {
-      this.waypoints[this.draggedWaypointIndex] = [event.lngLat.lng, event.lngLat.lat];
+      const coords = [event.lngLat.lng, event.lngLat.lat];
+      this.waypoints[this.draggedWaypointIndex] = this.buildWaypointCoordinate(coords) ?? coords;
       this.updateWaypoints();
     }
 
@@ -3774,7 +3799,8 @@ export class DirectionsManager {
       }
     }
     this.recordWaypointState();
-    this.waypoints.push(targetLngLat);
+    const waypoint = this.buildWaypointCoordinate(targetLngLat) ?? targetLngLat.slice();
+    this.waypoints.push(waypoint);
     this.updateWaypoints();
     if (this.waypoints.length === 1) {
       this.prepareNetwork({ reason: 'first-waypoint' });
@@ -3931,7 +3957,8 @@ export class DirectionsManager {
     insertIndex = Math.max(1, insertIndex);
 
     this.recordWaypointState();
-    this.waypoints.splice(insertIndex, 0, snapped);
+    const waypoint = this.buildWaypointCoordinate(snapped) ?? snapped;
+    this.waypoints.splice(insertIndex, 0, waypoint);
     this.shiftCachedLegSegments(insertIndex, 1);
     const startLeg = Math.max(0, insertIndex - 1);
     const endLeg = Math.min(this.waypoints.length - 2, insertIndex);
