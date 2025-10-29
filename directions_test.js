@@ -5653,6 +5653,64 @@ export class DirectionsManager {
 
     const METADATA_DISTANCE_EPSILON = 1e-5;
 
+    const deriveMetadataCategory = (metadataEntry) => {
+      if (!metadataEntry || typeof metadataEntry !== 'object') {
+        return null;
+      }
+
+      const hikingData = metadataEntry.hiking && typeof metadataEntry.hiking === 'object'
+        ? metadataEntry.hiking
+        : null;
+
+      const sacScale = resolveSacScale(
+        metadataEntry.sacScale,
+        hikingData?.sacScale,
+        metadataEntry.category,
+        hikingData?.category,
+        metadataEntry.difficulty,
+        hikingData?.difficulty
+      );
+
+      const category = typeof metadataEntry.category === 'string' && metadataEntry.category
+        ? metadataEntry.category
+        : (typeof hikingData?.category === 'string' && hikingData.category ? hikingData.category : sacScale);
+
+      if (typeof category === 'string' && category) {
+        return normalizeSacScale(category) ?? category;
+      }
+
+      return null;
+    };
+
+    const findNeighborCategory = (metadataEntry) => {
+      if (!metadataEntry) {
+        return null;
+      }
+
+      const index = metadataDistanceEntries.findIndex((candidate) => candidate?.entry === metadataEntry);
+      if (index === -1) {
+        return null;
+      }
+
+      for (let previous = index - 1; previous >= 0; previous -= 1) {
+        const candidate = metadataDistanceEntries[previous]?.entry;
+        const category = deriveMetadataCategory(candidate);
+        if (category) {
+          return category;
+        }
+      }
+
+      for (let next = index + 1; next < metadataDistanceEntries.length; next += 1) {
+        const candidate = metadataDistanceEntries[next]?.entry;
+        const category = deriveMetadataCategory(candidate);
+        if (category) {
+          return category;
+        }
+      }
+
+      return null;
+    };
+
     const resolveMetadataEntry = (segment, metadataIndex) => {
       if (!segment) {
         return null;
@@ -5733,7 +5791,7 @@ export class DirectionsManager {
         const hiking = metadataEntry.hiking && typeof metadataEntry.hiking === 'object'
           ? { ...metadataEntry.hiking }
           : null;
-        const sacScaleValue = resolveSacScale(
+        let sacScaleValue = resolveSacScale(
           metadataEntry.sacScale,
           hiking?.sacScale,
           metadataEntry.category,
@@ -5754,6 +5812,23 @@ export class DirectionsManager {
           ? metadataEntry.trackType
           : hiking?.trackType;
 
+        let categoryValue = typeof metadataEntry.category === 'string'
+          ? metadataEntry.category
+          : typeof hiking?.category === 'string'
+            ? hiking.category
+            : sacScaleValue;
+
+        if ((!categoryValue || typeof categoryValue !== 'string')
+          && metadataEntry.source === 'connector') {
+          const neighborCategory = findNeighborCategory(metadataEntry);
+          if (neighborCategory) {
+            categoryValue = neighborCategory;
+            if (!sacScaleValue) {
+              sacScaleValue = neighborCategory;
+            }
+          }
+        }
+
         const segmentMetadata = {
           distanceKm: Number.isFinite(distance) ? distance : distanceKm,
           startDistanceKm: Number.isFinite(startKm) ? startKm : startDistanceKm,
@@ -5769,11 +5844,6 @@ export class DirectionsManager {
         if (typeof sacScaleValue === 'string' && sacScaleValue) {
           segmentMetadata.sacScale = sacScaleValue;
         }
-        const categoryValue = typeof metadataEntry.category === 'string'
-          ? metadataEntry.category
-          : typeof hiking?.category === 'string'
-            ? hiking.category
-            : sacScaleValue;
         if (typeof categoryValue === 'string' && categoryValue) {
           segmentMetadata.category = normalizeSacScale(categoryValue) ?? categoryValue;
         }
