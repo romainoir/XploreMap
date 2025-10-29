@@ -856,7 +856,7 @@ export class DirectionsManager {
     this.routeGeojson = null;
     this.routeSegments = [];
     this.segmentLegLookup = [];
-    this.cachedLegSegments = [];
+    this.cachedLegSegments = new Map();
     this.routeProfile = null;
     this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
@@ -3720,13 +3720,16 @@ export class DirectionsManager {
   onMapMouseUp(event) {
     if (!this.isDragging) return;
     const movedWaypoint = this.draggedWaypointIndex !== null;
+    const movedWaypointIndex = this.draggedWaypointIndex;
     const movedBivouac = this.draggedBivouacIndex !== null;
     this.isDragging = false;
     this.draggedWaypointIndex = null;
     this.map.dragPan?.enable();
     this.setHoveredWaypointIndex(null);
     if (movedWaypoint && this.waypoints.length >= 2) {
-      this.invalidateCachedLegSegments();
+      const startLeg = Math.max(0, movedWaypointIndex - 1);
+      const endLeg = Math.min(this.waypoints.length - 2, movedWaypointIndex);
+      this.invalidateCachedLegSegments({ startIndex: startLeg, endIndex: endLeg });
       this.getRoute();
     }
     if (movedBivouac) {
@@ -3759,7 +3762,6 @@ export class DirectionsManager {
       : [event.lngLat.lng, event.lngLat.lat];
     this.recordWaypointState();
     this.waypoints.push(targetLngLat);
-    this.invalidateCachedLegSegments();
     this.updateWaypoints();
     if (this.waypoints.length === 1) {
       this.prepareNetwork({ reason: 'first-waypoint' });
@@ -3774,8 +3776,12 @@ export class DirectionsManager {
     const index = Number(event.features?.[0]?.properties.index);
     if (!Number.isFinite(index) || index <= 0 || index >= this.waypoints.length - 1) return;
     this.recordWaypointState();
-    this.waypoints.splice(index, 1);
-    this.invalidateCachedLegSegments();
+    const removalIndex = index;
+    const startLeg = Math.max(0, removalIndex - 1);
+    const endLeg = Math.min(this.waypoints.length - 2, removalIndex);
+    this.invalidateCachedLegSegments({ startIndex: startLeg, endIndex: endLeg });
+    this.waypoints.splice(removalIndex, 1);
+    this.shiftCachedLegSegments(removalIndex + 1, -1);
     this.updateWaypoints();
     if (this.waypoints.length >= 2) {
       this.getRoute();
@@ -3913,7 +3919,10 @@ export class DirectionsManager {
 
     this.recordWaypointState();
     this.waypoints.splice(insertIndex, 0, snapped);
-    this.invalidateCachedLegSegments();
+    this.shiftCachedLegSegments(insertIndex, 1);
+    const startLeg = Math.max(0, insertIndex - 1);
+    const endLeg = Math.min(this.waypoints.length - 2, insertIndex);
+    this.invalidateCachedLegSegments({ startIndex: startLeg, endIndex: endLeg });
     this.updateWaypoints();
     this.resetSegmentHover();
     await this.prepareNetwork({ reason: 'via-inserted' });
@@ -4904,7 +4913,7 @@ export class DirectionsManager {
     this.routeGeojson = null;
     this.routeSegments = [];
     this.segmentLegLookup = [];
-    this.cachedLegSegments = [];
+    this.cachedLegSegments = new Map();
     this.latestMetrics = null;
     this.routeProfile = null;
     this.routeCoordinateMetadata = [];
@@ -5272,6 +5281,8 @@ export class DirectionsManager {
     }
     this.updateWaypoints();
     if (this.waypoints.length >= 2) {
+      const lastLegIndex = Math.max(0, this.waypoints.length - 2);
+      this.invalidateCachedLegSegments({ startIndex: lastLegIndex });
       this.getRoute();
     }
   }
@@ -5279,11 +5290,11 @@ export class DirectionsManager {
   cacheRouteLegSegments() {
     const routeCoordinates = this.routeGeojson?.geometry?.coordinates;
     if (!Array.isArray(routeCoordinates) || routeCoordinates.length < 2) {
-      this.cachedLegSegments = [];
+      this.cachedLegSegments = new Map();
       return;
     }
     if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
-      this.cachedLegSegments = [];
+      this.cachedLegSegments = new Map();
       return;
     }
 
@@ -5313,7 +5324,7 @@ export class DirectionsManager {
       return -1;
     };
 
-    const segments = [];
+    const segments = new Map();
     let searchStart = 0;
     const segmentMetrics = Array.isArray(this.routeGeojson?.properties?.segments)
       ? this.routeGeojson.properties.segments
@@ -5386,7 +5397,7 @@ export class DirectionsManager {
             .filter(Boolean)
         : [];
 
-      segments.push({
+      segments.set(waypointIndex, {
         startIndex: waypointIndex,
         endIndex: waypointIndex + 1,
         coordinates: segmentCoordinates,
@@ -5403,74 +5414,127 @@ export class DirectionsManager {
     this.cachedLegSegments = segments;
   }
 
-  invalidateCachedLegSegments() {
-    this.cachedLegSegments = [];
+  invalidateCachedLegSegments(options = null) {
+    if (!(this.cachedLegSegments instanceof Map)) {
+      this.cachedLegSegments = new Map();
+      return;
+    }
+
+    if (!options) {
+      this.cachedLegSegments.clear();
+      return;
+    }
+
+    const { startIndex, endIndex } = options;
+    if (!Number.isInteger(startIndex) && !Number.isInteger(endIndex)) {
+      this.cachedLegSegments.clear();
+      return;
+    }
+
+    const start = Number.isInteger(startIndex) ? startIndex : Number.isInteger(endIndex) ? endIndex : 0;
+    const finish = Number.isInteger(endIndex) ? endIndex : start;
+    for (let index = start; index <= finish; index += 1) {
+      this.cachedLegSegments.delete(index);
+    }
+  }
+
+  shiftCachedLegSegments(startIndex, delta) {
+    if (!(this.cachedLegSegments instanceof Map)) {
+      this.cachedLegSegments = new Map();
+      return;
+    }
+    if (!Number.isInteger(startIndex) || !Number.isInteger(delta) || delta === 0) {
+      return;
+    }
+
+    const updated = new Map();
+    for (const [index, segment] of this.cachedLegSegments.entries()) {
+      if (index < startIndex) {
+        updated.set(index, segment);
+        continue;
+      }
+
+      const newIndex = index + delta;
+      if (newIndex < 0) {
+        continue;
+      }
+
+      const adjusted = {
+        ...segment,
+        startIndex: newIndex,
+        endIndex: newIndex + 1
+      };
+      updated.set(newIndex, adjusted);
+    }
+
+    this.cachedLegSegments = updated;
   }
 
   buildPreservedSegments() {
-    if (!Array.isArray(this.cachedLegSegments) || !this.cachedLegSegments.length) {
+    if (!(this.cachedLegSegments instanceof Map) || !this.cachedLegSegments.size) {
       return [];
     }
     if (!Array.isArray(this.waypoints) || this.waypoints.length < 2) {
       return [];
     }
 
-    return this.cachedLegSegments
-      .map((segment) => {
-        if (!segment) {
-          return null;
-        }
-        const startIndex = Number(segment.startIndex);
-        const endIndex = Number(segment.endIndex);
-        if (!Number.isInteger(startIndex) || endIndex !== startIndex + 1) {
-          return null;
-        }
-        if (startIndex < 0 || endIndex >= this.waypoints.length) {
-          return null;
-        }
-        const coordinates = Array.isArray(segment.coordinates)
-          ? segment.coordinates
-              .map((coord) => {
-                if (!Array.isArray(coord) || coord.length < 2) {
-                  return null;
-                }
-                const lng = Number(coord[0]);
-                const lat = Number(coord[1]);
-                if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-                  return null;
-                }
-                const elevation = coord.length > 2 && Number.isFinite(coord[2]) ? coord[2] : 0;
-                return [lng, lat, elevation];
-              })
-              .filter(Boolean)
-          : null;
-        if (!coordinates || coordinates.length < 2) {
-          return null;
-        }
-        const startWaypoint = this.waypoints[startIndex];
-        const endWaypoint = this.waypoints[endIndex];
-        if (!this.coordinatesMatch(coordinates[0], startWaypoint)
-          || !this.coordinatesMatch(coordinates[coordinates.length - 1], endWaypoint)) {
-          return null;
-        }
-        const distance = Number.isFinite(segment.distance) ? Number(segment.distance) : null;
-        const duration = Number.isFinite(segment.duration) ? Number(segment.duration) : null;
-        const ascent = Number.isFinite(segment.ascent) ? Number(segment.ascent) : null;
-        const descent = Number.isFinite(segment.descent) ? Number(segment.descent) : null;
-        return {
-          startIndex,
-          endIndex,
-          coordinates,
-          distance,
-          duration,
-          ascent,
-          descent,
-          metadata: Array.isArray(segment.metadata)
-            ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
-            : []
-        };
-      })
-      .filter(Boolean);
+    const preserved = [];
+    for (const segment of this.cachedLegSegments.values()) {
+      if (!segment) {
+        continue;
+      }
+      const startIndex = Number(segment.startIndex);
+      const endIndex = Number(segment.endIndex);
+      if (!Number.isInteger(startIndex) || endIndex !== startIndex + 1) {
+        continue;
+      }
+      if (startIndex < 0 || endIndex >= this.waypoints.length) {
+        continue;
+      }
+      const coordinates = Array.isArray(segment.coordinates)
+        ? segment.coordinates
+            .map((coord) => {
+              if (!Array.isArray(coord) || coord.length < 2) {
+                return null;
+              }
+              const lng = Number(coord[0]);
+              const lat = Number(coord[1]);
+              if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+                return null;
+              }
+              const elevation = coord.length > 2 && Number.isFinite(coord[2]) ? coord[2] : 0;
+              return [lng, lat, elevation];
+            })
+            .filter(Boolean)
+        : null;
+      if (!coordinates || coordinates.length < 2) {
+        continue;
+      }
+      const startWaypoint = this.waypoints[startIndex];
+      const endWaypoint = this.waypoints[endIndex];
+      if (!this.coordinatesMatch(coordinates[0], startWaypoint)
+        || !this.coordinatesMatch(coordinates[coordinates.length - 1], endWaypoint)) {
+        continue;
+      }
+      const distance = Number.isFinite(segment.distance) ? Number(segment.distance) : null;
+      const duration = Number.isFinite(segment.duration) ? Number(segment.duration) : null;
+      const ascent = Number.isFinite(segment.ascent) ? Number(segment.ascent) : null;
+      const descent = Number.isFinite(segment.descent) ? Number(segment.descent) : null;
+      preserved.push({
+        startIndex,
+        endIndex,
+        coordinates,
+        distance,
+        duration,
+        ascent,
+        descent,
+        metadata: Array.isArray(segment.metadata)
+          ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
+          : []
+      });
+    }
+
+    return preserved;
   }
 
   rebuildSegmentData() {
