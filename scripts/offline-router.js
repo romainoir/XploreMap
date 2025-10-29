@@ -147,7 +147,6 @@ function normalizeHikingAttributes(attributes) {
   const sacScale = resolveSacScale(
     attributes.sacScale,
     attributes.sac_scale,
-    attributes.category,
     attributes.difficulty
   );
   const trailVisibility = normalizeTrailVisibility(attributes.trailVisibility ?? attributes.trail_visibility);
@@ -157,7 +156,6 @@ function normalizeHikingAttributes(attributes) {
   const result = {};
   if (sacScale) {
     result.sacScale = sacScale;
-    result.category = sacScale;
   }
   if (trailVisibility) {
     result.trailVisibility = trailVisibility;
@@ -493,14 +491,9 @@ function appendCoordinateMetadataEntry(target, entry, options = {}) {
   const sacScaleValue = resolveSacScale(
     entry.sacScale,
     hiking?.sacScale,
-    entry.category,
-    hiking?.category,
     entry.difficulty,
     hiking?.difficulty
   );
-  const categoryValue = typeof entry.category === 'string' && entry.category
-    ? entry.category
-    : (typeof hiking?.category === 'string' && hiking.category ? hiking.category : sacScaleValue);
   const surfaceValue = typeof entry.surface === 'string' ? entry.surface : hiking?.surface;
   const trailValue = typeof entry.trailVisibility === 'string' ? entry.trailVisibility : hiking?.trailVisibility;
   const smoothnessValue = typeof entry.smoothness === 'string' ? entry.smoothness : hiking?.smoothness;
@@ -520,7 +513,6 @@ function appendCoordinateMetadataEntry(target, entry, options = {}) {
     endDistanceKm: endKm,
     ...(hiking ? { hiking } : {}),
     ...(typeof sacScaleValue === 'string' && sacScaleValue ? { sacScale: sacScaleValue } : {}),
-    ...(typeof categoryValue === 'string' && categoryValue ? { category: categoryValue } : {}),
     ...(typeof surfaceValue === 'string' && surfaceValue ? { surface: surfaceValue } : {}),
     ...(typeof trailValue === 'string' && trailValue ? { trailVisibility: trailValue } : {}),
     ...(typeof smoothnessValue === 'string' && smoothnessValue ? { smoothness: smoothnessValue } : {}),
@@ -625,21 +617,13 @@ function deriveConnectorNeighborAttributes(entries, startIndex, step) {
     const sacScale = resolveSacScale(
       candidate.sacScale,
       hiking?.sacScale,
-      candidate.category,
-      hiking?.category,
       candidate.difficulty,
       hiking?.difficulty
     );
-    const normalizedCategory = typeof candidate.category === 'string' && candidate.category
-      ? normalizeSacScale(candidate.category) ?? candidate.category
-      : (typeof hiking?.category === 'string' && hiking.category
-        ? normalizeSacScale(hiking.category) ?? hiking.category
-        : sacScale);
 
-    if (sacScale || normalizedCategory) {
+    if (sacScale) {
       return {
         sacScale,
-        category: normalizedCategory,
         hiking: hiking ? { ...hiking } : null
       };
     }
@@ -665,10 +649,8 @@ function propagateConnectorMetadata(entries) {
     }
 
     const hiking = entry.hiking && typeof entry.hiking === 'object' ? entry.hiking : null;
-    const hasCategory = typeof entry.category === 'string' && entry.category;
     const hasSacScale = typeof entry.sacScale === 'string' && entry.sacScale;
-    const hasHikingCategory = typeof hiking?.category === 'string' && hiking.category;
-    if (hasCategory || hasSacScale || hasHikingCategory) {
+    if (hasSacScale) {
       return;
     }
 
@@ -689,23 +671,10 @@ function propagateConnectorMetadata(entries) {
     const existingHiking = hiking ? { ...hiking } : {};
     const mergedHiking = inherited.hiking ? { ...inherited.hiking, ...existingHiking } : { ...existingHiking };
 
-    const inheritedSacScale = inherited.sacScale ?? (inherited.category ? normalizeSacScale(inherited.category) : null);
-    const inheritedCategory = inherited.category ?? inheritedSacScale;
-
-    if (inheritedSacScale) {
-      entry.sacScale = inheritedSacScale;
+    if (inherited.sacScale) {
+      entry.sacScale = inherited.sacScale;
       if (!mergedHiking.sacScale) {
-        mergedHiking.sacScale = inheritedSacScale;
-      }
-      if (!mergedHiking.category) {
-        mergedHiking.category = inheritedSacScale;
-      }
-    }
-
-    if (inheritedCategory) {
-      entry.category = inheritedCategory;
-      if (!mergedHiking.category) {
-        mergedHiking.category = inheritedCategory;
+        mergedHiking.sacScale = inherited.sacScale;
       }
     }
 

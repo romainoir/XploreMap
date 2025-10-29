@@ -243,10 +243,6 @@ function formatSacScaleLabel(value) {
   if (!normalized) {
     return null;
   }
-  const label = SAC_SCALE_LABELS[normalized];
-  if (label) {
-    return label;
-  }
   return formatTagLabel(normalized);
 }
 
@@ -344,81 +340,17 @@ const SURFACE_LABELS = Object.freeze(
   }, {})
 );
 
-const UNKNOWN_CATEGORY_CLASSIFICATION = Object.freeze({
-  key: 'category-unknown',
-  label: 'No info',
-  color: '#d0d4db'
-});
-
-const CATEGORY_CLASSIFICATIONS = Object.freeze([
-  UNKNOWN_CATEGORY_CLASSIFICATION,
-  {
-    key: 'category-t1',
-    label: 'T1 · Easy hike',
-    color: '#2ecc71',
-    maxMultiplier: 1,
-    maxGrade: 8,
-    sacScaleValues: Object.freeze(['hiking'])
-  },
-  {
-    key: 'category-t2',
-    label: 'T2 · Mountain trail',
-    color: '#27ae60',
-    maxMultiplier: 1.1,
-    maxGrade: 12,
-    sacScaleValues: Object.freeze(['mountain_hiking'])
-  },
-  {
-    key: 'category-t3',
-    label: 'T3 · Alpine hike',
-    color: '#f39c12',
-    maxMultiplier: 1.2,
-    maxGrade: 18,
-    sacScaleValues: Object.freeze(['demanding_mountain_hiking'])
-  },
-  {
-    key: 'category-t4',
-    label: 'T4 · Alpine route',
-    color: '#e67e22',
-    maxMultiplier: 1.35,
-    sacScaleValues: Object.freeze(['alpine_hiking'])
-  },
-  {
-    key: 'category-t5',
-    label: 'T5+ · Technical alpine',
-    color: '#c0392b',
-    sacScaleValues: Object.freeze(['demanding_alpine_hiking', 'difficult_alpine_hiking'])
-  }
-]);
-
-const SAC_SCALE_LABELS = Object.freeze(
-  CATEGORY_CLASSIFICATIONS.reduce((accumulator, entry) => {
-    if (!entry || !entry.label) {
-      return accumulator;
-    }
-    const values = Array.isArray(entry.sacScaleValues) ? entry.sacScaleValues : [];
-    values.forEach((value) => {
-      if (typeof value === 'string' && value) {
-        accumulator[value] = entry.label;
-      }
-    });
-    return accumulator;
-  }, {})
-);
-
 const PROFILE_MODE_DEFINITIONS = Object.freeze({
   none: { key: 'none', label: 'None' },
   slope: { key: 'slope', label: 'Slope' },
-  surface: { key: 'surface', label: 'Surface' },
-  category: { key: 'category', label: 'Category' }
+  surface: { key: 'surface', label: 'Surface' }
 });
 
 const PROFILE_GRADIENT_MODES = Object.freeze(['slope', 'surface']);
 
 const PROFILE_MODE_LEGENDS = Object.freeze({
   slope: SLOPE_CLASSIFICATIONS,
-  surface: SURFACE_CLASSIFICATIONS,
-  category: CATEGORY_CLASSIFICATIONS
+  surface: SURFACE_CLASSIFICATIONS
 });
 
 const DEFAULT_PROFILE_MODE = PROFILE_MODE_DEFINITIONS.none.key;
@@ -1457,7 +1389,6 @@ export class DirectionsManager {
 
     let sacScale = null;
     let sacRank = -Infinity;
-    let category = null;
     let surface = null;
     let surfaceRank = -Infinity;
     let trailVisibility = null;
@@ -1471,8 +1402,6 @@ export class DirectionsManager {
       const sacCandidates = [
         hiking?.sacScale,
         entry.sacScale,
-        hiking?.category,
-        entry.category,
         hiking?.difficulty,
         entry.difficulty
       ];
@@ -1485,7 +1414,6 @@ export class DirectionsManager {
         if (rank > sacRank) {
           sacRank = rank;
           sacScale = normalizedSacScale;
-          category = typeof candidate === 'string' && candidate ? candidate : normalizedSacScale;
         }
       });
       const normalizedSurface = normalizeSurfaceType(hiking?.surface ?? entry.surface);
@@ -1520,7 +1448,6 @@ export class DirectionsManager {
       costMultiplier: Number.isFinite(costMultiplier) && costMultiplier > 0 ? costMultiplier : 1,
       source: metadata?.source ?? 'network',
       sacScale,
-      category: category ? normalizeSacScale(category) ?? category : null,
       surface,
       trailVisibility
     };
@@ -1604,40 +1531,18 @@ export class DirectionsManager {
     return cloneClassificationEntry(SURFACE_CLASSIFICATIONS[SURFACE_CLASSIFICATIONS.length - 1]);
   }
 
-  classifyCategorySegment(segment) {
-    const metadata = this.getSegmentMetadata(segment);
-    const hikingMetadata = metadata?.hiking && typeof metadata.hiking === 'object' ? metadata.hiking : null;
-    const sacScale = resolveSacScale(
-      metadata?.sacScale,
-      metadata?.category,
-      hikingMetadata?.sacScale,
-      hikingMetadata?.category,
-      hikingMetadata?.difficulty
-    );
-    if (sacScale) {
-      for (const entry of CATEGORY_CLASSIFICATIONS) {
-        if (Array.isArray(entry.sacScaleValues) && entry.sacScaleValues.includes(sacScale)) {
-          return cloneClassificationEntry(entry);
-        }
-      }
-    }
-    return cloneClassificationEntry(UNKNOWN_CATEGORY_CLASSIFICATION);
-  }
-
   classifySegment(segment) {
     if (!segment) {
       return null;
     }
     switch (this.profileMode) {
-      case 'none':
-        return null;
       case 'slope':
         return this.classifySlopeSegment(segment);
       case 'surface':
         return this.classifySurfaceSegment(segment);
-      case 'category':
+      case 'none':
       default:
-        return this.classifyCategorySegment(segment);
+        return null;
     }
   }
 
@@ -1673,114 +1578,6 @@ export class DirectionsManager {
         classification: this.classifySegment(segment) || null
       };
     });
-
-    if (this.profileMode === 'category' && segmentEntries.length) {
-      const unknownKey = UNKNOWN_CATEGORY_CLASSIFICATION?.key;
-      const isUnknownClassification = (classification) => {
-        if (!classification) {
-          return true;
-        }
-        const key = typeof classification.key === 'string' ? classification.key : '';
-        if (unknownKey && key === unknownKey) {
-          return true;
-        }
-        const color = typeof classification.color === 'string' ? classification.color.trim() : '';
-        return !color;
-      };
-
-      const findNeighborClassification = (startIndex, step) => {
-        let index = startIndex + step;
-        while (index >= 0 && index < segmentEntries.length) {
-          const entry = segmentEntries[index];
-          if (!entry || !entry.segment) {
-            index += step;
-            continue;
-          }
-          const classification = entry.classification;
-          if (!classification || isUnknownClassification(classification)) {
-            index += step;
-            continue;
-          }
-          return classification;
-        }
-        return null;
-      };
-
-      const intermediateWaypoints = Array.isArray(this.waypoints)
-        ? this.waypoints
-            .slice(1, -1)
-            .map((coord) => {
-              if (!Array.isArray(coord) || coord.length < 2) {
-                return null;
-              }
-              const lng = Number(coord[0]);
-              const lat = Number(coord[1]);
-              if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-                return null;
-              }
-              return [lng, lat];
-            })
-            .filter(Boolean)
-        : [];
-
-      const touchesIntermediateWaypoint = (segment) => {
-        if (!segment || !intermediateWaypoints.length) {
-          return false;
-        }
-        const start = Array.isArray(segment.start) ? segment.start : null;
-        const end = Array.isArray(segment.end) ? segment.end : null;
-        if (!start && !end) {
-          return false;
-        }
-        return intermediateWaypoints.some((waypoint) => {
-          if (!Array.isArray(waypoint) || waypoint.length < 2) {
-            return false;
-          }
-          const matchesStart = start && this.coordinatesMatch(start, waypoint);
-          if (matchesStart) {
-            return true;
-          }
-          return end ? this.coordinatesMatch(end, waypoint) : false;
-        });
-      };
-
-      segmentEntries.forEach((entry, index) => {
-        if (!entry || !entry.segment) {
-          return;
-        }
-        const metadataSource = entry.segment?.metadata?.source;
-        if (!isConnectorMetadataSource(metadataSource)) {
-          return;
-        }
-        if (!isUnknownClassification(entry.classification)) {
-          return;
-        }
-        const fallbackClassification = findNeighborClassification(index, -1)
-          ?? findNeighborClassification(index, 1);
-        if (fallbackClassification) {
-          entry.classification = cloneClassificationEntry(fallbackClassification);
-        }
-      });
-
-      if (intermediateWaypoints.length) {
-        segmentEntries.forEach((entry, index) => {
-          if (!entry || !entry.segment) {
-            return;
-          }
-          if (!isUnknownClassification(entry.classification)) {
-            return;
-          }
-          if (!touchesIntermediateWaypoint(entry.segment)) {
-            return;
-          }
-          const fallbackClassification = findNeighborClassification(index, -1)
-            ?? findNeighborClassification(index, 1);
-          if (fallbackClassification) {
-            entry.classification = cloneClassificationEntry(fallbackClassification);
-          }
-        });
-      }
-    }
 
     segmentEntries.forEach((entry) => {
       if (!entry || !entry.segment) {
@@ -5971,64 +5768,6 @@ export class DirectionsManager {
 
     const METADATA_DISTANCE_EPSILON = 1e-5;
 
-    const deriveMetadataCategory = (metadataEntry) => {
-      if (!metadataEntry || typeof metadataEntry !== 'object') {
-        return null;
-      }
-
-      const hikingData = metadataEntry.hiking && typeof metadataEntry.hiking === 'object'
-        ? metadataEntry.hiking
-        : null;
-
-      const sacScale = resolveSacScale(
-        metadataEntry.sacScale,
-        hikingData?.sacScale,
-        metadataEntry.category,
-        hikingData?.category,
-        metadataEntry.difficulty,
-        hikingData?.difficulty
-      );
-
-      const category = typeof metadataEntry.category === 'string' && metadataEntry.category
-        ? metadataEntry.category
-        : (typeof hikingData?.category === 'string' && hikingData.category ? hikingData.category : sacScale);
-
-      if (typeof category === 'string' && category) {
-        return normalizeSacScale(category) ?? category;
-      }
-
-      return null;
-    };
-
-    const findNeighborCategory = (metadataEntry) => {
-      if (!metadataEntry) {
-        return null;
-      }
-
-      const index = metadataDistanceEntries.findIndex((candidate) => candidate?.entry === metadataEntry);
-      if (index === -1) {
-        return null;
-      }
-
-      for (let previous = index - 1; previous >= 0; previous -= 1) {
-        const candidate = metadataDistanceEntries[previous]?.entry;
-        const category = deriveMetadataCategory(candidate);
-        if (category) {
-          return category;
-        }
-      }
-
-      for (let next = index + 1; next < metadataDistanceEntries.length; next += 1) {
-        const candidate = metadataDistanceEntries[next]?.entry;
-        const category = deriveMetadataCategory(candidate);
-        if (category) {
-          return category;
-        }
-      }
-
-      return null;
-    };
-
     const resolveMetadataEntry = (segment, metadataIndex) => {
       if (!segment) {
         return null;
@@ -6109,11 +5848,9 @@ export class DirectionsManager {
         const hiking = metadataEntry.hiking && typeof metadataEntry.hiking === 'object'
           ? { ...metadataEntry.hiking }
           : null;
-        let sacScaleValue = resolveSacScale(
+        const sacScaleValue = resolveSacScale(
           metadataEntry.sacScale,
           hiking?.sacScale,
-          metadataEntry.category,
-          hiking?.category,
           metadataEntry.difficulty,
           hiking?.difficulty
         );
@@ -6130,23 +5867,6 @@ export class DirectionsManager {
           ? metadataEntry.trackType
           : hiking?.trackType;
 
-        let categoryValue = typeof metadataEntry.category === 'string'
-          ? metadataEntry.category
-          : typeof hiking?.category === 'string'
-            ? hiking.category
-            : sacScaleValue;
-
-        if ((!categoryValue || typeof categoryValue !== 'string')
-          && isConnectorMetadataSource(metadataEntry.source)) {
-          const neighborCategory = findNeighborCategory(metadataEntry);
-          if (neighborCategory) {
-            categoryValue = neighborCategory;
-            if (!sacScaleValue) {
-              sacScaleValue = neighborCategory;
-            }
-          }
-        }
-
         const segmentMetadata = {
           distanceKm: Number.isFinite(distance) ? distance : distanceKm,
           startDistanceKm: Number.isFinite(startKm) ? startKm : startDistanceKm,
@@ -6161,9 +5881,6 @@ export class DirectionsManager {
         }
         if (typeof sacScaleValue === 'string' && sacScaleValue) {
           segmentMetadata.sacScale = sacScaleValue;
-        }
-        if (typeof categoryValue === 'string' && categoryValue) {
-          segmentMetadata.category = normalizeSacScale(categoryValue) ?? categoryValue;
         }
         if (typeof surfaceValue === 'string' && surfaceValue) {
           segmentMetadata.surface = surfaceValue;
