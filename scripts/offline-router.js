@@ -84,6 +84,10 @@ function normalizeSacScale(value) {
   if (SAC_SCALE_RANK[lower]) {
     return lower;
   }
+  const sanitized = lower.replace(/\+/g, '');
+  if (SAC_SCALE_RANK[sanitized]) {
+    return sanitized;
+  }
   const alias = {
     t1: 'hiking',
     t2: 'mountain_hiking',
@@ -91,8 +95,18 @@ function normalizeSacScale(value) {
     t4: 'alpine_hiking',
     t5: 'demanding_alpine_hiking',
     t6: 'difficult_alpine_hiking'
-  }[lower];
-  return alias || null;
+  };
+  return alias[sanitized] || alias[lower] || null;
+}
+
+function resolveSacScale(...values) {
+  for (const value of values) {
+    const normalized = normalizeSacScale(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
 }
 
 function normalizeTrailVisibility(value) {
@@ -124,7 +138,12 @@ function normalizeHikingAttributes(attributes) {
   if (!attributes || typeof attributes !== 'object') {
     return null;
   }
-  const sacScale = normalizeSacScale(attributes.sacScale ?? attributes.sac_scale);
+  const sacScale = resolveSacScale(
+    attributes.sacScale,
+    attributes.sac_scale,
+    attributes.category,
+    attributes.difficulty
+  );
   const trailVisibility = normalizeTrailVisibility(attributes.trailVisibility ?? attributes.trail_visibility);
   const surface = normalizeSurface(attributes.surface);
   const smoothness = normalizeTagString(attributes.smoothness);
@@ -132,6 +151,7 @@ function normalizeHikingAttributes(attributes) {
   const result = {};
   if (sacScale) {
     result.sacScale = sacScale;
+    result.category = sacScale;
   }
   if (trailVisibility) {
     result.trailVisibility = trailVisibility;

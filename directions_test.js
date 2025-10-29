@@ -181,6 +181,10 @@ function normalizeSacScale(value) {
   if (SAC_SCALE_RANK[lower]) {
     return lower;
   }
+  const sanitized = lower.replace(/\+/g, '');
+  if (SAC_SCALE_RANK[sanitized]) {
+    return sanitized;
+  }
   const alias = {
     t1: 'hiking',
     t2: 'mountain_hiking',
@@ -188,8 +192,18 @@ function normalizeSacScale(value) {
     t4: 'alpine_hiking',
     t5: 'demanding_alpine_hiking',
     t6: 'difficult_alpine_hiking'
-  }[lower];
-  return alias || null;
+  };
+  return alias[sanitized] || alias[lower] || null;
+}
+
+function resolveSacScale(...values) {
+  for (const value of values) {
+    const normalized = normalizeSacScale(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
 }
 
 function normalizeTrailVisibility(value) {
@@ -1433,6 +1447,7 @@ export class DirectionsManager {
 
     let sacScale = null;
     let sacRank = -Infinity;
+    let category = null;
     let surface = null;
     let surfaceRank = -Infinity;
     let trailVisibility = null;
@@ -1443,16 +1458,28 @@ export class DirectionsManager {
         return;
       }
       const hiking = entry.hiking && typeof entry.hiking === 'object' ? entry.hiking : null;
-      const normalizedSacScale = normalizeSacScale(hiking?.sacScale ?? entry.sacScale);
-      const normalizedSurface = normalizeSurfaceType(hiking?.surface ?? entry.surface);
-      const normalizedTrail = normalizeTrailVisibility(hiking?.trailVisibility ?? entry.trailVisibility);
-      if (normalizedSacScale) {
+      const sacCandidates = [
+        hiking?.sacScale,
+        entry.sacScale,
+        hiking?.category,
+        entry.category,
+        hiking?.difficulty,
+        entry.difficulty
+      ];
+      sacCandidates.forEach((candidate) => {
+        const normalizedSacScale = normalizeSacScale(candidate);
+        if (!normalizedSacScale) {
+          return;
+        }
         const rank = SAC_SCALE_RANK[normalizedSacScale] || 0;
         if (rank > sacRank) {
           sacRank = rank;
           sacScale = normalizedSacScale;
+          category = typeof candidate === 'string' && candidate ? candidate : normalizedSacScale;
         }
-      }
+      });
+      const normalizedSurface = normalizeSurfaceType(hiking?.surface ?? entry.surface);
+      const normalizedTrail = normalizeTrailVisibility(hiking?.trailVisibility ?? entry.trailVisibility);
       if (normalizedSurface) {
         const rank = SURFACE_SEVERITY_RANK[normalizedSurface] || 0;
         if (rank > surfaceRank) {
@@ -1483,6 +1510,7 @@ export class DirectionsManager {
       costMultiplier: Number.isFinite(costMultiplier) && costMultiplier > 0 ? costMultiplier : 1,
       source: metadata?.source ?? 'network',
       sacScale,
+      category: category ? normalizeSacScale(category) ?? category : null,
       surface,
       trailVisibility
     };
@@ -1568,7 +1596,14 @@ export class DirectionsManager {
 
   classifyCategorySegment(segment) {
     const metadata = this.getSegmentMetadata(segment);
-    const sacScale = normalizeSacScale(metadata?.sacScale);
+    const hikingMetadata = metadata?.hiking && typeof metadata.hiking === 'object' ? metadata.hiking : null;
+    const sacScale = resolveSacScale(
+      metadata?.sacScale,
+      metadata?.category,
+      hikingMetadata?.sacScale,
+      hikingMetadata?.category,
+      hikingMetadata?.difficulty
+    );
     if (sacScale) {
       for (const entry of CATEGORY_CLASSIFICATIONS) {
         if (Array.isArray(entry.sacScaleValues) && entry.sacScaleValues.includes(sacScale)) {
@@ -5698,9 +5733,14 @@ export class DirectionsManager {
         const hiking = metadataEntry.hiking && typeof metadataEntry.hiking === 'object'
           ? { ...metadataEntry.hiking }
           : null;
-        const sacScaleValue = typeof metadataEntry.sacScale === 'string'
-          ? metadataEntry.sacScale
-          : hiking?.sacScale;
+        const sacScaleValue = resolveSacScale(
+          metadataEntry.sacScale,
+          hiking?.sacScale,
+          metadataEntry.category,
+          hiking?.category,
+          metadataEntry.difficulty,
+          hiking?.difficulty
+        );
         const surfaceValue = typeof metadataEntry.surface === 'string'
           ? metadataEntry.surface
           : hiking?.surface;
@@ -5728,6 +5768,14 @@ export class DirectionsManager {
         }
         if (typeof sacScaleValue === 'string' && sacScaleValue) {
           segmentMetadata.sacScale = sacScaleValue;
+        }
+        const categoryValue = typeof metadataEntry.category === 'string'
+          ? metadataEntry.category
+          : typeof hiking?.category === 'string'
+            ? hiking.category
+            : sacScaleValue;
+        if (typeof categoryValue === 'string' && categoryValue) {
+          segmentMetadata.category = normalizeSacScale(categoryValue) ?? categoryValue;
         }
         if (typeof surfaceValue === 'string' && surfaceValue) {
           segmentMetadata.surface = surfaceValue;
