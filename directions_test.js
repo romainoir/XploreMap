@@ -1743,6 +1743,49 @@ export class DirectionsManager {
         });
       };
 
+      const segmentsShareBoundary = (first, second) => {
+        if (!first || !second) {
+          return false;
+        }
+        const coords = [
+          Array.isArray(first.start) ? first.start : null,
+          Array.isArray(first.end) ? first.end : null
+        ];
+        const other = [
+          Array.isArray(second.start) ? second.start : null,
+          Array.isArray(second.end) ? second.end : null
+        ];
+        return coords.some((candidate) => {
+          if (!candidate) {
+            return false;
+          }
+          return other.some((comparison) => comparison && this.coordinatesMatch(candidate, comparison));
+        });
+      };
+
+      const propagateNeighborClassification = () => {
+        let changed = false;
+        segmentEntries.forEach((entry, index) => {
+          if (!entry || !entry.segment || !isUnknownClassification(entry.classification)) {
+            return;
+          }
+          const previous = index > 0 ? segmentEntries[index - 1] : null;
+          if (previous && previous.segment && !isUnknownClassification(previous.classification)
+            && segmentsShareBoundary(entry.segment, previous.segment)) {
+            entry.classification = cloneClassificationEntry(previous.classification);
+            changed = true;
+            return;
+          }
+          const next = index + 1 < segmentEntries.length ? segmentEntries[index + 1] : null;
+          if (next && next.segment && !isUnknownClassification(next.classification)
+            && segmentsShareBoundary(entry.segment, next.segment)) {
+            entry.classification = cloneClassificationEntry(next.classification);
+            changed = true;
+          }
+        });
+        return changed;
+      };
+
       segmentEntries.forEach((entry, index) => {
         if (!entry || !entry.segment) {
           return;
@@ -1778,6 +1821,11 @@ export class DirectionsManager {
             entry.classification = cloneClassificationEntry(fallbackClassification);
           }
         });
+      }
+
+      let updated = true;
+      while (updated) {
+        updated = propagateNeighborClassification();
       }
     }
 
