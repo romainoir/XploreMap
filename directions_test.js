@@ -115,6 +115,10 @@ const SEGMENT_MARKER_ICONS = {
   end: END_MARKER_ICON_ID
 };
 
+const CONNECTOR_METADATA_SOURCES = new Set(['connector', 'connector-start', 'connector-end']);
+
+const isConnectorMetadataSource = (source) => typeof source === 'string' && CONNECTOR_METADATA_SOURCES.has(source);
+
 const SAC_SCALE_RANK = Object.freeze({
   hiking: 1,
   mountain_hiking: 2,
@@ -1701,7 +1705,7 @@ export class DirectionsManager {
           return;
         }
         const metadataSource = entry.segment?.metadata?.source;
-        if (metadataSource !== 'connector' && metadataSource !== 'connector-start' && metadataSource !== 'connector-end') {
+        if (!isConnectorMetadataSource(metadataSource)) {
           return;
         }
         if (!isUnknownClassification(entry.classification)) {
@@ -5991,7 +5995,7 @@ export class DirectionsManager {
             : sacScaleValue;
 
         if ((!categoryValue || typeof categoryValue !== 'string')
-          && metadataEntry.source === 'connector') {
+          && isConnectorMetadataSource(metadataEntry.source)) {
           const neighborCategory = findNeighborCategory(metadataEntry);
           if (neighborCategory) {
             categoryValue = neighborCategory;
