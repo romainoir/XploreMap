@@ -5,8 +5,7 @@ const EMPTY_COLLECTION = {
 
 const MODE_COLORS = {
   'foot-hiking': '#f8b40b',
-  'cycling-regular': '#1bbd14',
-  'driving-car': '#193ae1'
+  manual: '#2d7bd6'
 };
 
 const HOVER_PIXEL_TOLERANCE = 12;
@@ -2781,6 +2780,7 @@ export class DirectionsManager {
       ? this.profileSegments
       : this.cutSegments;
 
+    const allowGradient = this.profileMode !== 'none';
     const useBaseColor = this.profileMode === 'none' && displaySegments !== this.cutSegments;
     const fallbackColor = this.modeColors[this.currentMode];
     const normalizeColor = (value) => {
@@ -2850,7 +2850,7 @@ export class DirectionsManager {
         }
 
         let blendPortion = 0;
-        if (!useBaseColor && normalizedPrevious && normalizedPrevious !== normalizedCurrent) {
+        if (allowGradient && !useBaseColor && normalizedPrevious && normalizedPrevious !== normalizedCurrent) {
           if (distanceKm > 0) {
             const ratio = ROUTE_GRADIENT_BLEND_DISTANCE_KM / Math.max(distanceKm, ROUTE_GRADIENT_BLEND_DISTANCE_KM);
             blendPortion = Math.min(0.4, Math.max(0.05, ratio));
@@ -2914,25 +2914,31 @@ export class DirectionsManager {
       });
     });
 
-    this.routeLineGradientExpression = this.generateRouteLineGradientExpression(normalizedSegments);
+    if (allowGradient) {
+      this.routeLineGradientExpression = this.generateRouteLineGradientExpression(normalizedSegments);
 
-    this.routeLineGradientData = gradientCoordinates.length >= 2 && this.routeLineGradientExpression
-      ? {
-        type: 'FeatureCollection',
-        features: [
-          {
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: gradientCoordinates
+      this.routeLineGradientData = gradientCoordinates.length >= 2 && this.routeLineGradientExpression
+        ? {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: gradientCoordinates
+              }
             }
-          }
-        ]
-      }
-      : EMPTY_COLLECTION;
+          ]
+        }
+        : EMPTY_COLLECTION;
+    } else {
+      this.routeLineGradientExpression = null;
+      this.routeLineGradientData = EMPTY_COLLECTION;
+    }
 
-    const shouldUseGradient = this.routeLineGradientSupported
+    const shouldUseGradient = allowGradient
+      && this.routeLineGradientSupported
       && Array.isArray(this.routeLineGradientExpression)
       && this.routeLineGradientExpression.length > 4
       && this.routeLineGradientData?.features?.length;
