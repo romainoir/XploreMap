@@ -65,7 +65,7 @@ const IMAGERY_OPTIONS = Object.freeze([
     id: 'vector-map',
     label: 'Vector map',
     type: 'base-style',
-    previewImage: './data/vector-map.svg',
+    previewImage: './data/OSM_vector.png',
     defaultOpacity: BASE_STYLE_RELIEF_OPACITY,
     defaultVisible: true
   },
@@ -135,7 +135,7 @@ const IMAGERY_OPTIONS = Object.freeze([
     sourceId: 'contours',
     layerId: 'contours',
     linkedLayerIds: ['contour-text'],
-    previewImage: './data/contours.svg',
+    previewImage: './data/contour.png',
     defaultVisible: true,
     defaultOpacity: 1
   }

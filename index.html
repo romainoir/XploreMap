@@ -29,6 +29,14 @@
 <div class="ui">
   <div class="ui__row ui__row--directions">
     <button id="directionsToggle" class="btn btn--primary directions-toggle" type="button" aria-controls="directionsControl">
+      <img
+        class="directions-toggle__icon"
+        src="./data/route.png"
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        decoding="async"
+      />
       <span>Directions</span>
     </button>
   </div>
@@ -309,7 +317,9 @@
     aria-haspopup="true"
     title="Toggle imagery layers"
   >
-    <span class="imagery-panel__toggle-icon" aria-hidden="true"></span>
+    <span class="imagery-panel__toggle-icon" aria-hidden="true">
+      <img src="./data/layers.png" alt="" loading="lazy" decoding="async" />
+    </span>
     <span class="sr-only">Toggle imagery layers</span>
   </button>
   <div class="imagery-panel__drawer" id="imageryPanelDrawer" hidden aria-hidden="true">
