@@ -1706,9 +1706,8 @@ export class DirectionsManager {
         return null;
       };
 
-      const intermediateWaypoints = Array.isArray(this.waypoints)
+      const waypointCoordinates = Array.isArray(this.waypoints)
         ? this.waypoints
-            .slice(1, -1)
             .map((coord) => {
               if (!Array.isArray(coord) || coord.length < 2) {
                 return null;
@@ -1723,8 +1722,8 @@ export class DirectionsManager {
             .filter(Boolean)
         : [];
 
-      const touchesIntermediateWaypoint = (segment) => {
-        if (!segment || !intermediateWaypoints.length) {
+      const touchesWaypoint = (segment) => {
+        if (!segment || !waypointCoordinates.length) {
           return false;
         }
         const start = Array.isArray(segment.start) ? segment.start : null;
@@ -1732,7 +1731,7 @@ export class DirectionsManager {
         if (!start && !end) {
           return false;
         }
-        return intermediateWaypoints.some((waypoint) => {
+        return waypointCoordinates.some((waypoint) => {
           if (!Array.isArray(waypoint) || waypoint.length < 2) {
             return false;
           }
@@ -1762,7 +1761,7 @@ export class DirectionsManager {
         }
       });
 
-      if (intermediateWaypoints.length) {
+      if (waypointCoordinates.length) {
         segmentEntries.forEach((entry, index) => {
           if (!entry || !entry.segment) {
             return;
@@ -1770,7 +1769,7 @@ export class DirectionsManager {
           if (!isUnknownClassification(entry.classification)) {
             return;
           }
-          if (!touchesIntermediateWaypoint(entry.segment)) {
+          if (!touchesWaypoint(entry.segment)) {
             return;
           }
           const fallbackClassification = findNeighborClassification(index, -1)
