@@ -6079,6 +6079,45 @@ export class DirectionsManager {
       gradientStops.push({ offset: ratio, color: trimmed });
     };
 
+    const gradientSegments = (() => {
+      if (this.profileMode === 'none') {
+        return [];
+      }
+      if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
+        return this.profileSegments;
+      }
+      if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
+        return this.cutSegments;
+      }
+      return [];
+    })();
+
+    gradientSegments.forEach((segment) => {
+      if (!segment) {
+        return;
+      }
+      const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
+      if (!segmentColor) {
+        return;
+      }
+      let startKm = Number(segment.startKm);
+      if (!Number.isFinite(startKm)) {
+        startKm = Number(segment.startDistanceKm);
+      }
+      if (!Number.isFinite(startKm)) {
+        startKm = 0;
+      }
+      let endKm = Number(segment.endKm);
+      if (!Number.isFinite(endKm)) {
+        endKm = Number(segment.endDistanceKm);
+      }
+      if (!Number.isFinite(endKm)) {
+        endKm = startKm;
+      }
+      addGradientStop(startKm, segmentColor);
+      addGradientStop(endKm, segmentColor);
+    });
+
     const hitTargetsHtml = samples
       .map((sample) => {
         const midDistance = (sample.startDistanceKm + sample.endDistanceKm) / 2;
@@ -6091,8 +6130,14 @@ export class DirectionsManager {
           && baseSegment.color.trim()
           ? baseSegment.color.trim()
           : fallbackColor;
-        addGradientStop(sample.startDistanceKm, baseColor);
-        addGradientStop(sample.endDistanceKm, baseColor);
+        const startColor = this.profileMode === 'none'
+          ? fallbackColor
+          : this.getColorForDistance(sample.startDistanceKm);
+        const endColor = this.profileMode === 'none'
+          ? fallbackColor
+          : this.getColorForDistance(sample.endDistanceKm);
+        addGradientStop(sample.startDistanceKm, startColor);
+        addGradientStop(sample.endDistanceKm, endColor);
         const segment = baseSegment;
         const accentColor = adjustHexColor(baseColor, 0.18);
         const spanKm = Math.max(0, sample.endDistanceKm - sample.startDistanceKm);
