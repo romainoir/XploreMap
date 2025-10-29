@@ -459,6 +459,69 @@ function buildSegmentResult(metrics, fallbackStart, fallbackEnd) {
   };
 }
 
+function appendCoordinateMetadataEntry(target, entry, options = {}) {
+  if (!Array.isArray(target) || !entry || typeof entry !== 'object') {
+    return;
+  }
+
+  const {
+    distanceKm: overrideDistanceKm,
+    startKm: overrideStartKm,
+    endKm: overrideEndKm,
+    defaultSource = 'network'
+  } = options;
+
+  const hasDistanceOverride = Object.prototype.hasOwnProperty.call(options, 'distanceKm');
+  const hasStartOverride = Object.prototype.hasOwnProperty.call(options, 'startKm');
+  const hasEndOverride = Object.prototype.hasOwnProperty.call(options, 'endKm');
+
+  const distanceKm = hasDistanceOverride ? Number(overrideDistanceKm) : Number(entry.distanceKm) || 0;
+  const startKm = hasStartOverride
+    ? Number(overrideStartKm)
+    : Number(entry.startDistanceKm ?? entry.cumulativeStartKm ?? 0);
+  const endKm = hasEndOverride
+    ? Number(overrideEndKm)
+    : Number(entry.endDistanceKm ?? entry.cumulativeEndKm ?? (Number.isFinite(startKm) ? startKm + distanceKm : distanceKm));
+
+  const hiking = entry.hiking && typeof entry.hiking === 'object' ? { ...entry.hiking } : null;
+  const sacScaleValue = resolveSacScale(
+    entry.sacScale,
+    hiking?.sacScale,
+    entry.category,
+    hiking?.category,
+    entry.difficulty,
+    hiking?.difficulty
+  );
+  const categoryValue = typeof entry.category === 'string' && entry.category
+    ? entry.category
+    : (typeof hiking?.category === 'string' && hiking.category ? hiking.category : sacScaleValue);
+  const surfaceValue = typeof entry.surface === 'string' ? entry.surface : hiking?.surface;
+  const trailValue = typeof entry.trailVisibility === 'string' ? entry.trailVisibility : hiking?.trailVisibility;
+  const smoothnessValue = typeof entry.smoothness === 'string' ? entry.smoothness : hiking?.smoothness;
+  const trackTypeValue = typeof entry.trackType === 'string' ? entry.trackType : hiking?.trackType;
+
+  target.push({
+    distanceKm,
+    ascent: Number(entry.ascent) || 0,
+    descent: Number(entry.descent) || 0,
+    costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
+      ? entry.costMultiplier
+      : 1,
+    source: entry.source ?? defaultSource,
+    start: Array.isArray(entry.start) ? entry.start.slice() : null,
+    end: Array.isArray(entry.end) ? entry.end.slice() : null,
+    startDistanceKm: startKm,
+    endDistanceKm: endKm,
+    ...(hiking ? { hiking } : {}),
+    ...(typeof sacScaleValue === 'string' && sacScaleValue ? { sacScale: sacScaleValue } : {}),
+    ...(typeof categoryValue === 'string' && categoryValue ? { category: categoryValue } : {}),
+    ...(typeof surfaceValue === 'string' && surfaceValue ? { surface: surfaceValue } : {}),
+    ...(typeof trailValue === 'string' && trailValue ? { trailVisibility: trailValue } : {}),
+    ...(typeof smoothnessValue === 'string' && smoothnessValue ? { smoothness: smoothnessValue } : {}),
+    ...(typeof trackTypeValue === 'string' && trackTypeValue ? { trackType: trackTypeValue } : {})
+  });
+}
+
 function createNodeOption({ node, fromCoord, toCoord }) {
   if (!node || !Array.isArray(fromCoord) || !Array.isArray(toCoord)) {
     return null;
@@ -965,18 +1028,11 @@ export class OfflineRouter {
                 const distanceKm = Number(entry.distanceKm) || 0;
                 const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
                 const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
-                coordinateMetadata.push({
+                appendCoordinateMetadataEntry(coordinateMetadata, entry, {
                   distanceKm,
-                  ascent: Number(entry.ascent) || 0,
-                  descent: Number(entry.descent) || 0,
-                  costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
-                    ? entry.costMultiplier
-                    : 1,
-                  source: entry.source ?? 'preserved',
-                  start: Array.isArray(entry.start) ? entry.start.slice() : null,
-                  end: Array.isArray(entry.end) ? entry.end.slice() : null,
-                  startDistanceKm: startKm,
-                  endDistanceKm: endKm
+                  startKm,
+                  endKm,
+                  defaultSource: 'preserved'
                 });
               });
               segments.push({
@@ -1012,18 +1068,11 @@ export class OfflineRouter {
           const distanceKm = Number(entry.distanceKm) || 0;
           const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
           const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
-          coordinateMetadata.push({
+          appendCoordinateMetadataEntry(coordinateMetadata, entry, {
             distanceKm,
-            ascent: Number(entry.ascent) || 0,
-            descent: Number(entry.descent) || 0,
-            costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
-              ? entry.costMultiplier
-              : 1,
-            source: entry.source ?? 'manual',
-            start: Array.isArray(entry.start) ? entry.start.slice() : null,
-            end: Array.isArray(entry.end) ? entry.end.slice() : null,
-            startDistanceKm: startKm,
-            endDistanceKm: endKm
+            startKm,
+            endKm,
+            defaultSource: 'manual'
           });
         });
 
@@ -1110,18 +1159,11 @@ export class OfflineRouter {
               const distanceKm = Number(entry.distanceKm) || 0;
               const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
               const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
-              coordinateMetadata.push({
+              appendCoordinateMetadataEntry(coordinateMetadata, entry, {
                 distanceKm,
-                ascent: Number(entry.ascent) || 0,
-                descent: Number(entry.descent) || 0,
-                costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
-                  ? entry.costMultiplier
-                  : 1,
-                source: entry.source ?? 'preserved',
-                start: Array.isArray(entry.start) ? entry.start.slice() : null,
-                end: Array.isArray(entry.end) ? entry.end.slice() : null,
-                startDistanceKm: startKm,
-                endDistanceKm: endKm
+                startKm,
+                endKm,
+                defaultSource: 'preserved'
               });
             });
             segments.push({
@@ -1166,34 +1208,11 @@ export class OfflineRouter {
         const distanceKm = Number(entry.distanceKm) || 0;
         const startKm = offsetKm + (Number(entry.cumulativeStartKm) || 0);
         const endKm = offsetKm + (Number(entry.cumulativeEndKm) || distanceKm);
-        const hiking = entry.hiking && typeof entry.hiking === 'object'
-          ? { ...entry.hiking }
-          : null;
-        const sacScaleValue = typeof entry.sacScale === 'string' ? entry.sacScale : hiking?.sacScale;
-        const surfaceValue = typeof entry.surface === 'string' ? entry.surface : hiking?.surface;
-        const trailValue = typeof entry.trailVisibility === 'string'
-          ? entry.trailVisibility
-          : hiking?.trailVisibility;
-        const smoothnessValue = typeof entry.smoothness === 'string' ? entry.smoothness : hiking?.smoothness;
-        const trackTypeValue = typeof entry.trackType === 'string' ? entry.trackType : hiking?.trackType;
-        coordinateMetadata.push({
+        appendCoordinateMetadataEntry(coordinateMetadata, entry, {
           distanceKm,
-          ascent: Number(entry.ascent) || 0,
-          descent: Number(entry.descent) || 0,
-          costMultiplier: Number.isFinite(entry.costMultiplier) && entry.costMultiplier > 0
-            ? entry.costMultiplier
-            : 1,
-          source: entry.source ?? 'network',
-          start: Array.isArray(entry.start) ? entry.start.slice() : null,
-          end: Array.isArray(entry.end) ? entry.end.slice() : null,
-          startDistanceKm: startKm,
-          endDistanceKm: endKm,
-          ...(hiking ? { hiking } : {}),
-          ...(typeof sacScaleValue === 'string' && sacScaleValue ? { sacScale: sacScaleValue } : {}),
-          ...(typeof surfaceValue === 'string' && surfaceValue ? { surface: surfaceValue } : {}),
-          ...(typeof trailValue === 'string' && trailValue ? { trailVisibility: trailValue } : {}),
-          ...(typeof smoothnessValue === 'string' && smoothnessValue ? { smoothness: smoothnessValue } : {}),
-          ...(typeof trackTypeValue === 'string' && trackTypeValue ? { trackType: trackTypeValue } : {})
+          startKm,
+          endKm,
+          defaultSource: 'network'
         });
       });
       segments.push({
