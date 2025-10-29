@@ -4331,32 +4331,52 @@ export class DirectionsManager {
 
     const isStart = index === 0;
     const isEnd = total > 1 && index === total - 1;
-    if (isStart) {
-      return '#2f8f3b';
-    }
-    if (isEnd) {
-      return '#d64545';
+    const startFallback = '#2f8f3b';
+    const endFallback = '#d64545';
+    const viaFallback = this.cutSegments?.[0]?.color ?? fallback;
+    const preferFallback = () => {
+      if (isStart) {
+        return startFallback;
+      }
+      if (isEnd) {
+        return endFallback;
+      }
+      return viaFallback;
+    };
+
+    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
+      return preferFallback();
     }
 
-    const viaFallback = this.cutSegments?.[0]?.color ?? fallback;
-    if (!Array.isArray(this.routeSegments) || !this.routeSegments.length) {
-      return viaFallback;
+    let distanceKm = null;
+    if (isStart) {
+      distanceKm = 0;
+    } else if (isEnd) {
+      const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+      distanceKm = Number.isFinite(totalDistance) ? totalDistance : null;
     }
 
     try {
-      const lngLat = toLngLat(coords);
-      const projection = this.projectOntoRoute(lngLat, ROUTE_CLICK_PIXEL_TOLERANCE);
-      if (projection && Number.isFinite(projection.distanceKm)) {
-        const segment = this.getCutSegmentForDistance(projection.distanceKm);
-        if (segment?.color) {
-          return segment.color;
+      if (!Number.isFinite(distanceKm)) {
+        const lngLat = toLngLat(coords);
+        const projection = this.projectOntoRoute(lngLat, ROUTE_CLICK_PIXEL_TOLERANCE);
+        if (projection && Number.isFinite(projection.distanceKm)) {
+          distanceKm = projection.distanceKm;
+        }
+      }
+
+      if (Number.isFinite(distanceKm)) {
+        const colorValue = this.getColorForDistance(distanceKm);
+        const trimmed = typeof colorValue === 'string' ? colorValue.trim() : '';
+        if (trimmed) {
+          return trimmed;
         }
       }
     } catch (error) {
       console.warn('Failed to resolve waypoint color', error);
     }
 
-    return viaFallback;
+    return preferFallback();
   }
 
   projectPointOnSegment(lngLat, startCoord, endCoord) {
