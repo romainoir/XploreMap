@@ -81,6 +81,10 @@ function normalizeSacScale(value) {
   if (SAC_SCALE_RANK[lower]) {
     return lower;
   }
+  const sanitized = lower.replace(/\+/g, '');
+  if (SAC_SCALE_RANK[sanitized]) {
+    return sanitized;
+  }
   const alias = {
     t1: 'hiking',
     t2: 'mountain_hiking',
@@ -88,8 +92,8 @@ function normalizeSacScale(value) {
     t4: 'alpine_hiking',
     t5: 'demanding_alpine_hiking',
     t6: 'difficult_alpine_hiking'
-  }[lower];
-  return alias || null;
+  };
+  return alias[sanitized] || alias[lower] || null;
 }
 
 function normalizeTrailVisibility(value) {
