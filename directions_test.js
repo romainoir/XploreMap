@@ -1533,11 +1533,11 @@ export class DirectionsManager {
           ['linear'],
           ['zoom'],
           8,
-          ['match', ['get', 'type'], 'bivouac', 0.15, 0.55],
+          ['match', ['get', 'type'], 'bivouac', 0.12, 0.55],
           12,
-          ['match', ['get', 'type'], 'bivouac', 0.2167, 0.75],
+          ['match', ['get', 'type'], 'bivouac', 0.18, 0.75],
           16,
-          ['match', ['get', 'type'], 'bivouac', 0.2833, 0.95]
+          ['match', ['get', 'type'], 'bivouac', 0.24, 0.95]
         ],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
@@ -7632,13 +7632,17 @@ export class DirectionsManager {
             }
             const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
             const safeTitle = escapeHtml(rawTitle);
-            const verticalStyle = 'bottom:calc(100% + 12px)';
+            const colorValue = typeof marker?.labelColor === 'string' ? marker.labelColor.trim() : '';
+            const styleParts = ['--elevation-marker-icon-width:26px', '--elevation-marker-icon-height:26px'];
+            if (colorValue) {
+              styleParts.push(`--bivouac-marker-color:${colorValue}`);
+            }
+            const styleAttribute = styleParts.length ? ` style="${styleParts.join(';')}"` : '';
             return `
               <div
                 class="elevation-marker bivouac"
                 data-distance-km="${distanceKm.toFixed(6)}"
-                data-bottom-offset="12"
-                style="${verticalStyle}"
+                data-bottom-offset="12"${styleAttribute}
                 title="${safeTitle}"
                 aria-label="${safeTitle}"
               >
@@ -7808,12 +7812,14 @@ export class DirectionsManager {
       if (!Number.isFinite(distanceKm)) {
         return;
       }
+      const isPoiMarker = marker.classList.contains('poi');
+      const isBivouacMarker = marker.classList.contains('bivouac');
       const ratio = span > 0 ? (distanceKm - domainLow) / span : 0;
       const clampedRatio = Math.max(0, Math.min(1, ratio));
       const percent = clampedRatio * 100;
       marker.style.left = `${percent.toFixed(6)}%`;
 
-      if (marker.classList.contains('poi') && canPositionVertically) {
+      if ((isPoiMarker || isBivouacMarker) && canPositionVertically) {
         const clampedDistanceKm = domainLow + clampedRatio * span;
         const elevation = this.getElevationAtDistance(clampedDistanceKm);
         if (Number.isFinite(elevation)) {
@@ -7834,7 +7840,7 @@ export class DirectionsManager {
             marker.style.bottom = `calc(100% + ${offsetValue}px)`;
           }
         }
-      } else if (marker.classList.contains('poi')) {
+      } else if (isPoiMarker || isBivouacMarker) {
         const offsetValue = Number(marker.dataset.bottomOffset);
         if (Number.isFinite(offsetValue)) {
           marker.style.bottom = `calc(100% + ${offsetValue}px)`;

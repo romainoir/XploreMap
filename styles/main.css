@@ -982,13 +982,14 @@ html, body { margin:0; height:100%; }
 }
 
 .elevation-marker.bivouac {
-  min-width: 40px;
-  min-height: 40px;
+  min-width: 26px;
+  min-height: 26px;
+  color: var(--bivouac-marker-color, #2d7bd6);
 }
 
 .elevation-marker.bivouac .elevation-marker__icon {
-  --elevation-marker-icon-width: 40px;
-  --elevation-marker-icon-height: 40px;
+  --elevation-marker-icon-width: 26px;
+  --elevation-marker-icon-height: 26px;
 }
 
 .elevation-marker.poi {
