@@ -597,13 +597,13 @@ async function init() {
     [
       'match',
       ['var', 'sacScale'],
-      'difficult_alpine_hiking', '#800026',
-      'demanding_alpine_hiking', '#bd0026',
-      'alpine_hiking', '#f03b20',
-      'demanding_mountain_hiking', '#fd8d3c',
-      'mountain_hiking', '#fecc5c',
-      'hiking', '#31a354',
-      '#2d7bd6'
+      'difficult_alpine_hiking', '#4a0404',
+      'demanding_alpine_hiking', '#4a0404',
+      'alpine_hiking', '#e67e22',
+      'demanding_mountain_hiking', '#f7d774',
+      'mountain_hiking', '#27ae60',
+      'hiking', '#a8f0c5',
+      '#d0d4db'
     ]
   ]);
   let debugNetworkVisible = false;
