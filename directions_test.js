@@ -24,13 +24,13 @@ const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
-const POI_SEARCH_RADIUS_METERS = 50;
+const POI_SEARCH_RADIUS_METERS = 100;
 const POI_CATEGORY_DISTANCE_OVERRIDES = Object.freeze({
-  peak: 50,
+  peak: 100,
   volcano: 200,
-  mountain_pass: 50,
-  saddle: 50,
-  alpine_hut: 50,
+  mountain_pass: 100,
+  saddle: 100,
+  alpine_hut: 100,
   wilderness_hut: 100,
   hut: 100,
   cabin: 100,
