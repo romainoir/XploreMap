@@ -968,21 +968,16 @@ html, body { margin:0; height:100%; }
 }
 
 .elevation-marker svg {
-  width: 22px;
-  height: 22px;
+  width: var(--elevation-marker-icon-width, 22px);
+  height: var(--elevation-marker-icon-height, 22px);
   display: block;
   fill: currentColor;
 }
 
-.elevation-marker img {
-  width: 22px;
-  height: 22px;
-  display: block;
-}
-
+.elevation-marker img,
 .elevation-marker__icon {
-  width: 22px;
-  height: 22px;
+  width: var(--elevation-marker-icon-width, 22px);
+  height: var(--elevation-marker-icon-height, 22px);
   display: block;
 }
 
@@ -992,8 +987,14 @@ html, body { margin:0; height:100%; }
 }
 
 .elevation-marker.bivouac .elevation-marker__icon {
-  width: 40px;
-  height: 40px;
+  --elevation-marker-icon-width: 40px;
+  --elevation-marker-icon-height: 40px;
+}
+
+.elevation-marker.poi {
+  min-width: 26px;
+  min-height: 26px;
+  color: var(--poi-marker-color, #2d7bd6);
 }
 
 .elevation-marker__label {
