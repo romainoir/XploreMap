@@ -1,3 +1,5 @@
+import { getOpenFreeMapIcon } from './scripts/openfreemap-sprites.js';
+
 const EMPTY_COLLECTION = {
   type: 'FeatureCollection',
   features: []
@@ -20,6 +22,98 @@ const ROUTE_CUT_EPSILON_KM = 0.02;
 const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
+
+const POI_SOURCE_ID = 'openmaptiles';
+const POI_SOURCE_LAYER = 'poi';
+const POI_SEARCH_RADIUS_METERS = 250;
+const DEFAULT_POI_COLOR = '#2d7bd6';
+const DEFAULT_POI_TITLE = 'Point d’intérêt';
+const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
+const POI_ICON_DEFINITIONS = Object.freeze({
+  peak: { icon: 'peak', label: 'Sommet', color: '#2d7bd6' },
+  volcano: { icon: 'peak', label: 'Volcan', color: '#2d7bd6' },
+  mountain_pass: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
+  saddle: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
+  viewpoint: { icon: 'viewpoint', label: 'Point de vue', color: '#35a3ad' },
+  restaurant: { icon: 'restaurant', label: 'Restaurant', color: '#d97706' },
+  fast_food: { icon: 'fast_food', label: 'Restauration rapide', color: '#d97706' },
+  cafe: { icon: 'cafe', label: 'Café', color: '#d97706' },
+  bar: { icon: 'bar', label: 'Bar', color: '#b45309' },
+  pub: { icon: 'bar', label: 'Pub', color: '#b45309' },
+  parking: { icon: 'parking', label: 'Parking', color: '#4b5563' },
+  parking_underground: { icon: 'parking', label: 'Parking', color: '#4b5563' },
+  'parking_multi-storey': { icon: 'parking', label: 'Parking', color: '#4b5563' },
+  parking_multistorey: { icon: 'parking', label: 'Parking', color: '#4b5563' },
+  parking_multi_storey: { icon: 'parking', label: 'Parking', color: '#4b5563' },
+  alpine_hut: { icon: 'alpine_hut', label: 'Refuge', color: '#68b723' },
+  wilderness_hut: { icon: 'wilderness_hut', label: 'Cabane', color: '#68b723' },
+  cabin: { icon: 'wilderness_hut', label: 'Cabane', color: '#68b723' },
+  shelter: { icon: 'shelter', label: 'Abri', color: '#68b723' },
+  hostel: { icon: 'lodging', label: 'Auberge', color: '#68b723' },
+  guest_house: { icon: 'lodging', label: 'Maison d’hôtes', color: '#68b723' },
+  hotel: { icon: 'lodging', label: 'Hôtel', color: '#68b723' }
+});
+
+function normalizePoiValue(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().toLowerCase();
+}
+
+function resolvePoiName(properties = {}) {
+  for (const key of POI_NAME_PROPERTIES) {
+    const raw = properties[key];
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+  return '';
+}
+
+function resolvePoiDefinition(properties = {}) {
+  const candidates = [];
+  const subclass = normalizePoiValue(properties.subclass);
+  const className = normalizePoiValue(properties.class);
+  if (subclass) {
+    candidates.push(subclass);
+  }
+  if (className && className !== subclass) {
+    candidates.push(className);
+  }
+  for (const candidate of candidates) {
+    if (candidate && POI_ICON_DEFINITIONS[candidate]) {
+      return { key: candidate, definition: POI_ICON_DEFINITIONS[candidate] };
+    }
+  }
+  return null;
+}
+
+function buildPoiIdentifier(categoryKey, coordinates, rawId) {
+  if (typeof rawId === 'string' && rawId.trim()) {
+    return `${categoryKey}:${rawId.trim()}`;
+  }
+  if (Number.isFinite(rawId)) {
+    return `${categoryKey}:${rawId}`;
+  }
+  if (Array.isArray(coordinates) && coordinates.length >= 2) {
+    const lng = Number(coordinates[0]);
+    const lat = Number(coordinates[1]);
+    if (Number.isFinite(lng) && Number.isFinite(lat)) {
+      const precision = 1e6;
+      const lngKey = Math.round(lng * precision) / precision;
+      const latKey = Math.round(lat * precision) / precision;
+      return `${categoryKey}:${lngKey},${latKey}`;
+    }
+  }
+  const randomId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+  return `${categoryKey}:${randomId}`;
+}
 
 const EARTH_RADIUS_METERS = 6371000;
 const toRadians = (value) => (value * Math.PI) / 180;
@@ -944,6 +1038,8 @@ export class DirectionsManager {
     this.highlightedElevationBar = null;
     this.activeHoverSource = null;
     this.lastElevationHoverDistance = null;
+    this.routePointsOfInterest = [];
+    this.pendingPoiRequest = null;
 
     this.setHintVisible(false);
 
@@ -5605,6 +5701,8 @@ export class DirectionsManager {
     this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
     this.elevationDomain = null;
+    this.routePointsOfInterest = [];
+    this.pendingPoiRequest = null;
     this.resetRouteCuts();
     this.detachElevationChartEvents();
     this.elevationChartContainer = null;
@@ -6715,6 +6813,153 @@ export class DirectionsManager {
     this.routeStats.classList.add('has-stats');
   }
 
+  async refreshRoutePointsOfInterest() {
+    const profile = this.routeProfile;
+    const coordinates = Array.isArray(profile?.coordinates) ? profile.coordinates : [];
+    if (!this.map || coordinates.length < 2 || !turfApi || typeof turfApi.lineString !== 'function'
+      || typeof turfApi.nearestPointOnLine !== 'function') {
+      this.routePointsOfInterest = [];
+      return;
+    }
+
+    const requestToken = Symbol('poi-request');
+    this.pendingPoiRequest = requestToken;
+    const line = turfApi.lineString(coordinates.map((coord) => [coord[0], coord[1]]));
+    const totalDistanceKm = Number(profile?.totalDistanceKm);
+
+    let sourceFeatures = [];
+    try {
+      sourceFeatures = this.map.querySourceFeatures(POI_SOURCE_ID, { sourceLayer: POI_SOURCE_LAYER });
+    } catch (error) {
+      console.warn('Failed to query OpenFreeMap POIs for the current route', error);
+      sourceFeatures = [];
+    }
+
+    const shouldRetry = (!Array.isArray(sourceFeatures) || !sourceFeatures.length)
+      && typeof this.map?.isStyleLoaded === 'function'
+      && !this.map.isStyleLoaded();
+    if (shouldRetry && typeof this.map?.once === 'function') {
+      this.map.once('idle', () => {
+        if (this.pendingPoiRequest === requestToken) {
+          this.refreshRoutePointsOfInterest().catch(() => {});
+        }
+      });
+    }
+
+    if (!Array.isArray(sourceFeatures) || !sourceFeatures.length) {
+      this.routePointsOfInterest = [];
+      if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
+        && this.routeGeojson.geometry.coordinates.length >= 2) {
+        this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
+      }
+      if (!shouldRetry) {
+        this.pendingPoiRequest = null;
+      }
+      return;
+    }
+
+    const seen = new Set();
+    const collected = [];
+
+    sourceFeatures.forEach((feature) => {
+      if (!feature) {
+        return;
+      }
+      const plain = typeof feature.toJSON === 'function' ? feature.toJSON() : feature;
+      const geometry = plain?.geometry;
+      if (!geometry || geometry.type !== 'Point' || !Array.isArray(geometry.coordinates)) {
+        return;
+      }
+      const [lng, lat] = geometry.coordinates;
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        return;
+      }
+      const definition = resolvePoiDefinition(plain?.properties || {});
+      if (!definition) {
+        return;
+      }
+      let nearest = null;
+      try {
+        nearest = turfApi.nearestPointOnLine(line, turfApi.point([lng, lat]), { units: 'kilometers' });
+      } catch (error) {
+        return;
+      }
+      const distanceKm = Number(nearest?.properties?.location);
+      const distanceToLineKm = Number(nearest?.properties?.dist ?? nearest?.properties?.distance);
+      if (!Number.isFinite(distanceKm) || !Number.isFinite(distanceToLineKm)) {
+        return;
+      }
+      const distanceMeters = distanceToLineKm * 1000;
+      if (!Number.isFinite(distanceMeters) || distanceMeters > POI_SEARCH_RADIUS_METERS) {
+        return;
+      }
+      const rawId = plain?.properties?.id
+        ?? plain?.properties?.osm_id
+        ?? plain?.properties?.osmID
+        ?? plain?.properties?.osm_identifier;
+      const identifier = buildPoiIdentifier(definition.key, geometry.coordinates, rawId);
+      if (seen.has(identifier)) {
+        return;
+      }
+      seen.add(identifier);
+
+      const name = resolvePoiName(plain?.properties || {});
+      const categoryLabel = definition.definition.label ?? DEFAULT_POI_TITLE;
+      const tooltip = name
+        ? (categoryLabel && categoryLabel !== name ? `${name} · ${categoryLabel}` : name)
+        : categoryLabel || DEFAULT_POI_TITLE;
+      const clampedDistanceKm = Number.isFinite(totalDistanceKm)
+        ? Math.max(0, Math.min(totalDistanceKm, distanceKm))
+        : Math.max(0, distanceKm);
+
+      collected.push({
+        id: identifier,
+        name,
+        title: tooltip,
+        categoryLabel,
+        iconName: definition.definition.icon ?? definition.key,
+        color: definition.definition.color ?? DEFAULT_POI_COLOR,
+        distanceKm: clampedDistanceKm,
+        coordinates: [lng, lat]
+      });
+    });
+
+    collected.sort((a, b) => a.distanceKm - b.distanceKm);
+
+    const resolved = [];
+    for (const entry of collected) {
+      if (!entry || !entry.iconName) {
+        continue;
+      }
+      try {
+        const icon = await getOpenFreeMapIcon(entry.iconName);
+        if (!icon) {
+          continue;
+        }
+        resolved.push({ ...entry, icon });
+      } catch (error) {
+        console.warn('Failed to load OpenFreeMap icon', entry.iconName, error);
+      }
+      if (this.pendingPoiRequest !== requestToken) {
+        return;
+      }
+    }
+
+    if (this.pendingPoiRequest !== requestToken) {
+      return;
+    }
+
+    this.routePointsOfInterest = resolved;
+
+    if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
+      && this.routeGeojson.geometry.coordinates.length >= 2) {
+      this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
+    } else if (coordinates.length >= 2) {
+      this.updateElevationProfile(coordinates);
+    }
+    this.pendingPoiRequest = null;
+  }
+
   updateElevationProfile(coordinates) {
     if (!this.elevationChart) {
       this.updateProfileLegend(false);
@@ -6988,52 +7233,116 @@ export class DirectionsManager {
       if (!(rawXSpan > 0)) {
         return '';
       }
+      const markerElements = [];
       const markers = this.computeSegmentMarkers();
-      if (!Array.isArray(markers) || !markers.length) {
+      if (Array.isArray(markers) && markers.length) {
+        const bivouacElements = markers
+          .filter((marker) => marker?.type === 'bivouac')
+          .map((marker) => {
+            const distanceKm = this.getMarkerDistance(marker);
+            if (
+              !Number.isFinite(distanceKm)
+              || distanceKm < xMin - xBoundaryTolerance
+              || distanceKm > xMax + xBoundaryTolerance
+            ) {
+              return null;
+            }
+            const elevation = this.getElevationAtDistance(distanceKm);
+            let percentY = null;
+            if (Number.isFinite(elevation)) {
+              const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
+              percentY = ((clampedElevation - yAxis.min) / range) * 100;
+              percentY = Math.max(0, Math.min(100, percentY));
+            }
+            const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
+            const safeTitle = escapeHtml(rawTitle);
+            const verticalStyle = Number.isFinite(percentY)
+              ? `bottom:${percentY.toFixed(2)}%`
+              : 'bottom:0';
+            return `
+              <div
+                class="elevation-marker bivouac"
+                data-distance-km="${distanceKm.toFixed(6)}"
+                style="${verticalStyle}"
+                title="${safeTitle}"
+                aria-label="${safeTitle}"
+              >
+                <span class="elevation-marker__label">${safeTitle}</span>
+                ${BIVOUAC_ELEVATION_ICON}
+              </div>
+            `;
+          })
+          .filter(Boolean);
+        markerElements.push(...bivouacElements);
+      }
+
+      const poiMarkers = Array.isArray(this.routePointsOfInterest) ? this.routePointsOfInterest : [];
+      if (poiMarkers.length) {
+        const poiElements = poiMarkers
+          .map((poi) => {
+            const distanceKm = Number(poi?.distanceKm);
+            if (!Number.isFinite(distanceKm)
+              || distanceKm < xMin - xBoundaryTolerance
+              || distanceKm > xMax + xBoundaryTolerance) {
+              return null;
+            }
+            const elevation = this.getElevationAtDistance(distanceKm);
+            let percentY = null;
+            if (Number.isFinite(elevation)) {
+              const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
+              percentY = ((clampedElevation - yAxis.min) / range) * 100;
+              percentY = Math.max(0, Math.min(100, percentY));
+            }
+            const title = poi?.title ?? poi?.name ?? poi?.categoryLabel ?? DEFAULT_POI_TITLE;
+            const safeTitle = escapeHtml(title);
+            const colorValue = typeof poi?.color === 'string' && poi.color.trim()
+              ? poi.color.trim()
+              : DEFAULT_POI_COLOR;
+            const icon = poi?.icon ?? null;
+            const iconWidth = Number(icon?.width);
+            const iconHeight = Number(icon?.height);
+            const styleParts = [];
+            styleParts.push(Number.isFinite(percentY)
+              ? `bottom:${percentY.toFixed(2)}%`
+              : 'bottom:0');
+            styleParts.push(`color:${colorValue}`);
+            styleParts.push(`--poi-marker-color:${colorValue}`);
+            if (Number.isFinite(iconWidth) && iconWidth > 0) {
+              styleParts.push(`--elevation-marker-icon-width:${iconWidth.toFixed(2)}px`);
+            }
+            if (Number.isFinite(iconHeight) && iconHeight > 0) {
+              styleParts.push(`--elevation-marker-icon-height:${iconHeight.toFixed(2)}px`);
+            }
+            if (!icon || typeof icon.url !== 'string' || !icon.url) {
+              return null;
+            }
+            return `
+              <div
+                class="elevation-marker poi"
+                data-distance-km="${distanceKm.toFixed(6)}"
+                style="${styleParts.join(';')}"
+                title="${safeTitle}"
+                aria-label="${safeTitle}"
+              >
+                <img
+                  class="elevation-marker__icon"
+                  src="${icon.url}"
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+            `;
+          })
+          .filter(Boolean);
+        markerElements.push(...poiElements);
+      }
+
+      if (!markerElements.length) {
         return '';
       }
-      const elements = markers
-        .filter((marker) => marker?.type === 'bivouac')
-        .map((marker) => {
-          const distanceKm = this.getMarkerDistance(marker);
-          if (
-            !Number.isFinite(distanceKm)
-            || distanceKm < xMin - xBoundaryTolerance
-            || distanceKm > xMax + xBoundaryTolerance
-          ) {
-            return null;
-          }
-          const elevation = this.getElevationAtDistance(distanceKm);
-          let percentY = null;
-          if (Number.isFinite(elevation)) {
-            const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
-            percentY = ((clampedElevation - yAxis.min) / range) * 100;
-            percentY = Math.max(0, Math.min(100, percentY));
-          }
-          const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
-          const safeTitle = escapeHtml(rawTitle);
-          const verticalStyle = Number.isFinite(percentY)
-            ? `bottom:${percentY.toFixed(2)}%`
-            : 'bottom:0';
-          return `
-            <div
-              class="elevation-marker bivouac"
-              data-distance-km="${distanceKm.toFixed(6)}"
-              style="${verticalStyle}"
-              title="${safeTitle}"
-              aria-label="${safeTitle}"
-            >
-              <span class="elevation-marker__label">${safeTitle}</span>
-              ${BIVOUAC_ELEVATION_ICON}
-            </div>
-          `;
-        })
-        .filter(Boolean)
-        .join('');
-      if (!elements) {
-        return '';
-      }
-      return `<div class="elevation-marker-layer" aria-hidden="true">${elements}</div>`;
+      return `<div class="elevation-marker-layer" aria-hidden="true">${markerElements.join('')}</div>`;
     })();
 
     this.elevationChart.innerHTML = `
@@ -7257,6 +7566,8 @@ export class DirectionsManager {
     }
     const coordinates = route?.geometry?.coordinates ?? [];
     this.routeProfile = this.buildRouteProfile(coordinates);
+    this.routePointsOfInterest = [];
+    this.pendingPoiRequest = null;
     const profileCoordinates = Array.isArray(this.routeProfile?.coordinates)
       ? this.routeProfile.coordinates
       : [];
@@ -7363,6 +7674,9 @@ export class DirectionsManager {
     this.updateCutDisplays();
     this.updateDistanceMarkers(resolvedRoute);
     this.updateStats(resolvedRoute);
+    this.refreshRoutePointsOfInterest().catch((error) => {
+      console.warn('Failed to refresh route points of interest', error);
+    });
   }
 
   async getRoute() {
