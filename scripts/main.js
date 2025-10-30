@@ -653,7 +653,6 @@ async function init() {
       ['get', 'ref'],
       ''
     ],
-    'let',
     'category',
     [
       'coalesce',
