@@ -47,24 +47,33 @@ const POI_ICON_DEFINITIONS = Object.freeze({
   mountain_pass: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
   saddle: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
   viewpoint: { icon: 'viewpoint', label: 'Point de vue', color: '#35a3ad' },
-  restaurant: { icon: 'restaurant', label: 'Restaurant', color: '#d97706' },
-  fast_food: { icon: 'fast_food', label: 'Restauration rapide', color: '#d97706' },
-  cafe: { icon: 'cafe', label: 'Café', color: '#d97706' },
-  bar: { icon: 'bar', label: 'Bar', color: '#b45309' },
-  pub: { icon: 'bar', label: 'Pub', color: '#b45309' },
   parking: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   parking_underground: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   'parking_multi-storey': { icon: 'parking', label: 'Parking', color: '#4b5563' },
   parking_multistorey: { icon: 'parking', label: 'Parking', color: '#4b5563' },
-  parking_multi_storey: { icon: 'parking', label: 'Parking', color: '#4b5563' },
-  alpine_hut: { icon: 'alpine_hut', label: 'Refuge', color: '#68b723' },
-  wilderness_hut: { icon: 'wilderness_hut', label: 'Cabane', color: '#68b723' },
-  cabin: { icon: 'wilderness_hut', label: 'Cabane', color: '#68b723' },
-  shelter: { icon: 'shelter', label: 'Abri', color: '#68b723' },
-  hostel: { icon: 'lodging', label: 'Auberge', color: '#68b723' },
-  guest_house: { icon: 'lodging', label: 'Maison d’hôtes', color: '#68b723' },
-  hotel: { icon: 'lodging', label: 'Hôtel', color: '#68b723' }
+  parking_multi_storey: { icon: 'parking', label: 'Parking', color: '#4b5563' }
 });
+
+const ELEVATION_PROFILE_POI_CATEGORY_KEYS = Object.freeze([
+  'peak',
+  'volcano',
+  'mountain_pass',
+  'saddle',
+  'viewpoint',
+  'parking',
+  'parking_underground',
+  'parking_multi-storey',
+  'parking_multistorey',
+  'parking_multi_storey'
+]);
+const ELEVATION_PROFILE_POI_CATEGORY_SET = new Set(ELEVATION_PROFILE_POI_CATEGORY_KEYS);
+
+function isElevationProfilePoiCategory(key) {
+  if (typeof key !== 'string' || !key) {
+    return false;
+  }
+  return ELEVATION_PROFILE_POI_CATEGORY_SET.has(key);
+}
 
 function normalizePoiValue(value) {
   if (typeof value !== 'string') {
@@ -97,7 +106,7 @@ function resolvePoiDefinition(properties = {}) {
     candidates.push(className);
   }
   for (const candidate of candidates) {
-    if (candidate && POI_ICON_DEFINITIONS[candidate]) {
+    if (candidate && POI_ICON_DEFINITIONS[candidate] && isElevationProfilePoiCategory(candidate)) {
       return { key: candidate, definition: POI_ICON_DEFINITIONS[candidate] };
     }
   }
@@ -208,31 +217,26 @@ function buildOverpassPoiQuery(bounds, { timeoutSeconds = POI_FALLBACK_TIMEOUT_S
   const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
   const filters = [
     'node["natural"="peak"]',
+    'way["natural"="peak"]',
+    'relation["natural"="peak"]',
     'node["natural"="volcano"]',
+    'way["natural"="volcano"]',
+    'relation["natural"="volcano"]',
     'node["natural"="saddle"]',
+    'way["natural"="saddle"]',
+    'relation["natural"="saddle"]',
     'node["natural"="mountain_pass"]',
+    'way["natural"="mountain_pass"]',
+    'relation["natural"="mountain_pass"]',
     'node["mountain_pass"="yes"]',
+    'way["mountain_pass"="yes"]',
+    'relation["mountain_pass"="yes"]',
     'node["tourism"="viewpoint"]',
-    'node["tourism"="alpine_hut"]',
-    'node["tourism"="wilderness_hut"]',
-    'node["tourism"="guest_house"]',
-    'node["tourism"="hostel"]',
-    'node["tourism"="hotel"]',
-    'node["amenity"="restaurant"]',
-    'node["amenity"="fast_food"]',
-    'node["amenity"="cafe"]',
-    'node["amenity"="bar"]',
-    'node["amenity"="pub"]',
+    'way["tourism"="viewpoint"]',
+    'relation["tourism"="viewpoint"]',
     'node["amenity"="parking"]',
-    'node["amenity"="shelter"]',
-    'node["building"="cabin"]',
-    'node["shelter_type"="cabin"]',
     'way["amenity"="parking"]',
-    'relation["amenity"="parking"]',
-    'way["amenity"="shelter"]',
-    'relation["amenity"="shelter"]',
-    'way["building"="cabin"]',
-    'relation["building"="cabin"]'
+    'relation["amenity"="parking"]'
   ];
   const query = `
 [out:json][timeout:${timeout}];
@@ -248,76 +252,39 @@ function classifyOverpassPoi(tags = {}) {
   const amenity = normalizeOverpassValue(tags.amenity);
   const tourism = normalizeOverpassValue(tags.tourism);
   const natural = normalizeOverpassValue(tags.natural);
-  const building = normalizeOverpassValue(tags.building);
-  const shelterType = normalizeOverpassValue(tags.shelter_type);
   const mountainPass = normalizeOverpassValue(tags.mountain_pass);
   const parkingType = normalizeOverpassValue(tags.parking);
 
+  const buildResult = (key, extras = {}) => {
+    if (!isElevationProfilePoiCategory(key)) {
+      return null;
+    }
+    return { key, ...extras };
+  };
+
   if (natural === 'peak') {
-    return { key: 'peak' };
+    return buildResult('peak');
   }
   if (natural === 'volcano') {
-    return { key: 'volcano' };
+    return buildResult('volcano');
   }
   if (natural === 'saddle') {
-    return { key: 'saddle' };
+    return buildResult('saddle');
   }
   if (natural === 'mountain_pass' || mountainPass === 'yes' || mountainPass === 'true') {
-    return { key: 'mountain_pass' };
+    return buildResult('mountain_pass');
   }
   if (tourism === 'viewpoint') {
-    return { key: 'viewpoint' };
-  }
-  if (amenity === 'restaurant') {
-    return { key: 'restaurant' };
-  }
-  if (amenity === 'fast_food') {
-    return { key: 'fast_food' };
-  }
-  if (amenity === 'cafe') {
-    return { key: 'cafe' };
-  }
-  if (amenity === 'bar') {
-    return { key: 'bar' };
-  }
-  if (amenity === 'pub') {
-    return { key: 'pub' };
+    return buildResult('viewpoint');
   }
   if (amenity === 'parking') {
     if (parkingType === 'underground') {
-      return { key: 'parking_underground', class: 'parking' };
+      return buildResult('parking_underground', { class: 'parking' });
     }
     if (['multi-storey', 'multistorey', 'multi_storey', 'multi level', 'multi-level'].includes(parkingType)) {
-      return { key: 'parking_multi-storey', class: 'parking' };
+      return buildResult('parking_multi-storey', { class: 'parking' });
     }
-    return { key: 'parking', class: 'parking' };
-  }
-  if (amenity === 'shelter') {
-    if (['cabin', 'basic_hut', 'hut'].includes(shelterType)) {
-      return { key: 'cabin', class: 'shelter' };
-    }
-    return { key: 'shelter', class: 'shelter' };
-  }
-  if (tourism === 'alpine_hut') {
-    return { key: 'alpine_hut' };
-  }
-  if (tourism === 'wilderness_hut') {
-    return { key: 'wilderness_hut' };
-  }
-  if (tourism === 'guest_house') {
-    return { key: 'guest_house' };
-  }
-  if (tourism === 'hostel') {
-    return { key: 'hostel' };
-  }
-  if (tourism === 'hotel') {
-    return { key: 'hotel' };
-  }
-  if (building === 'cabin') {
-    return { key: 'cabin', class: 'shelter' };
-  }
-  if (shelterType === 'cabin') {
-    return { key: 'cabin', class: 'shelter' };
+    return buildResult('parking', { class: 'parking' });
   }
   return null;
 }
@@ -7300,6 +7267,7 @@ export class DirectionsManager {
         name,
         title: tooltip,
         categoryLabel,
+        categoryKey: definition.key,
         iconName: definition.definition.icon ?? definition.key,
         color: definition.definition.color ?? DEFAULT_POI_COLOR,
         distanceKm: clampedDistanceKm,
@@ -7667,6 +7635,14 @@ export class DirectionsManager {
       const poiMarkers = Array.isArray(this.routePointsOfInterest) ? this.routePointsOfInterest : [];
       if (poiMarkers.length) {
         const poiElements = poiMarkers
+          .filter((poi) => {
+            const key = typeof poi?.categoryKey === 'string' ? poi.categoryKey : '';
+            if (isElevationProfilePoiCategory(key)) {
+              return true;
+            }
+            const iconKey = typeof poi?.iconName === 'string' ? poi.iconName : '';
+            return isElevationProfilePoiCategory(iconKey);
+          })
           .map((poi) => {
             const distanceKm = Number(poi?.distanceKm);
             if (!Number.isFinite(distanceKm)
