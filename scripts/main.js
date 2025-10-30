@@ -587,6 +587,7 @@ async function init() {
   const DEBUG_NETWORK_INTERSECTIONS_LAYER_ID = 'offline-router-network-debug-intersections';
   const DEBUG_NETWORK_POIS_SOURCE_ID = 'offline-router-network-pois';
   const DEBUG_NETWORK_POIS_LAYER_ID = 'offline-router-network-pois';
+  const DEBUG_NETWORK_POIS_LABEL_LAYER_ID = 'offline-router-network-pois-labels';
   const DEBUG_NETWORK_SAC_SCALE_COLOR_EXPRESSION = Object.freeze([
     'let',
     'sacScale',
@@ -641,6 +642,58 @@ async function init() {
     'hotel', '#68b723',
     '#2d7bd6'
   ]);
+  const DEBUG_NETWORK_POI_LABEL_TEXT_EXPRESSION = Object.freeze([
+    'let',
+    'rawName',
+    [
+      'coalesce',
+      ['get', 'name:fr'],
+      ['get', 'name'],
+      ['get', 'name:en'],
+      ['get', 'ref'],
+      ''
+    ],
+    'let',
+    'category',
+    [
+      'coalesce',
+      ['get', 'subclass'],
+      ['get', 'class'],
+      ''
+    ],
+    [
+      'case',
+      ['!=', ['var', 'rawName'], ''],
+      ['var', 'rawName'],
+      [
+        'match',
+        ['var', 'category'],
+        'peak', 'Sommet',
+        'volcano', 'Volcan',
+        'mountain_pass', 'Col',
+        'saddle', 'Col',
+        'viewpoint', 'Point de vue',
+        'restaurant', 'Restaurant',
+        'fast_food', 'Restauration rapide',
+        'cafe', 'Café',
+        'bar', 'Bar',
+        'pub', 'Pub',
+        'parking', 'Parking',
+        'parking_underground', 'Parking',
+        'parking_multi-storey', 'Parking',
+        'parking_multistorey', 'Parking',
+        'parking_multi_storey', 'Parking',
+        'alpine_hut', 'Refuge',
+        'wilderness_hut', 'Cabane',
+        'cabin', 'Cabane',
+        'shelter', 'Abri',
+        'hostel', 'Auberge',
+        'guest_house', 'Maison d’hôtes',
+        'hotel', 'Hôtel',
+        ''
+      ]
+    ]
+  ]);
   let debugNetworkVisible = false;
   let debugNetworkData = null;
   let directionsManager = null;
@@ -657,6 +710,9 @@ async function init() {
     }
     if (map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
       map.moveLayer(DEBUG_NETWORK_POIS_LAYER_ID);
+    }
+    if (map.getLayer(DEBUG_NETWORK_POIS_LABEL_LAYER_ID)) {
+      map.moveLayer(DEBUG_NETWORK_POIS_LABEL_LAYER_ID);
     }
   };
 
@@ -923,8 +979,50 @@ async function init() {
         });
       }
       map.setLayoutProperty(DEBUG_NETWORK_POIS_LAYER_ID, 'visibility', 'visible');
-    } else if (map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
-      map.setLayoutProperty(DEBUG_NETWORK_POIS_LAYER_ID, 'visibility', 'none');
+      if (!map.getLayer(DEBUG_NETWORK_POIS_LABEL_LAYER_ID)) {
+        map.addLayer({
+          id: DEBUG_NETWORK_POIS_LABEL_LAYER_ID,
+          type: 'symbol',
+          source: DEBUG_NETWORK_POIS_SOURCE_ID,
+          filter: ['==', ['geometry-type'], 'Point'],
+          layout: {
+            'text-field': DEBUG_NETWORK_POI_LABEL_TEXT_EXPRESSION,
+            'text-size': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              10,
+              11,
+              13,
+              13,
+              16,
+              16
+            ],
+            'text-offset': [0, 1.1],
+            'text-anchor': 'top',
+            'text-variable-anchor': ['top', 'right', 'left', 'bottom'],
+            'text-radial-offset': 0.6,
+            'text-max-width': 8,
+            'text-justify': 'center',
+            'text-line-height': 1.2,
+            'text-padding': 2
+          },
+          paint: {
+            'text-color': DEBUG_NETWORK_POI_COLOR_EXPRESSION,
+            'text-halo-color': 'rgba(255, 255, 255, 0.94)',
+            'text-halo-width': 1.2,
+            'text-halo-blur': 0.2
+          }
+        });
+      }
+      map.setLayoutProperty(DEBUG_NETWORK_POIS_LABEL_LAYER_ID, 'visibility', 'visible');
+    } else {
+      if (map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
+        map.setLayoutProperty(DEBUG_NETWORK_POIS_LAYER_ID, 'visibility', 'none');
+      }
+      if (map.getLayer(DEBUG_NETWORK_POIS_LABEL_LAYER_ID)) {
+        map.setLayoutProperty(DEBUG_NETWORK_POIS_LABEL_LAYER_ID, 'visibility', 'none');
+      }
     }
     bringDebugNetworkToFront();
     return true;
@@ -939,6 +1037,9 @@ async function init() {
     }
     if (map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
       map.setLayoutProperty(DEBUG_NETWORK_POIS_LAYER_ID, 'visibility', 'none');
+    }
+    if (map.getLayer(DEBUG_NETWORK_POIS_LABEL_LAYER_ID)) {
+      map.setLayoutProperty(DEBUG_NETWORK_POIS_LABEL_LAYER_ID, 'visibility', 'none');
     }
   };
 

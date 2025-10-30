@@ -7308,18 +7308,22 @@ export class DirectionsManager {
 
     const resolved = [];
     for (const entry of collected) {
-      if (!entry || !entry.iconName) {
+      if (!entry) {
         continue;
       }
-      try {
-        const icon = await getOpenFreeMapIcon(entry.iconName);
-        if (!icon) {
-          continue;
+      let icon = null;
+      const iconName = typeof entry.iconName === 'string' ? entry.iconName.trim() : '';
+      if (iconName) {
+        try {
+          icon = await getOpenFreeMapIcon(iconName);
+        } catch (error) {
+          console.warn('Failed to load OpenFreeMap icon', iconName, error);
         }
-        resolved.push({ ...entry, icon });
-      } catch (error) {
-        console.warn('Failed to load OpenFreeMap icon', entry.iconName, error);
+        if (this.pendingPoiRequest !== requestToken) {
+          return;
+        }
       }
+      resolved.push({ ...entry, icon });
       if (this.pendingPoiRequest !== requestToken) {
         return;
       }
