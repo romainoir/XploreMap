@@ -24,7 +24,7 @@ const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
-const POI_SEARCH_RADIUS_METERS = 20;
+const POI_SEARCH_RADIUS_METERS = 10;
 const POI_CATEGORY_DISTANCE_OVERRIDES = Object.freeze({
   peak: 750,
   volcano: 750,
@@ -7284,6 +7284,9 @@ export class DirectionsManager {
       seen.add(identifier);
 
       const name = resolvePoiName(feature.properties || {});
+      if (!name && definition.key === 'peak') {
+        return;
+      }
       const categoryLabel = definition.definition.label ?? DEFAULT_POI_TITLE;
       const tooltip = name
         ? (categoryLabel && categoryLabel !== name ? `${name} · ${categoryLabel}` : name)
