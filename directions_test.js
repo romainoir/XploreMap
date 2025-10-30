@@ -814,7 +814,8 @@ const PROFILE_MODE_DEFINITIONS = Object.freeze({
   none: { key: 'none', label: 'None' },
   slope: { key: 'slope', label: 'Slope' },
   surface: { key: 'surface', label: 'Surface' },
-  category: { key: 'category', label: 'Difficulty' }
+  category: { key: 'category', label: 'Difficulty' },
+  poi: { key: 'poi', label: 'POI' }
 });
 
 const PROFILE_GRADIENT_MODES = Object.freeze(['slope', 'surface']);
@@ -1796,7 +1797,9 @@ export class DirectionsManager {
     if (!this.profileLegend) {
       return;
     }
-    const shouldDisplay = Boolean(hasRoute && this.profileMode !== 'none');
+    const shouldDisplay = Boolean(
+      hasRoute && this.profileMode !== 'none' && this.profileMode !== 'poi'
+    );
     if (!shouldDisplay) {
       this.profileLegend.innerHTML = '';
       this.profileLegend.setAttribute('aria-hidden', 'true');
@@ -2222,6 +2225,7 @@ export class DirectionsManager {
         return this.classifySurfaceSegment(segment);
       case 'category':
         return this.classifyCategorySegment(segment);
+      case 'poi':
       case 'none':
       default:
         return null;
@@ -2390,6 +2394,7 @@ export class DirectionsManager {
 
   updateProfileSegments() {
     if (this.profileMode === 'none'
+      || this.profileMode === 'poi'
       || !Array.isArray(this.routeSegments)
       || !this.routeSegments.length) {
       this.profileSegments = [];
@@ -7647,16 +7652,8 @@ export class DirectionsManager {
       }
 
       const poiMarkers = Array.isArray(this.routePointsOfInterest) ? this.routePointsOfInterest : [];
-      if (poiMarkers.length) {
+      if (this.profileMode === 'poi' && poiMarkers.length) {
         const poiElements = poiMarkers
-          .filter((poi) => {
-            const key = typeof poi?.categoryKey === 'string' ? poi.categoryKey : '';
-            if (isElevationProfilePoiCategory(key)) {
-              return true;
-            }
-            const iconKey = typeof poi?.iconName === 'string' ? poi.iconName : '';
-            return isElevationProfilePoiCategory(iconKey);
-          })
           .map((poi) => {
             const distanceKm = Number(poi?.distanceKm);
             if (!Number.isFinite(distanceKm)
