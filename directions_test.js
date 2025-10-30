@@ -1,4 +1,5 @@
 import { getOpenFreeMapIcon } from './scripts/openfreemap-sprites.js';
+import { OVERPASS_ENDPOINT as OVERPASS_INTERPRETER_ENDPOINT } from './scripts/overpass-network.js';
 
 const EMPTY_COLLECTION = {
   type: 'FeatureCollection',
@@ -29,6 +30,9 @@ const POI_SEARCH_RADIUS_METERS = 250;
 const DEFAULT_POI_COLOR = '#2d7bd6';
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
+const POI_FALLBACK_MAX_BOUND_SPAN_DEGREES = 2.5;
+const POI_FALLBACK_TIMEOUT_SECONDS = 60;
+const POI_FALLBACK_ENDPOINT = OVERPASS_INTERPRETER_ENDPOINT;
 const POI_ICON_DEFINITIONS = Object.freeze({
   peak: { icon: 'peak', label: 'Sommet', color: '#2d7bd6' },
   volcano: { icon: 'peak', label: 'Volcan', color: '#2d7bd6' },
@@ -118,6 +122,308 @@ function buildPoiIdentifier(categoryKey, coordinates, rawId) {
 const EARTH_RADIUS_METERS = 6371000;
 const toRadians = (value) => (value * Math.PI) / 180;
 const toDegrees = (value) => (value * 180) / Math.PI;
+
+const normalizeOverpassValue = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().toLowerCase();
+};
+
+function normalizeLongitude(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = ((value + 180) % 360 + 360) % 360 - 180;
+  return Math.min(180, Math.max(-180, normalized));
+}
+
+function normalizeLatitude(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.min(90, Math.max(-90, value));
+}
+
+function clampBounds(bounds) {
+  if (!bounds) {
+    return null;
+  }
+  const { west, south, east, north } = bounds;
+  const normalizedWest = normalizeLongitude(west);
+  const normalizedEast = normalizeLongitude(east);
+  const normalizedSouth = normalizeLatitude(south);
+  const normalizedNorth = normalizeLatitude(north);
+  if (normalizedWest == null || normalizedEast == null
+    || normalizedSouth == null || normalizedNorth == null) {
+    return null;
+  }
+  return {
+    west: normalizedWest,
+    east: normalizedEast,
+    south: normalizedSouth,
+    north: normalizedNorth
+  };
+}
+
+function getBufferedRouteBounds(line, bufferMeters = POI_SEARCH_RADIUS_METERS) {
+  if (!turfApi || typeof turfApi.buffer !== 'function' || typeof turfApi.bbox !== 'function') {
+    return null;
+  }
+  try {
+    const padded = turfApi.buffer(line, bufferMeters, { units: 'meters' });
+    const bbox = turfApi.bbox(padded);
+    if (!Array.isArray(bbox) || bbox.length !== 4) {
+      return null;
+    }
+    const [west, south, east, north] = bbox.map((value) => Number.isFinite(value) ? value : null);
+    if ([west, south, east, north].some((value) => value == null)) {
+      return null;
+    }
+    if (east < west) {
+      return null;
+    }
+    return clampBounds({ west, south, east, north });
+  } catch (error) {
+    console.warn('Failed to compute buffered bounds for POI fallback query', error);
+    return null;
+  }
+}
+
+function buildOverpassPoiQuery(bounds, { timeoutSeconds = POI_FALLBACK_TIMEOUT_SECONDS } = {}) {
+  const { west, south, east, north } = bounds ?? {};
+  if (!Number.isFinite(west) || !Number.isFinite(south)
+    || !Number.isFinite(east) || !Number.isFinite(north)) {
+    return null;
+  }
+  const timeout = Math.min(180, Math.max(10, Math.round(timeoutSeconds)));
+  const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
+  const filters = [
+    'node["natural"="peak"]',
+    'node["natural"="volcano"]',
+    'node["natural"="saddle"]',
+    'node["natural"="mountain_pass"]',
+    'node["mountain_pass"="yes"]',
+    'node["tourism"="viewpoint"]',
+    'node["tourism"="alpine_hut"]',
+    'node["tourism"="wilderness_hut"]',
+    'node["tourism"="guest_house"]',
+    'node["tourism"="hostel"]',
+    'node["tourism"="hotel"]',
+    'node["amenity"="restaurant"]',
+    'node["amenity"="fast_food"]',
+    'node["amenity"="cafe"]',
+    'node["amenity"="bar"]',
+    'node["amenity"="pub"]',
+    'node["amenity"="parking"]',
+    'node["amenity"="shelter"]',
+    'node["building"="cabin"]',
+    'node["shelter_type"="cabin"]',
+    'way["amenity"="parking"]',
+    'relation["amenity"="parking"]',
+    'way["amenity"="shelter"]',
+    'relation["amenity"="shelter"]',
+    'way["building"="cabin"]',
+    'relation["building"="cabin"]'
+  ];
+  const query = `
+[out:json][timeout:${timeout}];
+(
+  ${filters.map((filter) => `${filter}(${bbox});`).join('\n  ')}
+);
+out center tags;
+  `.trim();
+  return query;
+}
+
+function classifyOverpassPoi(tags = {}) {
+  const amenity = normalizeOverpassValue(tags.amenity);
+  const tourism = normalizeOverpassValue(tags.tourism);
+  const natural = normalizeOverpassValue(tags.natural);
+  const building = normalizeOverpassValue(tags.building);
+  const shelterType = normalizeOverpassValue(tags.shelter_type);
+  const mountainPass = normalizeOverpassValue(tags.mountain_pass);
+  const parkingType = normalizeOverpassValue(tags.parking);
+
+  if (natural === 'peak') {
+    return { key: 'peak' };
+  }
+  if (natural === 'volcano') {
+    return { key: 'volcano' };
+  }
+  if (natural === 'saddle') {
+    return { key: 'saddle' };
+  }
+  if (natural === 'mountain_pass' || mountainPass === 'yes' || mountainPass === 'true') {
+    return { key: 'mountain_pass' };
+  }
+  if (tourism === 'viewpoint') {
+    return { key: 'viewpoint' };
+  }
+  if (amenity === 'restaurant') {
+    return { key: 'restaurant' };
+  }
+  if (amenity === 'fast_food') {
+    return { key: 'fast_food' };
+  }
+  if (amenity === 'cafe') {
+    return { key: 'cafe' };
+  }
+  if (amenity === 'bar') {
+    return { key: 'bar' };
+  }
+  if (amenity === 'pub') {
+    return { key: 'pub' };
+  }
+  if (amenity === 'parking') {
+    if (parkingType === 'underground') {
+      return { key: 'parking_underground', class: 'parking' };
+    }
+    if (['multi-storey', 'multistorey', 'multi_storey', 'multi level', 'multi-level'].includes(parkingType)) {
+      return { key: 'parking_multi-storey', class: 'parking' };
+    }
+    return { key: 'parking', class: 'parking' };
+  }
+  if (amenity === 'shelter') {
+    if (['cabin', 'basic_hut', 'hut'].includes(shelterType)) {
+      return { key: 'cabin', class: 'shelter' };
+    }
+    return { key: 'shelter', class: 'shelter' };
+  }
+  if (tourism === 'alpine_hut') {
+    return { key: 'alpine_hut' };
+  }
+  if (tourism === 'wilderness_hut') {
+    return { key: 'wilderness_hut' };
+  }
+  if (tourism === 'guest_house') {
+    return { key: 'guest_house' };
+  }
+  if (tourism === 'hostel') {
+    return { key: 'hostel' };
+  }
+  if (tourism === 'hotel') {
+    return { key: 'hotel' };
+  }
+  if (building === 'cabin') {
+    return { key: 'cabin', class: 'shelter' };
+  }
+  if (shelterType === 'cabin') {
+    return { key: 'cabin', class: 'shelter' };
+  }
+  return null;
+}
+
+function convertOverpassElementToFeature(element) {
+  if (!element || typeof element !== 'object') {
+    return null;
+  }
+  const tags = element.tags || {};
+  const classification = classifyOverpassPoi(tags);
+  if (!classification) {
+    return null;
+  }
+  const lngCandidates = [element.lon, element.lng, element?.center?.lon, element?.center?.lng];
+  const latCandidates = [element.lat, element.latitude, element?.center?.lat, element?.center?.latitude];
+  let lng = null;
+  let lat = null;
+  for (const candidate of lngCandidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric)) {
+      lng = numeric;
+      break;
+    }
+  }
+  for (const candidate of latCandidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric)) {
+      lat = numeric;
+      break;
+    }
+  }
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return null;
+  }
+
+  const properties = {};
+  const subclass = classification.key;
+  const className = classification.class ?? classification.key;
+  properties.class = className;
+  properties.subclass = subclass;
+  if (element.id != null) {
+    properties.id = `${element.type || 'node'}/${element.id}`;
+    properties.osm_id = element.id;
+  }
+  POI_NAME_PROPERTIES.forEach((propertyKey) => {
+    const tagValue = tags[propertyKey];
+    if (typeof tagValue === 'string' && tagValue.trim()) {
+      properties[propertyKey] = tagValue.trim();
+    }
+  });
+  if (typeof tags.name === 'string' && tags.name.trim()) {
+    properties.name = tags.name.trim();
+  }
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'Point',
+      coordinates: [lng, lat]
+    },
+    properties
+  };
+}
+
+async function fetchOverpassRoutePois(line, {
+  bufferMeters = POI_SEARCH_RADIUS_METERS,
+  endpoint = POI_FALLBACK_ENDPOINT,
+  signal
+} = {}) {
+  const bounds = getBufferedRouteBounds(line, bufferMeters);
+  if (!bounds) {
+    return [];
+  }
+  const { west, east, south, north } = bounds;
+  const lngSpan = Math.abs(east - west);
+  const latSpan = Math.abs(north - south);
+  if (lngSpan > POI_FALLBACK_MAX_BOUND_SPAN_DEGREES || latSpan > POI_FALLBACK_MAX_BOUND_SPAN_DEGREES) {
+    return [];
+  }
+  const query = buildOverpassPoiQuery(bounds);
+  if (!query) {
+    return [];
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=UTF-8'
+      },
+      body: query,
+      signal
+    });
+    if (!response.ok) {
+      throw new Error(`Overpass POI request failed with status ${response.status}`);
+    }
+    const payload = await response.json();
+    const elements = Array.isArray(payload?.elements) ? payload.elements : [];
+    return elements
+      .map((element) => {
+        try {
+          return convertOverpassElementToFeature(element);
+        } catch (error) {
+          console.warn('Failed to convert Overpass POI element', error);
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch (error) {
+    if (signal && signal.aborted) {
+      return [];
+    }
+    throw error;
+  }
+}
 
 const haversineDistanceMeters = (a, b) => {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) {
@@ -1040,6 +1346,7 @@ export class DirectionsManager {
     this.lastElevationHoverDistance = null;
     this.routePointsOfInterest = [];
     this.pendingPoiRequest = null;
+    this.pendingPoiAbortController = null;
 
     this.setHintVisible(false);
 
@@ -6822,6 +7129,15 @@ export class DirectionsManager {
       return;
     }
 
+    if (this.pendingPoiAbortController && typeof this.pendingPoiAbortController.abort === 'function') {
+      try {
+        this.pendingPoiAbortController.abort();
+      } catch (error) {
+        console.warn('Failed to abort pending POI fallback request', error);
+      }
+    }
+    this.pendingPoiAbortController = null;
+
     const requestToken = Symbol('poi-request');
     this.pendingPoiRequest = requestToken;
     const line = turfApi.lineString(coordinates.map((coord) => [coord[0], coord[1]]));
@@ -6846,6 +7162,32 @@ export class DirectionsManager {
       });
     }
 
+    if ((!Array.isArray(sourceFeatures) || !sourceFeatures.length) && !shouldRetry) {
+      let abortController = null;
+      if (typeof AbortController === 'function') {
+        abortController = new AbortController();
+        this.pendingPoiAbortController = abortController;
+      }
+      try {
+        const fallbackFeatures = await fetchOverpassRoutePois(line, {
+          bufferMeters: POI_SEARCH_RADIUS_METERS,
+          signal: abortController?.signal
+        });
+        if (this.pendingPoiRequest !== requestToken) {
+          return;
+        }
+        sourceFeatures = fallbackFeatures;
+      } catch (error) {
+        if (!(abortController?.signal?.aborted)) {
+          console.warn('Failed to fetch POIs from Overpass fallback', error);
+        }
+      } finally {
+        if (this.pendingPoiAbortController === abortController) {
+          this.pendingPoiAbortController = null;
+        }
+      }
+    }
+
     if (!Array.isArray(sourceFeatures) || !sourceFeatures.length) {
       this.routePointsOfInterest = [];
       if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
@@ -6855,6 +7197,7 @@ export class DirectionsManager {
       if (!shouldRetry) {
         this.pendingPoiRequest = null;
       }
+      this.pendingPoiAbortController = null;
       return;
     }
 
@@ -6958,6 +7301,7 @@ export class DirectionsManager {
       this.updateElevationProfile(coordinates);
     }
     this.pendingPoiRequest = null;
+    this.pendingPoiAbortController = null;
   }
 
   updateElevationProfile(coordinates) {
