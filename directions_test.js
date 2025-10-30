@@ -1327,6 +1327,7 @@ export class DirectionsManager {
     this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
     this.elevationDomain = null;
+    this.elevationYAxis = null;
     this.routeLineGradientSupported = true;
     this.routeLineGradientExpression = null;
     this.routeLineGradientData = EMPTY_COLLECTION;
@@ -6044,6 +6045,7 @@ export class DirectionsManager {
     this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
     this.elevationDomain = null;
+    this.elevationYAxis = null;
     this.routePointsOfInterest = [];
     this.pendingPoiRequest = null;
     this.resetRouteCuts();
@@ -7348,6 +7350,7 @@ export class DirectionsManager {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
       this.elevationDomain = null;
+      this.elevationYAxis = null;
       this.elevationChartContainer = null;
       this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
@@ -7361,6 +7364,7 @@ export class DirectionsManager {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
       this.elevationDomain = null;
+      this.elevationYAxis = null;
       this.elevationChartContainer = null;
       this.elevationHoverReadout = null;
       this.highlightedElevationBar = null;
@@ -7387,6 +7391,7 @@ export class DirectionsManager {
     const yMax = maxElevation + margin;
     const yAxis = this.computeAxisTicks(yMin, yMax, ELEVATION_TICK_TARGET);
     const range = Math.max(Number.EPSILON, yAxis.max - yAxis.min);
+    this.elevationYAxis = { min: yAxis.min, max: yAxis.max };
 
     const distanceSeries = Array.isArray(this.routeProfile?.cumulativeDistances)
       ? this.routeProfile.cumulativeDistances.filter((value) => Number.isFinite(value))
@@ -7627,6 +7632,7 @@ export class DirectionsManager {
               <div
                 class="elevation-marker bivouac"
                 data-distance-km="${distanceKm.toFixed(6)}"
+                data-bottom-offset="12"
                 style="${verticalStyle}"
                 title="${safeTitle}"
                 aria-label="${safeTitle}"
@@ -7710,6 +7716,7 @@ export class DirectionsManager {
               <div
                 class="elevation-marker poi"
                 data-distance-km="${distanceKm.toFixed(6)}"
+                data-bottom-offset="8"
                 style="${styleParts.join(';')}"
                 title="${safeTitle}"
                 aria-label="${safeTitle}"
@@ -7772,24 +7779,70 @@ export class DirectionsManager {
     if (!markers.length) {
       return;
     }
-    const domainMin = Number(this.elevationDomain?.min);
-    let domainSpan = Number(this.elevationDomain?.span);
-    if (!Number.isFinite(domainSpan) || Math.abs(domainSpan) < Number.EPSILON) {
-      domainSpan = Number(this.routeProfile?.totalDistanceKm);
+
+    let domainMin = Number(this.elevationDomain?.min);
+    let domainMax = Number(this.elevationDomain?.max);
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+      if (Number.isFinite(totalDistance) && totalDistance > 0) {
+        domainMin = 0;
+        domainMax = totalDistance;
+      }
     }
-    if (!Number.isFinite(domainMin) || !Number.isFinite(domainSpan) || domainSpan === 0) {
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
       return;
     }
-    const span = Math.abs(domainSpan);
+    const domainLow = Math.min(domainMin, domainMax);
+    const domainHigh = Math.max(domainMin, domainMax);
+    const span = domainHigh - domainLow;
+    if (!(span > 0)) {
+      return;
+    }
+
+    const yMin = Number(this.elevationYAxis?.min);
+    const yMax = Number(this.elevationYAxis?.max);
+    const ySpan = yMax - yMin;
+    const canPositionVertically = Number.isFinite(yMin)
+      && Number.isFinite(yMax)
+      && Math.abs(ySpan) > Number.EPSILON;
+
     markers.forEach((marker) => {
       const distanceKm = Number(marker.dataset.distanceKm);
       if (!Number.isFinite(distanceKm)) {
         return;
       }
-      const ratio = span > 0 ? (distanceKm - domainMin) / span : 0;
+      const ratio = span > 0 ? (distanceKm - domainLow) / span : 0;
       const clampedRatio = Math.max(0, Math.min(1, ratio));
       const percent = clampedRatio * 100;
       marker.style.left = `${percent.toFixed(6)}%`;
+
+      if (marker.classList.contains('poi') && canPositionVertically) {
+        const clampedDistanceKm = domainLow + clampedRatio * span;
+        const elevation = this.getElevationAtDistance(clampedDistanceKm);
+        if (Number.isFinite(elevation)) {
+          const normalized = (elevation - yMin) / ySpan;
+          const clampedElevation = Math.max(0, Math.min(1, normalized));
+          const elevationPercent = (clampedElevation * 100).toFixed(6);
+          const offsetValue = Number(marker.dataset.bottomOffset);
+          const offsetPx = Number.isFinite(offsetValue) ? offsetValue : 0;
+          const offsetSuffix = offsetPx !== 0 ? ` + ${offsetPx}px` : '';
+          if (offsetSuffix) {
+            marker.style.bottom = `calc(${elevationPercent}%${offsetSuffix})`;
+          } else {
+            marker.style.bottom = `${elevationPercent}%`;
+          }
+        } else {
+          const offsetValue = Number(marker.dataset.bottomOffset);
+          if (Number.isFinite(offsetValue)) {
+            marker.style.bottom = `calc(100% + ${offsetValue}px)`;
+          }
+        }
+      } else if (marker.classList.contains('poi')) {
+        const offsetValue = Number(marker.dataset.bottomOffset);
+        if (Number.isFinite(offsetValue)) {
+          marker.style.bottom = `calc(100% + ${offsetValue}px)`;
+        }
+      }
     });
   }
 
