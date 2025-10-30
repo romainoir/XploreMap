@@ -494,6 +494,10 @@ function appendCoordinateMetadataEntry(target, entry, options = {}) {
     entry.difficulty,
     hiking?.difficulty
   );
+  const rawCategory = typeof entry.category === 'string' && entry.category
+    ? entry.category
+    : (typeof hiking?.category === 'string' && hiking.category ? hiking.category : null);
+  const categoryValue = rawCategory ? normalizeSacScale(rawCategory) ?? rawCategory : null;
   const surfaceValue = typeof entry.surface === 'string' ? entry.surface : hiking?.surface;
   const trailValue = typeof entry.trailVisibility === 'string' ? entry.trailVisibility : hiking?.trailVisibility;
   const smoothnessValue = typeof entry.smoothness === 'string' ? entry.smoothness : hiking?.smoothness;
@@ -512,6 +516,7 @@ function appendCoordinateMetadataEntry(target, entry, options = {}) {
     startDistanceKm: startKm,
     endDistanceKm: endKm,
     ...(hiking ? { hiking } : {}),
+    ...(typeof categoryValue === 'string' && categoryValue ? { category: categoryValue } : {}),
     ...(typeof sacScaleValue === 'string' && sacScaleValue ? { sacScale: sacScaleValue } : {}),
     ...(typeof surfaceValue === 'string' && surfaceValue ? { surface: surfaceValue } : {}),
     ...(typeof trailValue === 'string' && trailValue ? { trailVisibility: trailValue } : {}),
