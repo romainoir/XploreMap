@@ -26,10 +26,15 @@ const turfApi = typeof turf !== 'undefined' ? turf : null;
 
 const POI_SEARCH_RADIUS_METERS = 10;
 const POI_CATEGORY_DISTANCE_OVERRIDES = Object.freeze({
-  peak: 750,
-  volcano: 750,
-  mountain_pass: 500,
-  saddle: 500
+  peak: 200,
+  volcano: 200,
+  mountain_pass: 150,
+  saddle: 150,
+  alpine_hut: 250,
+  wilderness_hut: 250,
+  hut: 250,
+  cabin: 250,
+  shelter: 150
 });
 const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
   POI_SEARCH_RADIUS_METERS,
@@ -47,6 +52,11 @@ const POI_ICON_DEFINITIONS = Object.freeze({
   mountain_pass: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
   saddle: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
   viewpoint: { icon: 'viewpoint', label: 'Point de vue', color: '#35a3ad' },
+  alpine_hut: { icon: 'alpine_hut', label: 'Refuge', color: '#c26d2d' },
+  wilderness_hut: { icon: 'wilderness_hut', label: 'Cabane', color: '#c26d2d' },
+  hut: { icon: 'wilderness_hut', label: 'Cabane', color: '#c26d2d' },
+  cabin: { icon: 'wilderness_hut', label: 'Cabane', color: '#c26d2d' },
+  shelter: { icon: 'shelter', label: 'Abri', color: '#c26d2d' },
   parking: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   parking_underground: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   'parking_multi-storey': { icon: 'parking', label: 'Parking', color: '#4b5563' },
@@ -60,6 +70,11 @@ const ELEVATION_PROFILE_POI_CATEGORY_KEYS = Object.freeze([
   'mountain_pass',
   'saddle',
   'viewpoint',
+  'alpine_hut',
+  'wilderness_hut',
+  'hut',
+  'cabin',
+  'shelter',
   'parking',
   'parking_underground',
   'parking_multi-storey',
@@ -99,12 +114,14 @@ function resolvePoiDefinition(properties = {}) {
   const candidates = [];
   const subclass = normalizePoiValue(properties.subclass);
   const className = normalizePoiValue(properties.class);
-  if (subclass) {
-    candidates.push(subclass);
-  }
-  if (className && className !== subclass) {
-    candidates.push(className);
-  }
+  const amenity = normalizePoiValue(properties.amenity);
+  const tourism = normalizePoiValue(properties.tourism);
+  const manMade = normalizePoiValue(properties.man_made);
+  [subclass, className, amenity, tourism, manMade]
+    .filter((value, index, array) => value && array.indexOf(value) === index)
+    .forEach((value) => {
+      candidates.push(value);
+    });
   for (const candidate of candidates) {
     if (candidate && POI_ICON_DEFINITIONS[candidate] && isElevationProfilePoiCategory(candidate)) {
       return { key: candidate, definition: POI_ICON_DEFINITIONS[candidate] };
@@ -7603,18 +7620,9 @@ export class DirectionsManager {
             ) {
               return null;
             }
-            const elevation = this.getElevationAtDistance(distanceKm);
-            let percentY = null;
-            if (Number.isFinite(elevation)) {
-              const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
-              percentY = ((clampedElevation - yAxis.min) / range) * 100;
-              percentY = Math.max(0, Math.min(100, percentY));
-            }
             const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
             const safeTitle = escapeHtml(rawTitle);
-            const verticalStyle = Number.isFinite(percentY)
-              ? `bottom:${percentY.toFixed(2)}%`
-              : 'bottom:0';
+            const verticalStyle = 'bottom:calc(100% + 12px)';
             return `
               <div
                 class="elevation-marker bivouac"
@@ -7650,13 +7658,6 @@ export class DirectionsManager {
               || distanceKm > xMax + xBoundaryTolerance) {
               return null;
             }
-            const elevation = this.getElevationAtDistance(distanceKm);
-            let percentY = null;
-            if (Number.isFinite(elevation)) {
-              const clampedElevation = Math.min(yAxis.max, Math.max(yAxis.min, elevation));
-              percentY = ((clampedElevation - yAxis.min) / range) * 100;
-              percentY = Math.max(0, Math.min(100, percentY));
-            }
             const title = poi?.title ?? poi?.name ?? poi?.categoryLabel ?? DEFAULT_POI_TITLE;
             const safeTitle = escapeHtml(title);
             const rawLabel = (() => {
@@ -7680,9 +7681,7 @@ export class DirectionsManager {
             const iconWidth = Number(icon?.width);
             const iconHeight = Number(icon?.height);
             const styleParts = [];
-            styleParts.push(Number.isFinite(percentY)
-              ? `bottom:${percentY.toFixed(2)}%`
-              : 'bottom:0');
+            styleParts.push('bottom:calc(100% + 8px)');
             styleParts.push(`color:${colorValue}`);
             styleParts.push(`--poi-marker-color:${colorValue}`);
             if (Number.isFinite(iconWidth) && iconWidth > 0) {
@@ -7773,58 +7772,23 @@ export class DirectionsManager {
     if (!markers.length) {
       return;
     }
-    const bars = Array.from(this.elevationChartContainer.querySelectorAll('.elevation-bar'));
-    if (!bars.length) {
+    const domainMin = Number(this.elevationDomain?.min);
+    let domainSpan = Number(this.elevationDomain?.span);
+    if (!Number.isFinite(domainSpan) || Math.abs(domainSpan) < Number.EPSILON) {
+      domainSpan = Number(this.routeProfile?.totalDistanceKm);
+    }
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainSpan) || domainSpan === 0) {
       return;
     }
-    const containerRect = this.elevationChartContainer.getBoundingClientRect();
-    const containerWidth = containerRect.width;
-    if (!containerWidth) {
-      return;
-    }
-    const containerLeft = containerRect.left;
-    const barMetrics = bars
-      .map((bar) => {
-        const startKm = Number(bar.dataset.startKm);
-        const endKm = Number(bar.dataset.endKm);
-        if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
-          return null;
-        }
-        const rect = bar.getBoundingClientRect();
-        return { startKm, endKm, rect };
-      })
-      .filter(Boolean);
-    if (!barMetrics.length) {
-      return;
-    }
-    const domainSpan = Number(this.elevationDomain?.span);
-    const span = Number.isFinite(domainSpan)
-      ? Math.abs(domainSpan)
-      : Number(this.routeProfile?.totalDistanceKm) || 0;
-    const epsilon = Math.max(1e-5, span * 1e-4);
+    const span = Math.abs(domainSpan);
     markers.forEach((marker) => {
       const distanceKm = Number(marker.dataset.distanceKm);
       if (!Number.isFinite(distanceKm)) {
         return;
       }
-      let target = null;
-      for (const metric of barMetrics) {
-        if (distanceKm >= metric.startKm - epsilon && distanceKm <= metric.endKm + epsilon) {
-          target = metric;
-          break;
-        }
-      }
-      if (!target) {
-        target = barMetrics[barMetrics.length - 1];
-      }
-      if (!target) {
-        return;
-      }
-      const span = Math.max(target.endKm - target.startKm, 1e-6);
-      const ratio = Math.max(0, Math.min(1, (distanceKm - target.startKm) / span));
-      const x = target.rect.left + ratio * target.rect.width;
-      const offset = x - containerLeft;
-      const percent = Math.max(0, Math.min(100, (offset / containerWidth) * 100));
+      const ratio = span > 0 ? (distanceKm - domainMin) / span : 0;
+      const clampedRatio = Math.max(0, Math.min(1, ratio));
+      const percent = clampedRatio * 100;
       marker.style.left = `${percent.toFixed(6)}%`;
     });
   }
