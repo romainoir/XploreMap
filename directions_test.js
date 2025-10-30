@@ -7327,12 +7327,22 @@ export class DirectionsManager {
             if (Number.isFinite(iconHeight) && iconHeight > 0) {
               styleParts.push(`--elevation-marker-icon-height:${iconHeight.toFixed(2)}px`);
             }
-            if (!icon || typeof icon.url !== 'string' || !icon.url) {
-              return null;
-            }
             const labelMarkup = safeLabel
               ? `<span class="elevation-marker__label">${safeLabel}</span>`
               : '';
+            const hasIconImage = icon && typeof icon.url === 'string' && icon.url;
+            const iconMarkup = hasIconImage
+              ? `
+                <img
+                  class="elevation-marker__icon"
+                  src="${icon.url}"
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                  decoding="async"
+                />
+              `
+              : '<span class="elevation-marker__icon elevation-marker__icon--fallback" aria-hidden="true"></span>';
             return `
               <div
                 class="elevation-marker poi"
@@ -7342,14 +7352,7 @@ export class DirectionsManager {
                 aria-label="${safeTitle}"
               >
                 ${labelMarkup}
-                <img
-                  class="elevation-marker__icon"
-                  src="${icon.url}"
-                  alt=""
-                  aria-hidden="true"
-                  loading="lazy"
-                  decoding="async"
-                />
+                ${iconMarkup}
               </div>
             `;
           })
