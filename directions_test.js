@@ -23,8 +23,6 @@ const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
-const POI_SOURCE_ID = 'openmaptiles';
-const POI_SOURCE_LAYER = 'poi';
 const POI_SEARCH_RADIUS_METERS = 250;
 const DEFAULT_POI_COLOR = '#2d7bd6';
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
@@ -1040,6 +1038,7 @@ export class DirectionsManager {
     this.lastElevationHoverDistance = null;
     this.routePointsOfInterest = [];
     this.pendingPoiRequest = null;
+    this.offlinePoiCollection = EMPTY_COLLECTION;
 
     this.setHintVisible(false);
 
@@ -2471,6 +2470,50 @@ export class DirectionsManager {
     this.updateModeAvailability();
     if (reroute && this.waypoints.length >= 2) {
       this.getRoute();
+    }
+  }
+
+  setOfflinePointsOfInterest(collection) {
+    let normalized = EMPTY_COLLECTION;
+    if (collection && typeof collection === 'object' && collection.type === 'FeatureCollection'
+      && Array.isArray(collection.features)) {
+      const features = collection.features
+        .map((feature) => {
+          if (!feature || typeof feature !== 'object') {
+            return null;
+          }
+          const geometry = feature.geometry;
+          if (!geometry || geometry.type !== 'Point' || !Array.isArray(geometry.coordinates)) {
+            return null;
+          }
+          const lng = Number(geometry.coordinates[0]);
+          const lat = Number(geometry.coordinates[1]);
+          if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+            return null;
+          }
+          const properties = feature.properties && typeof feature.properties === 'object'
+            ? { ...feature.properties }
+            : {};
+          return {
+            type: 'Feature',
+            properties,
+            geometry: {
+              type: 'Point',
+              coordinates: [lng, lat]
+            }
+          };
+        })
+        .filter(Boolean);
+      if (features.length) {
+        normalized = { type: 'FeatureCollection', features };
+      }
+    }
+    this.offlinePoiCollection = normalized;
+    if (Array.isArray(this.routeProfile?.coordinates) && this.routeProfile.coordinates.length >= 2) {
+      this.refreshRoutePointsOfInterest().catch(() => {});
+    } else {
+      this.routePointsOfInterest = [];
+      this.pendingPoiRequest = null;
     }
   }
 
@@ -6827,24 +6870,8 @@ export class DirectionsManager {
     const line = turfApi.lineString(coordinates.map((coord) => [coord[0], coord[1]]));
     const totalDistanceKm = Number(profile?.totalDistanceKm);
 
-    let sourceFeatures = [];
-    try {
-      sourceFeatures = this.map.querySourceFeatures(POI_SOURCE_ID, { sourceLayer: POI_SOURCE_LAYER });
-    } catch (error) {
-      console.warn('Failed to query OpenFreeMap POIs for the current route', error);
-      sourceFeatures = [];
-    }
-
-    const shouldRetry = (!Array.isArray(sourceFeatures) || !sourceFeatures.length)
-      && typeof this.map?.isStyleLoaded === 'function'
-      && !this.map.isStyleLoaded();
-    if (shouldRetry && typeof this.map?.once === 'function') {
-      this.map.once('idle', () => {
-        if (this.pendingPoiRequest === requestToken) {
-          this.refreshRoutePointsOfInterest().catch(() => {});
-        }
-      });
-    }
+    const sourceCollection = this.offlinePoiCollection;
+    const sourceFeatures = Array.isArray(sourceCollection?.features) ? sourceCollection.features : [];
 
     if (!Array.isArray(sourceFeatures) || !sourceFeatures.length) {
       this.routePointsOfInterest = [];
@@ -6852,9 +6879,7 @@ export class DirectionsManager {
         && this.routeGeojson.geometry.coordinates.length >= 2) {
         this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
       }
-      if (!shouldRetry) {
-        this.pendingPoiRequest = null;
-      }
+      this.pendingPoiRequest = null;
       return;
     }
 
@@ -6862,11 +6887,10 @@ export class DirectionsManager {
     const collected = [];
 
     sourceFeatures.forEach((feature) => {
-      if (!feature) {
+      if (!feature || typeof feature !== 'object') {
         return;
       }
-      const plain = typeof feature.toJSON === 'function' ? feature.toJSON() : feature;
-      const geometry = plain?.geometry;
+      const geometry = feature.geometry;
       if (!geometry || geometry.type !== 'Point' || !Array.isArray(geometry.coordinates)) {
         return;
       }
@@ -6874,7 +6898,7 @@ export class DirectionsManager {
       if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
         return;
       }
-      const definition = resolvePoiDefinition(plain?.properties || {});
+      const definition = resolvePoiDefinition(feature.properties || {});
       if (!definition) {
         return;
       }
@@ -6893,17 +6917,18 @@ export class DirectionsManager {
       if (!Number.isFinite(distanceMeters) || distanceMeters > POI_SEARCH_RADIUS_METERS) {
         return;
       }
-      const rawId = plain?.properties?.id
-        ?? plain?.properties?.osm_id
-        ?? plain?.properties?.osmID
-        ?? plain?.properties?.osm_identifier;
-      const identifier = buildPoiIdentifier(definition.key, geometry.coordinates, rawId);
+      const rawId = feature?.properties?.id
+        ?? feature?.properties?.osm_id
+        ?? feature?.properties?.['@id']
+        ?? feature?.id
+        ?? feature?.properties?.ref;
+      const identifier = buildPoiIdentifier(definition.key, [lng, lat], rawId);
       if (seen.has(identifier)) {
         return;
       }
       seen.add(identifier);
 
-      const name = resolvePoiName(plain?.properties || {});
+      const name = resolvePoiName(feature.properties || {});
       const categoryLabel = definition.definition.label ?? DEFAULT_POI_TITLE;
       const tooltip = name
         ? (categoryLabel && categoryLabel !== name ? `${name} · ${categoryLabel}` : name)

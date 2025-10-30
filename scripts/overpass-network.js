@@ -3,6 +3,35 @@ const DEFAULT_NETWORK_RADIUS_METERS = 15000;
 export const PATH_RADIUS_METERS = DEFAULT_NETWORK_RADIUS_METERS;
 export const POI_RADIUS_METERS = DEFAULT_NETWORK_RADIUS_METERS;
 const MIN_COORDINATE_SPAN_EPSILON = 1e-9;
+const POI_FILTERS = Object.freeze([
+  'node["natural"="peak"]',
+  'node["natural"="volcano"]',
+  'node["natural"="saddle"]',
+  'node["natural"="mountain_pass"]',
+  'node["mountain_pass"="yes"]',
+  'node["tourism"="viewpoint"]',
+  'node["tourism"="alpine_hut"]',
+  'node["tourism"="wilderness_hut"]',
+  'node["tourism"="guest_house"]',
+  'node["tourism"="hostel"]',
+  'node["tourism"="hotel"]',
+  'node["amenity"="restaurant"]',
+  'node["amenity"="fast_food"]',
+  'node["amenity"="cafe"]',
+  'node["amenity"="bar"]',
+  'node["amenity"="pub"]',
+  'node["amenity"="parking"]',
+  'node["amenity"="shelter"]',
+  'node["building"="cabin"]',
+  'node["shelter_type"="cabin"]',
+  'way["amenity"="parking"]',
+  'relation["amenity"="parking"]',
+  'way["amenity"="shelter"]',
+  'relation["amenity"="shelter"]',
+  'way["building"="cabin"]',
+  'relation["building"="cabin"]'
+]);
+const POI_NAME_TAGS = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
 
 function normalizeNumber(value) {
   const numeric = Number(value);
@@ -77,12 +106,16 @@ export function getOverpassQuery(lat, lon, radiusMeters = PATH_RADIUS_METERS) {
   const latValue = toFixed(normalizedLat, 6);
   const lonValue = toFixed(normalizedLon, 6);
   const radiusValue = normalizeRadiusMeters(radiusMeters);
+  const poiFilters = POI_FILTERS
+    .map((filter) => `${filter}(around:${radiusValue},${latValue},${lonValue});`)
+    .join('\n  ');
   return `[out:json][timeout:180];
 (
   way["highway"]["highway"!="proposed"]["highway"!="construction"](around:${radiusValue},${latValue},${lonValue});
+  ${poiFilters}
 );
 (._;>;);
-out body;`;
+out body center;`;
 }
 
 const FORBIDDEN_ACCESS_VALUES = new Set(['no', 'private']);
@@ -105,6 +138,157 @@ const DRIVING_HIGHWAYS = new Set([
 const DRIVING_ONLY_HIGHWAYS = new Set(['motorway', 'motorway_link']);
 const CYCLING_AND_FOOT_HIGHWAYS = new Set(['cycleway', 'path', 'track', 'bridleway', 'byway']);
 const FOOT_ONLY_HIGHWAYS = new Set(['footway', 'pedestrian', 'steps', 'corridor', 'escalator']);
+
+const normalizePoiTagValue = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+
+function classifyPoiTags(tags = {}) {
+  const amenity = normalizePoiTagValue(tags.amenity);
+  const tourism = normalizePoiTagValue(tags.tourism);
+  const natural = normalizePoiTagValue(tags.natural);
+  const building = normalizePoiTagValue(tags.building);
+  const shelterType = normalizePoiTagValue(tags.shelter_type);
+  const mountainPass = normalizePoiTagValue(tags.mountain_pass);
+  const parkingType = normalizePoiTagValue(tags.parking);
+
+  if (natural === 'peak') {
+    return { key: 'peak' };
+  }
+  if (natural === 'volcano') {
+    return { key: 'volcano' };
+  }
+  if (natural === 'saddle') {
+    return { key: 'saddle' };
+  }
+  if (natural === 'mountain_pass' || mountainPass === 'yes' || mountainPass === 'true') {
+    return { key: 'mountain_pass' };
+  }
+  if (tourism === 'viewpoint') {
+    return { key: 'viewpoint' };
+  }
+  if (amenity === 'restaurant') {
+    return { key: 'restaurant' };
+  }
+  if (amenity === 'fast_food') {
+    return { key: 'fast_food' };
+  }
+  if (amenity === 'cafe') {
+    return { key: 'cafe' };
+  }
+  if (amenity === 'bar') {
+    return { key: 'bar' };
+  }
+  if (amenity === 'pub') {
+    return { key: 'pub' };
+  }
+  if (amenity === 'parking') {
+    if (parkingType === 'underground') {
+      return { key: 'parking_underground', class: 'parking' };
+    }
+    if (['multi-storey', 'multistorey', 'multi_storey', 'multi level', 'multi-level'].includes(parkingType)) {
+      return { key: 'parking_multi-storey', class: 'parking' };
+    }
+    return { key: 'parking', class: 'parking' };
+  }
+  if (amenity === 'shelter') {
+    if (['cabin', 'basic_hut', 'hut'].includes(shelterType)) {
+      return { key: 'cabin', class: 'shelter' };
+    }
+    return { key: 'shelter', class: 'shelter' };
+  }
+  if (tourism === 'alpine_hut') {
+    return { key: 'alpine_hut' };
+  }
+  if (tourism === 'wilderness_hut') {
+    return { key: 'wilderness_hut' };
+  }
+  if (tourism === 'guest_house') {
+    return { key: 'guest_house' };
+  }
+  if (tourism === 'hostel') {
+    return { key: 'hostel' };
+  }
+  if (tourism === 'hotel') {
+    return { key: 'hotel' };
+  }
+  if (building === 'cabin') {
+    return { key: 'cabin', class: 'shelter' };
+  }
+  if (shelterType === 'cabin') {
+    return { key: 'cabin', class: 'shelter' };
+  }
+  return null;
+}
+
+function extractPoiCoordinate(element) {
+  if (!element) {
+    return null;
+  }
+  if (element.type === 'node') {
+    return buildCoordinate(
+      element.lon ?? element.lng,
+      element.lat ?? element.latitude,
+      [element.tags?.ele, element.ele]
+    );
+  }
+  const center = element.center;
+  if (center) {
+    return buildCoordinate(
+      center.lon ?? center.lng,
+      center.lat ?? center.latitude,
+      [center.ele]
+    );
+  }
+  if (Array.isArray(element.geometry) && element.geometry.length) {
+    const first = element.geometry[0];
+    if (first) {
+      return buildCoordinate(
+        first.lon ?? first.lng ?? first[0],
+        first.lat ?? first[1],
+        [first.tags?.ele, first.ele]
+      );
+    }
+  }
+  return null;
+}
+
+function convertElementToPoiFeature(element) {
+  if (!element || typeof element !== 'object' || !element.tags) {
+    return null;
+  }
+  const classification = classifyPoiTags(element.tags);
+  if (!classification) {
+    return null;
+  }
+  const coordinates = extractPoiCoordinate(element);
+  if (!coordinates) {
+    return null;
+  }
+  const properties = {
+    class: classification.class ?? classification.key,
+    subclass: classification.key
+  };
+  if (element.id != null) {
+    properties.id = `${element.type || 'node'}/${element.id}`;
+    properties.osm_id = element.id;
+  }
+  POI_NAME_TAGS.forEach((tag) => {
+    const value = element.tags[tag];
+    if (typeof value === 'string' && value.trim()) {
+      properties[tag] = value.trim();
+    }
+  });
+  if (typeof element.tags.name === 'string' && element.tags.name.trim()) {
+    properties.name = element.tags.name.trim();
+  }
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'Point',
+      coordinates
+    },
+    properties
+  };
+}
 
 function normalizeTagValue(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -401,21 +585,32 @@ function collectNodes(elements) {
   return nodes;
 }
 
-function convertOverpassElementsToGeoJSON(elements) {
-  if (!Array.isArray(elements)) {
-    return { type: 'FeatureCollection', features: [] };
-  }
+function convertOverpassElements(elements) {
   const nodesById = collectNodes(elements);
-  const features = [];
+  const networkFeatures = [];
+  const poiFeatures = [];
+  if (!Array.isArray(elements)) {
+    return {
+      network: { type: 'FeatureCollection', features: [] },
+      pois: { type: 'FeatureCollection', features: [] }
+    };
+  }
   elements.forEach((element) => {
     if (element && element.type === 'way') {
       const feature = buildFeatureFromWay(element, nodesById);
       if (feature) {
-        features.push(feature);
+        networkFeatures.push(feature);
       }
     }
+    const poiFeature = convertElementToPoiFeature(element);
+    if (poiFeature) {
+      poiFeatures.push(poiFeature);
+    }
   });
-  return { type: 'FeatureCollection', features };
+  return {
+    network: { type: 'FeatureCollection', features: networkFeatures },
+    pois: { type: 'FeatureCollection', features: poiFeatures }
+  };
 }
 
 function metersToLatitudeDegrees(meters) {
@@ -505,9 +700,9 @@ export async function extractOverpassNetwork({
       }
       const payload = await response.json();
       const elements = Array.isArray(payload?.elements) ? payload.elements : [];
-      const network = convertOverpassElementsToGeoJSON(elements);
+      const { network, pois } = convertOverpassElements(elements);
       const coverageBounds = computeCoverageBounds({ lat, lon, radiusMeters: candidateRadius });
-      return { network, coverageBounds };
+      return { network, pois, coverageBounds };
     } catch (error) {
       if (signal?.aborted) {
         throw error;

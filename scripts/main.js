@@ -580,6 +580,7 @@ async function init() {
   let offlineNetworkCoverage = null;
   let offlineNetworkRefreshPromise = null;
   let offlineNetworkLoadingCount = 0;
+  let offlineNetworkPois = null;
 
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
@@ -1004,11 +1005,11 @@ async function init() {
         const centerLat = Number(mapCenter?.lat ?? mapCenter?.latitude ?? mapCenter?.[1]);
         const centerLon = Number(mapCenter?.lng ?? mapCenter?.lon ?? mapCenter?.longitude ?? mapCenter?.[0]);
 
-        let networkResult = { network: null, coverageBounds: null };
+        let networkResult = { network: null, coverageBounds: null, pois: null };
 
         if (preferOpenFreeMapNetwork) {
           const network = await extractOpenFreeMapNetwork(map, { targetBounds });
-          networkResult = { network, coverageBounds: null };
+          networkResult = { network, coverageBounds: null, pois: null };
         } else {
           let overpassCenter = Number.isFinite(centerLat) && Number.isFinite(centerLon)
             ? { lat: centerLat, lon: centerLon }
@@ -1035,6 +1036,10 @@ async function init() {
           debugNetworkData = debugDataset || network;
           const fallbackCoverage = boundsToPlain(targetBounds ?? fallbackBounds);
           offlineNetworkCoverage = coverageBounds ?? fallbackCoverage;
+          offlineNetworkPois = ensureFeatureCollection(networkResult.pois);
+          if (directionsManager && typeof directionsManager.setOfflinePointsOfInterest === 'function') {
+            directionsManager.setOfflinePointsOfInterest(offlineNetworkPois);
+          }
           if (debugNetworkVisible) {
             await applyDebugNetworkLayer();
           }
@@ -1206,6 +1211,9 @@ async function init() {
         const deferEnsureReady = initialRouter === offlineRouter
           && (!Array.isArray(directionsManager.waypoints) || directionsManager.waypoints.length === 0);
         directionsManager.setRouter(initialRouter, { deferEnsureReady });
+      }
+      if (typeof directionsManager.setOfflinePointsOfInterest === 'function') {
+        directionsManager.setOfflinePointsOfInterest(offlineNetworkPois);
       }
       directionsManager.setRouteSegmentsListener((payload) => {
         const isObject = payload && typeof payload === 'object';
