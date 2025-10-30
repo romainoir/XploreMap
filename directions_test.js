@@ -24,7 +24,7 @@ const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
-const POI_SEARCH_RADIUS_METERS = 250;
+const POI_SEARCH_RADIUS_METERS = 20;
 const DEFAULT_POI_COLOR = '#2d7bd6';
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
