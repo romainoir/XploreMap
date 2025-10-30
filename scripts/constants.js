@@ -18,7 +18,7 @@ export const COLOR_RELIEF_COLOR_RAMP = [
 ];
 export const S2_OPACITY = 0.50;
 export const VERSATILES_LOCAL_JSON = './osm_liberty.json';
-export const MAPLIBRE_SPRITE_URL = 'https://demotiles.maplibre.org/styles/osm-bright-gl-style/sprite';
+export const MAPLIBRE_SPRITE_URL = 'https://tiles.openfreemap.org/sprites/ofm_f384/ofm';
 export const S2C_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg';
 export const TILE_FADE_DURATION = 800;
 export const S2_FADE_DURATION = 700;
