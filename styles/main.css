@@ -367,8 +367,8 @@ html, body { margin:0; height:100%; }
 
 .profile-mode-menu__list {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  bottom: calc(100% + 8px);
+  left: 50%;
   display: none;
   flex-direction: column;
   gap: 4px;
@@ -379,6 +379,8 @@ html, body { margin:0; height:100%; }
   border: 1px solid rgba(17, 34, 48, 0.12);
   backdrop-filter: blur(12px);
   z-index: 5;
+  transform: translateX(-50%);
+  min-width: 100%;
 }
 
 .profile-mode-menu__list--open {
@@ -564,6 +566,10 @@ html, body { margin:0; height:100%; }
 }
 
 .directions-dock[aria-hidden="false"] {
+  pointer-events: none;
+}
+
+.directions-dock[aria-hidden="false"] .directions-control {
   pointer-events: auto;
 }
 
