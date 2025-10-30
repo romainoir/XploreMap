@@ -119,6 +119,68 @@
           <img data-icon-id="gpx-export" alt="" aria-hidden="true" loading="lazy" decoding="async" />
           <span class="sr-only">Export GPX</span>
         </button>
+        <div class="profile-mode-controls">
+          <div class="profile-mode-menu" aria-live="polite">
+            <button
+              id="profileModeToggle"
+              class="profile-mode-button"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="profileModeMenuList"
+            >
+              <span class="profile-mode-button__icon" aria-hidden="true">
+                <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
+              </span>
+              <span class="profile-mode-button__label">None</span>
+              <span class="sr-only">Toggle overlay mode</span>
+            </button>
+            <div
+              id="profileModeMenuList"
+              class="profile-mode-menu__list"
+              role="menu"
+              tabindex="-1"
+              aria-hidden="true"
+            >
+              <button
+                type="button"
+                class="profile-mode-menu__item active"
+                data-profile-mode="none"
+                role="menuitemradio"
+                aria-checked="true"
+              >
+                <span class="profile-mode-menu__text">None</span>
+              </button>
+              <button
+                type="button"
+                class="profile-mode-menu__item"
+                data-profile-mode="slope"
+                role="menuitemradio"
+                aria-checked="false"
+              >
+                <span class="profile-mode-menu__text">Slope</span>
+              </button>
+              <button
+                type="button"
+                class="profile-mode-menu__item"
+                data-profile-mode="surface"
+                role="menuitemradio"
+                aria-checked="false"
+              >
+                <span class="profile-mode-menu__text">Surface</span>
+              </button>
+              <button
+                type="button"
+                class="profile-mode-menu__item"
+                data-profile-mode="category"
+                role="menuitemradio"
+                aria-checked="false"
+              >
+                <span class="profile-mode-menu__text">Category</span>
+              </button>
+            </div>
+          </div>
+        </div>
         <button
           id="routingModeToggle"
           class="btn btn--icon btn--icon-only routing-mode-toggle"
@@ -174,75 +236,13 @@
           </div>
           <div class="chart-card__meta">
             <div id="routeStats" class="route-stats" aria-live="polite"></div>
-            <div class="profile-mode-controls">
-              <div class="profile-mode-menu" aria-live="polite">
-                <button
-                  id="profileModeToggle"
-                  class="profile-mode-button"
-                  type="button"
-                  aria-haspopup="true"
-                  aria-expanded="false"
-                  aria-controls="profileModeMenuList"
-                >
-                  <span class="profile-mode-button__icon" aria-hidden="true">
-                    <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
-                  </span>
-                  <span class="profile-mode-button__label">None</span>
-                  <span class="sr-only">Toggle overlay mode</span>
-                </button>
-                <div
-                  id="profileModeMenuList"
-                  class="profile-mode-menu__list"
-                  role="menu"
-                  tabindex="-1"
-                  aria-hidden="true"
-                >
-                  <button
-                    type="button"
-                    class="profile-mode-menu__item active"
-                    data-profile-mode="none"
-                    role="menuitemradio"
-                    aria-checked="true"
-                  >
-                    <span class="profile-mode-menu__text">None</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="profile-mode-menu__item"
-                    data-profile-mode="slope"
-                    role="menuitemradio"
-                    aria-checked="false"
-                  >
-                    <span class="profile-mode-menu__text">Slope</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="profile-mode-menu__item"
-                    data-profile-mode="surface"
-                    role="menuitemradio"
-                    aria-checked="false"
-                  >
-                    <span class="profile-mode-menu__text">Surface</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="profile-mode-menu__item"
-                    data-profile-mode="category"
-                    role="menuitemradio"
-                    aria-checked="false"
-                  >
-                    <span class="profile-mode-menu__text">Category</span>
-                  </button>
-                </div>
-              </div>
-              <div
-                id="profileLegend"
-                class="profile-legend"
-                role="group"
-                aria-label="Route overlay legend"
-                aria-hidden="true"
-              ></div>
-            </div>
+            <div
+              id="profileLegend"
+              class="profile-legend"
+              role="group"
+              aria-label="Route overlay legend"
+              aria-hidden="true"
+            ></div>
           </div>
         </div>
         <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>

@@ -1378,12 +1378,14 @@ export class DirectionsManager {
     if (!shouldDisplay) {
       this.profileLegend.innerHTML = '';
       this.profileLegend.setAttribute('aria-hidden', 'true');
+      this.profileLegend.classList.remove('profile-legend--gradient');
       return;
     }
     const entries = this.getProfileLegendEntries(this.profileMode);
     if (!entries.length) {
       this.profileLegend.innerHTML = '';
       this.profileLegend.setAttribute('aria-hidden', 'true');
+      this.profileLegend.classList.remove('profile-legend--gradient');
       return;
     }
     const fallbackColor = this.modeColors?.[this.currentMode] ?? '#3ab7c6';
@@ -1397,6 +1399,58 @@ export class DirectionsManager {
       }
       return fallbackColor;
     };
+    const isGradientMode = this.profileMode === 'slope';
+    this.profileLegend.classList.toggle('profile-legend--gradient', isGradientMode);
+    this.profileLegend.innerHTML = '';
+    if (isGradientMode) {
+      const totalStops = entries.length - 1;
+      const gradientStops = entries
+        .map((entry, index) => {
+          const color = normalizeColor(entry.color);
+          if (totalStops <= 0) {
+            return `${color} 0%`;
+          }
+          const percentage = (index / totalStops) * 100;
+          const clamped = Number.isFinite(percentage) ? Math.max(0, Math.min(percentage, 100)) : 0;
+          return `${color} ${clamped.toFixed(2)}%`;
+        });
+      const gradientBar = document.createElement('div');
+      gradientBar.className = 'profile-legend__gradient-bar';
+      const gradientTrack = document.createElement('div');
+      gradientTrack.className = 'profile-legend__gradient-track';
+      if (gradientStops.length) {
+        gradientTrack.style.setProperty('--profile-gradient', `linear-gradient(90deg, ${gradientStops.join(', ')})`);
+      }
+      gradientBar.appendChild(gradientTrack);
+      const labelsWrapper = document.createElement('div');
+      labelsWrapper.className = 'profile-legend__gradient-labels';
+      const extractRangeLabel = (entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return '';
+        }
+        if (typeof entry.label === 'string') {
+          const match = entry.label.match(/\(([^)]+)\)/);
+          if (match && match[1]) {
+            return match[1];
+          }
+          return entry.label;
+        }
+        if (typeof entry.key === 'string') {
+          return entry.key;
+        }
+        return '';
+      };
+      entries.forEach((entry) => {
+        const labelElement = document.createElement('span');
+        labelElement.className = 'profile-legend__gradient-label';
+        labelElement.textContent = extractRangeLabel(entry);
+        labelsWrapper.appendChild(labelElement);
+      });
+      this.profileLegend.appendChild(gradientBar);
+      this.profileLegend.appendChild(labelsWrapper);
+      this.profileLegend.setAttribute('aria-hidden', 'false');
+      return;
+    }
     const items = entries
       .map((entry) => {
         const color = normalizeColor(entry.color);
