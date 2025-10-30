@@ -25,6 +25,16 @@ const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
 const POI_SEARCH_RADIUS_METERS = 20;
+const POI_CATEGORY_DISTANCE_OVERRIDES = Object.freeze({
+  peak: 750,
+  volcano: 750,
+  mountain_pass: 500,
+  saddle: 500
+});
+const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
+  POI_SEARCH_RADIUS_METERS,
+  ...Object.values(POI_CATEGORY_DISTANCE_OVERRIDES)
+);
 const DEFAULT_POI_COLOR = '#2d7bd6';
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
@@ -372,7 +382,7 @@ function convertOverpassElementToFeature(element) {
 }
 
 async function fetchOverpassRoutePois(line, {
-  bufferMeters = POI_SEARCH_RADIUS_METERS,
+  bufferMeters = POI_MAX_SEARCH_RADIUS_METERS,
   endpoint = POI_FALLBACK_ENDPOINT,
   signal
 } = {}) {
@@ -7196,7 +7206,7 @@ export class DirectionsManager {
       }
       try {
         const fallbackFeatures = await fetchOverpassRoutePois(line, {
-          bufferMeters: POI_SEARCH_RADIUS_METERS,
+          bufferMeters: POI_MAX_SEARCH_RADIUS_METERS,
           signal: abortController?.signal
         });
         if (this.pendingPoiRequest !== requestToken) {
@@ -7254,8 +7264,12 @@ export class DirectionsManager {
       if (!Number.isFinite(distanceKm) || !Number.isFinite(distanceToLineKm)) {
         return;
       }
+      const categoryKey = typeof definition?.key === 'string' ? definition.key : '';
+      const maxDistanceMeters = Number.isFinite(POI_CATEGORY_DISTANCE_OVERRIDES[categoryKey])
+        ? Math.max(0, POI_CATEGORY_DISTANCE_OVERRIDES[categoryKey])
+        : POI_SEARCH_RADIUS_METERS;
       const distanceMeters = distanceToLineKm * 1000;
-      if (!Number.isFinite(distanceMeters) || distanceMeters > POI_SEARCH_RADIUS_METERS) {
+      if (!Number.isFinite(distanceMeters) || distanceMeters > maxDistanceMeters) {
         return;
       }
       const rawId = feature?.properties?.id
