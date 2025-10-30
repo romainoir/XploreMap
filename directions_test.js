@@ -7295,6 +7295,20 @@ export class DirectionsManager {
             }
             const title = poi?.title ?? poi?.name ?? poi?.categoryLabel ?? DEFAULT_POI_TITLE;
             const safeTitle = escapeHtml(title);
+            const rawLabel = (() => {
+              const nameValue = typeof poi?.name === 'string' ? poi.name.trim() : '';
+              if (nameValue) {
+                return nameValue;
+              }
+              const categoryValue = typeof poi?.categoryLabel === 'string'
+                ? poi.categoryLabel.trim()
+                : '';
+              if (categoryValue) {
+                return categoryValue;
+              }
+              return DEFAULT_POI_TITLE;
+            })();
+            const safeLabel = escapeHtml(rawLabel);
             const colorValue = typeof poi?.color === 'string' && poi.color.trim()
               ? poi.color.trim()
               : DEFAULT_POI_COLOR;
@@ -7316,6 +7330,9 @@ export class DirectionsManager {
             if (!icon || typeof icon.url !== 'string' || !icon.url) {
               return null;
             }
+            const labelMarkup = safeLabel
+              ? `<span class="elevation-marker__label">${safeLabel}</span>`
+              : '';
             return `
               <div
                 class="elevation-marker poi"
@@ -7324,6 +7341,7 @@ export class DirectionsManager {
                 title="${safeTitle}"
                 aria-label="${safeTitle}"
               >
+                ${labelMarkup}
                 <img
                   class="elevation-marker__icon"
                   src="${icon.url}"
