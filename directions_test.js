@@ -24,17 +24,17 @@ const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
-const POI_SEARCH_RADIUS_METERS = 10;
+const POI_SEARCH_RADIUS_METERS = 50;
 const POI_CATEGORY_DISTANCE_OVERRIDES = Object.freeze({
-  peak: 200,
+  peak: 50,
   volcano: 200,
-  mountain_pass: 150,
-  saddle: 150,
-  alpine_hut: 250,
-  wilderness_hut: 250,
-  hut: 250,
-  cabin: 250,
-  shelter: 150
+  mountain_pass: 50,
+  saddle: 50,
+  alpine_hut: 50,
+  wilderness_hut: 100,
+  hut: 100,
+  cabin: 100,
+  shelter: 100
 });
 const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
   POI_SEARCH_RADIUS_METERS,
