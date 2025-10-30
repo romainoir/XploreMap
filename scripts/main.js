@@ -3,6 +3,7 @@ import {
   BASE_STYLE_RELIEF_OPACITY,
   DEFAULT_3D_ORIENTATION,
   RELIEF_OPACITY,
+  MAPLIBRE_SPRITE_URL,
   S2C_URL,
   S2_FADE_DURATION,
   S2_OPACITY,
@@ -471,7 +472,7 @@ async function init() {
 
   const versaStyle = await fetch(VERSATILES_LOCAL_JSON, { cache: 'no-store' }).then(r => r.json());
   versaStyle.glyphs = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
-  if ('sprite' in versaStyle) delete versaStyle.sprite;
+  versaStyle.sprite = MAPLIBRE_SPRITE_URL;
 
   const map = new maplibregl.Map({
     container: 'map',
