@@ -1763,10 +1763,21 @@ export class DirectionsManager {
         });
       };
 
+      const shouldPropagateClassification = (entry) => {
+        if (!entry || !entry.segment || !isUnknownClassification(entry.classification)) {
+          return false;
+        }
+        const metadataSource = entry.segment?.metadata?.source;
+        if (isConnectorMetadataSource(metadataSource)) {
+          return true;
+        }
+        return touchesWaypoint(entry.segment);
+      };
+
       const propagateNeighborClassification = () => {
         let changed = false;
         segmentEntries.forEach((entry, index) => {
-          if (!entry || !entry.segment || !isUnknownClassification(entry.classification)) {
+          if (!shouldPropagateClassification(entry)) {
             return;
           }
           const previous = index > 0 ? segmentEntries[index - 1] : null;
