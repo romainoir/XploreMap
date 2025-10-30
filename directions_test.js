@@ -366,7 +366,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   UNKNOWN_CATEGORY_CLASSIFICATION,
   {
     key: 'category-t1',
-    label: 'T1 · Easy hike',
+    label: 'Easy Hike',
     color: '#a8f0c5',
     maxMultiplier: 1,
     maxGrade: 8,
@@ -374,7 +374,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'category-t2',
-    label: 'T2 · Mountain trail',
+    label: 'Mountain Trail',
     color: '#27ae60',
     maxMultiplier: 1.1,
     maxGrade: 12,
@@ -382,7 +382,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'category-t3',
-    label: 'T3 · Alpine hike',
+    label: 'Alpine Hike',
     color: '#f7d774',
     maxMultiplier: 1.2,
     maxGrade: 18,
@@ -390,14 +390,14 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'category-t4',
-    label: 'T4 · Alpine route',
+    label: 'Alpine Route',
     color: '#e67e22',
     maxMultiplier: 1.35,
     sacScaleValues: Object.freeze(['alpine_hiking'])
   },
   {
     key: 'category-t5',
-    label: 'T5+ · Technical alpine',
+    label: 'Technical Alpine',
     color: '#4a0404',
     sacScaleValues: Object.freeze(['demanding_alpine_hiking', 'difficult_alpine_hiking'])
   }
@@ -422,7 +422,7 @@ const PROFILE_MODE_DEFINITIONS = Object.freeze({
   none: { key: 'none', label: 'None' },
   slope: { key: 'slope', label: 'Slope' },
   surface: { key: 'surface', label: 'Surface' },
-  category: { key: 'category', label: 'Category' }
+  category: { key: 'category', label: 'Difficulty' }
 });
 
 const PROFILE_GRADIENT_MODES = Object.freeze(['slope', 'surface']);
@@ -7157,7 +7157,7 @@ export class DirectionsManager {
     let detailMarkup = '';
     if (profileSegment?.name) {
       const definition = this.getProfileModeDefinition(this.profileMode);
-      const modeLabel = escapeHtml(definition?.label ?? 'Category');
+      const modeLabel = escapeHtml(definition?.label ?? 'Difficulty');
       const segmentLabel = escapeHtml(profileSegment.name);
       detailMarkup = `<span class="profile">${modeLabel}: ${segmentLabel}</span>`;
     }
