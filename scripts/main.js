@@ -585,6 +585,8 @@ async function init() {
   const DEBUG_NETWORK_SOURCE_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_LAYER_ID = 'offline-router-network-debug';
   const DEBUG_NETWORK_INTERSECTIONS_LAYER_ID = 'offline-router-network-debug-intersections';
+  const DEBUG_NETWORK_POIS_SOURCE_ID = 'offline-router-network-pois';
+  const DEBUG_NETWORK_POIS_LAYER_ID = 'offline-router-network-pois';
   const DEBUG_NETWORK_SAC_SCALE_COLOR_EXPRESSION = Object.freeze([
     'let',
     'sacScale',
@@ -607,6 +609,38 @@ async function init() {
       '#d0d4db'
     ]
   ]);
+  const DEBUG_NETWORK_POI_COLOR_EXPRESSION = Object.freeze([
+    'match',
+    [
+      'coalesce',
+      ['get', 'subclass'],
+      ['get', 'class'],
+      ''
+    ],
+    'peak', '#2d7bd6',
+    'volcano', '#2d7bd6',
+    'mountain_pass', '#4a6d8c',
+    'saddle', '#4a6d8c',
+    'viewpoint', '#35a3ad',
+    'restaurant', '#d97706',
+    'fast_food', '#d97706',
+    'cafe', '#d97706',
+    'bar', '#b45309',
+    'pub', '#b45309',
+    'parking', '#4b5563',
+    'parking_underground', '#4b5563',
+    'parking_multi-storey', '#4b5563',
+    'parking_multistorey', '#4b5563',
+    'parking_multi_storey', '#4b5563',
+    'alpine_hut', '#68b723',
+    'wilderness_hut', '#68b723',
+    'cabin', '#68b723',
+    'shelter', '#68b723',
+    'hostel', '#68b723',
+    'guest_house', '#68b723',
+    'hotel', '#68b723',
+    '#2d7bd6'
+  ]);
   let debugNetworkVisible = false;
   let debugNetworkData = null;
   let directionsManager = null;
@@ -620,6 +654,9 @@ async function init() {
     }
     if (map.getLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID)) {
       map.moveLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID);
+    }
+    if (map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
+      map.moveLayer(DEBUG_NETWORK_POIS_LAYER_ID);
     }
   };
 
@@ -839,6 +876,56 @@ async function init() {
     if (map.getLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID)) {
       map.setLayoutProperty(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID, 'visibility', 'visible');
     }
+    const poiCollection = offlineNetworkPois;
+    const emptyCollection = { type: 'FeatureCollection', features: [] };
+    const hasPois = Array.isArray(poiCollection?.features) && poiCollection.features.length > 0;
+    if (!map.getSource(DEBUG_NETWORK_POIS_SOURCE_ID)) {
+      map.addSource(DEBUG_NETWORK_POIS_SOURCE_ID, {
+        type: 'geojson',
+        data: hasPois ? poiCollection : emptyCollection
+      });
+    } else {
+      map.getSource(DEBUG_NETWORK_POIS_SOURCE_ID).setData(hasPois ? poiCollection : emptyCollection);
+    }
+    if (hasPois) {
+      if (!map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
+        map.addLayer({
+          id: DEBUG_NETWORK_POIS_LAYER_ID,
+          type: 'circle',
+          source: DEBUG_NETWORK_POIS_SOURCE_ID,
+          filter: ['==', ['geometry-type'], 'Point'],
+          paint: {
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              8,
+              2.2,
+              12,
+              3.4,
+              15,
+              5.4
+            ],
+            'circle-color': DEBUG_NETWORK_POI_COLOR_EXPRESSION,
+            'circle-stroke-color': '#0f172a',
+            'circle-stroke-width': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              8,
+              0.4,
+              15,
+              1.1
+            ],
+            'circle-opacity': 0.9,
+            'circle-stroke-opacity': 0.95
+          }
+        });
+      }
+      map.setLayoutProperty(DEBUG_NETWORK_POIS_LAYER_ID, 'visibility', 'visible');
+    } else if (map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
+      map.setLayoutProperty(DEBUG_NETWORK_POIS_LAYER_ID, 'visibility', 'none');
+    }
     bringDebugNetworkToFront();
     return true;
   };
@@ -849,6 +936,9 @@ async function init() {
     }
     if (map.getLayer(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID)) {
       map.setLayoutProperty(DEBUG_NETWORK_INTERSECTIONS_LAYER_ID, 'visibility', 'none');
+    }
+    if (map.getLayer(DEBUG_NETWORK_POIS_LAYER_ID)) {
+      map.setLayoutProperty(DEBUG_NETWORK_POIS_LAYER_ID, 'visibility', 'none');
     }
   };
 
