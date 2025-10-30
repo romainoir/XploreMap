@@ -1769,6 +1769,10 @@ export class DirectionsManager {
           if (!entry || !entry.segment || !isUnknownClassification(entry.classification)) {
             return;
           }
+          const metadataSource = entry.segment?.metadata?.source;
+          if (!isConnectorMetadataSource(metadataSource)) {
+            return;
+          }
           const previous = index > 0 ? segmentEntries[index - 1] : null;
           if (previous && previous.segment && !isUnknownClassification(previous.classification)
             && segmentsShareBoundary(entry.segment, previous.segment)) {
@@ -1807,6 +1811,10 @@ export class DirectionsManager {
       if (waypointCoordinates.length) {
         segmentEntries.forEach((entry, index) => {
           if (!entry || !entry.segment) {
+            return;
+          }
+          const metadataSource = entry.segment?.metadata?.source;
+          if (!isConnectorMetadataSource(metadataSource)) {
             return;
           }
           if (!isUnknownClassification(entry.classification)) {
