@@ -5910,7 +5910,7 @@ export class DirectionsManager {
       const metadataEntries = Array.isArray(segmentMetadataSource[waypointIndex])
         ? segmentMetadataSource[waypointIndex]
             .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
-            .filter(Boolean)
+            .filter((entry) => entry && !isConnectorMetadataSource(entry.source))
         : [];
 
       segments.set(waypointIndex, {
@@ -6036,6 +6036,12 @@ export class DirectionsManager {
       const duration = Number.isFinite(segment.duration) ? Number(segment.duration) : null;
       const ascent = Number.isFinite(segment.ascent) ? Number(segment.ascent) : null;
       const descent = Number.isFinite(segment.descent) ? Number(segment.descent) : null;
+      const metadata = Array.isArray(segment.metadata)
+        ? segment.metadata
+            .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
+            .filter((entry) => entry && !isConnectorMetadataSource(entry.source))
+        : [];
+
       preserved.push({
         startIndex,
         endIndex,
@@ -6044,9 +6050,7 @@ export class DirectionsManager {
         duration,
         ascent,
         descent,
-        metadata: Array.isArray(segment.metadata)
-          ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
-          : []
+        metadata
       });
     }
 
