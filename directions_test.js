@@ -355,7 +355,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   {
     key: 'category-t1',
     label: 'T1 · Easy hike',
-    color: '#2ecc71',
+    color: '#a8f0c5',
     maxMultiplier: 1,
     maxGrade: 8,
     sacScaleValues: Object.freeze(['hiking'])
@@ -371,7 +371,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   {
     key: 'category-t3',
     label: 'T3 · Alpine hike',
-    color: '#f39c12',
+    color: '#f7d774',
     maxMultiplier: 1.2,
     maxGrade: 18,
     sacScaleValues: Object.freeze(['demanding_mountain_hiking'])
@@ -386,7 +386,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   {
     key: 'category-t5',
     label: 'T5+ · Technical alpine',
-    color: '#c0392b',
+    color: '#4a0404',
     sacScaleValues: Object.freeze(['demanding_alpine_hiking', 'difficult_alpine_hiking'])
   }
 ]);
