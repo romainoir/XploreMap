@@ -227,6 +227,18 @@ function normalizeSurfaceType(value) {
   return normalized.toLowerCase().replace(/\s+/g, '_');
 }
 
+function normalizeCoordinatePair(coord) {
+  if (!Array.isArray(coord) || coord.length < 2) {
+    return null;
+  }
+  const lng = Number(coord[0]);
+  const lat = Number(coord[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return null;
+  }
+  return [lng, lat];
+}
+
 function formatTagLabel(value) {
   if (typeof value !== 'string' || !value.trim()) {
     return null;
@@ -438,6 +450,18 @@ function cloneClassificationEntry(entry) {
     return null;
   }
   return { ...entry };
+}
+
+function isUnknownCategoryClassification(classification) {
+  if (!classification || typeof classification !== 'object') {
+    return true;
+  }
+  const key = typeof classification.key === 'string' ? classification.key : '';
+  if (UNKNOWN_CATEGORY_CLASSIFICATION?.key && key === UNKNOWN_CATEGORY_CLASSIFICATION.key) {
+    return true;
+  }
+  const color = typeof classification.color === 'string' ? classification.color.trim() : '';
+  return !color;
 }
 
 function loadBivouacMarkerImageElement() {
@@ -1641,6 +1665,166 @@ export class DirectionsManager {
     }
   }
 
+  getWaypointCoordinates() {
+    if (!Array.isArray(this.waypoints)) {
+      return [];
+    }
+    return this.waypoints.map((coord) => normalizeCoordinatePair(coord)).filter(Boolean);
+  }
+
+  segmentTouchesWaypoint(segment, waypointCoordinates = this.getWaypointCoordinates()) {
+    if (!segment || !Array.isArray(waypointCoordinates) || !waypointCoordinates.length) {
+      return false;
+    }
+    const start = Array.isArray(segment.start) ? segment.start : null;
+    const end = Array.isArray(segment.end) ? segment.end : null;
+    if (!start && !end) {
+      return false;
+    }
+    return waypointCoordinates.some((waypoint) => {
+      if (!Array.isArray(waypoint) || waypoint.length < 2) {
+        return false;
+      }
+      if (start && this.coordinatesMatch(start, waypoint)) {
+        return true;
+      }
+      return end ? this.coordinatesMatch(end, waypoint) : false;
+    });
+  }
+
+  segmentsShareBoundary(first, second) {
+    if (!first || !second) {
+      return false;
+    }
+    const boundaries = [
+      Array.isArray(first.start) ? first.start : null,
+      Array.isArray(first.end) ? first.end : null
+    ];
+    const comparison = [
+      Array.isArray(second.start) ? second.start : null,
+      Array.isArray(second.end) ? second.end : null
+    ];
+    return boundaries.some((candidate) => {
+      if (!candidate) {
+        return false;
+      }
+      return comparison.some((other) => other && this.coordinatesMatch(candidate, other));
+    });
+  }
+
+  resolveCategorySegmentEntries(segmentEntries) {
+    if (!Array.isArray(segmentEntries) || !segmentEntries.length) {
+      return Array.isArray(segmentEntries) ? segmentEntries : [];
+    }
+
+    const resolved = segmentEntries.map((entry) => {
+      if (!entry) {
+        return null;
+      }
+      const segment = entry.segment ?? null;
+      const classification = entry.classification ? cloneClassificationEntry(entry.classification) : null;
+      return { segment, classification };
+    });
+
+    const waypointCoordinates = this.getWaypointCoordinates();
+
+    const findNeighborClassification = (startIndex, step) => {
+      let index = startIndex + step;
+      while (index >= 0 && index < resolved.length) {
+        const candidate = resolved[index];
+        if (!candidate || !candidate.segment) {
+          index += step;
+          continue;
+        }
+        const { classification } = candidate;
+        if (!classification || isUnknownCategoryClassification(classification)) {
+          index += step;
+          continue;
+        }
+        return classification;
+      }
+      return null;
+    };
+
+    const assignClassification = (entry, classification) => {
+      if (!entry || !classification) {
+        return;
+      }
+      entry.classification = cloneClassificationEntry(classification);
+    };
+
+    resolved.forEach((entry, index) => {
+      if (!entry || !entry.segment) {
+        return;
+      }
+      const metadataSource = entry.segment?.metadata?.source;
+      if (!isConnectorMetadataSource(metadataSource)) {
+        return;
+      }
+      if (!isUnknownCategoryClassification(entry.classification)) {
+        return;
+      }
+      const fallback = findNeighborClassification(index, -1) ?? findNeighborClassification(index, 1);
+      if (fallback) {
+        assignClassification(entry, fallback);
+      }
+    });
+
+    if (waypointCoordinates.length) {
+      resolved.forEach((entry, index) => {
+        if (!entry || !entry.segment) {
+          return;
+        }
+        const metadataSource = entry.segment?.metadata?.source;
+        if (!isConnectorMetadataSource(metadataSource)) {
+          return;
+        }
+        if (!isUnknownCategoryClassification(entry.classification)) {
+          return;
+        }
+        if (!this.segmentTouchesWaypoint(entry.segment, waypointCoordinates)) {
+          return;
+        }
+        const fallback = findNeighborClassification(index, -1) ?? findNeighborClassification(index, 1);
+        if (fallback) {
+          assignClassification(entry, fallback);
+        }
+      });
+    }
+
+    let updated = true;
+    while (updated) {
+      updated = false;
+      resolved.forEach((entry, index) => {
+        if (!entry || !entry.segment) {
+          return;
+        }
+        const metadataSource = entry.segment?.metadata?.source;
+        if (!isConnectorMetadataSource(metadataSource)) {
+          return;
+        }
+        if (!isUnknownCategoryClassification(entry.classification)) {
+          return;
+        }
+        const previous = index > 0 ? resolved[index - 1] : null;
+        if (previous && previous.segment && !isUnknownCategoryClassification(previous.classification)
+          && this.segmentsShareBoundary(entry.segment, previous.segment)) {
+          assignClassification(entry, previous.classification);
+          updated = true;
+          return;
+        }
+        const next = index + 1 < resolved.length ? resolved[index + 1] : null;
+        if (next && next.segment && !isUnknownCategoryClassification(next.classification)
+          && this.segmentsShareBoundary(entry.segment, next.segment)) {
+          assignClassification(entry, next.classification);
+          updated = true;
+        }
+      });
+    }
+
+    return resolved;
+  }
+
   updateProfileSegments() {
     if (this.profileMode === 'none'
       || !Array.isArray(this.routeSegments)
@@ -1664,7 +1848,7 @@ export class DirectionsManager {
       list.push(coord);
     };
 
-    const segmentEntries = this.routeSegments.map((segment) => {
+    let segmentEntries = this.routeSegments.map((segment) => {
       if (!segment) {
         return null;
       }
@@ -1675,166 +1859,7 @@ export class DirectionsManager {
     });
 
     if (this.profileMode === 'category' && segmentEntries.length) {
-      const unknownKey = UNKNOWN_CATEGORY_CLASSIFICATION?.key;
-      const isUnknownClassification = (classification) => {
-        if (!classification) {
-          return true;
-        }
-        const key = typeof classification.key === 'string' ? classification.key : '';
-        if (unknownKey && key === unknownKey) {
-          return true;
-        }
-        const color = typeof classification.color === 'string' ? classification.color.trim() : '';
-        return !color;
-      };
-
-      const findNeighborClassification = (startIndex, step) => {
-        let index = startIndex + step;
-        while (index >= 0 && index < segmentEntries.length) {
-          const entry = segmentEntries[index];
-          if (!entry || !entry.segment) {
-            index += step;
-            continue;
-          }
-          const classification = entry.classification;
-          if (!classification || isUnknownClassification(classification)) {
-            index += step;
-            continue;
-          }
-          return classification;
-        }
-        return null;
-      };
-
-      const waypointCoordinates = Array.isArray(this.waypoints)
-        ? this.waypoints
-            .map((coord) => {
-              if (!Array.isArray(coord) || coord.length < 2) {
-                return null;
-              }
-              const lng = Number(coord[0]);
-              const lat = Number(coord[1]);
-              if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-                return null;
-              }
-              return [lng, lat];
-            })
-            .filter(Boolean)
-        : [];
-
-      const touchesWaypoint = (segment) => {
-        if (!segment || !waypointCoordinates.length) {
-          return false;
-        }
-        const start = Array.isArray(segment.start) ? segment.start : null;
-        const end = Array.isArray(segment.end) ? segment.end : null;
-        if (!start && !end) {
-          return false;
-        }
-        return waypointCoordinates.some((waypoint) => {
-          if (!Array.isArray(waypoint) || waypoint.length < 2) {
-            return false;
-          }
-          const matchesStart = start && this.coordinatesMatch(start, waypoint);
-          if (matchesStart) {
-            return true;
-          }
-          return end ? this.coordinatesMatch(end, waypoint) : false;
-        });
-      };
-
-      const segmentsShareBoundary = (first, second) => {
-        if (!first || !second) {
-          return false;
-        }
-        const coords = [
-          Array.isArray(first.start) ? first.start : null,
-          Array.isArray(first.end) ? first.end : null
-        ];
-        const other = [
-          Array.isArray(second.start) ? second.start : null,
-          Array.isArray(second.end) ? second.end : null
-        ];
-        return coords.some((candidate) => {
-          if (!candidate) {
-            return false;
-          }
-          return other.some((comparison) => comparison && this.coordinatesMatch(candidate, comparison));
-        });
-      };
-
-      const propagateNeighborClassification = () => {
-        let changed = false;
-        segmentEntries.forEach((entry, index) => {
-          if (!entry || !entry.segment || !isUnknownClassification(entry.classification)) {
-            return;
-          }
-          const metadataSource = entry.segment?.metadata?.source;
-          if (!isConnectorMetadataSource(metadataSource)) {
-            return;
-          }
-          const previous = index > 0 ? segmentEntries[index - 1] : null;
-          if (previous && previous.segment && !isUnknownClassification(previous.classification)
-            && segmentsShareBoundary(entry.segment, previous.segment)) {
-            entry.classification = cloneClassificationEntry(previous.classification);
-            changed = true;
-            return;
-          }
-          const next = index + 1 < segmentEntries.length ? segmentEntries[index + 1] : null;
-          if (next && next.segment && !isUnknownClassification(next.classification)
-            && segmentsShareBoundary(entry.segment, next.segment)) {
-            entry.classification = cloneClassificationEntry(next.classification);
-            changed = true;
-          }
-        });
-        return changed;
-      };
-
-      segmentEntries.forEach((entry, index) => {
-        if (!entry || !entry.segment) {
-          return;
-        }
-        const metadataSource = entry.segment?.metadata?.source;
-        if (!isConnectorMetadataSource(metadataSource)) {
-          return;
-        }
-        if (!isUnknownClassification(entry.classification)) {
-          return;
-        }
-        const fallbackClassification = findNeighborClassification(index, -1)
-          ?? findNeighborClassification(index, 1);
-        if (fallbackClassification) {
-          entry.classification = cloneClassificationEntry(fallbackClassification);
-        }
-      });
-
-      if (waypointCoordinates.length) {
-        segmentEntries.forEach((entry, index) => {
-          if (!entry || !entry.segment) {
-            return;
-          }
-          const metadataSource = entry.segment?.metadata?.source;
-          if (!isConnectorMetadataSource(metadataSource)) {
-            return;
-          }
-          if (!isUnknownClassification(entry.classification)) {
-            return;
-          }
-          if (!touchesWaypoint(entry.segment)) {
-            return;
-          }
-          const fallbackClassification = findNeighborClassification(index, -1)
-            ?? findNeighborClassification(index, 1);
-          if (fallbackClassification) {
-            entry.classification = cloneClassificationEntry(fallbackClassification);
-          }
-        });
-      }
-
-      let updated = true;
-      while (updated) {
-        updated = propagateNeighborClassification();
-      }
+      segmentEntries = this.resolveCategorySegmentEntries(segmentEntries);
     }
 
     segmentEntries.forEach((entry) => {
@@ -3105,40 +3130,22 @@ export class DirectionsManager {
     const fallbackFeatures = [];
     const normalizedSegments = [];
 
-    const waypointCoordinates = Array.isArray(this.waypoints)
-      ? this.waypoints
-          .map((coord) => {
-            if (!Array.isArray(coord) || coord.length < 2) {
-              return null;
-            }
-            const lng = Number(coord[0]);
-            const lat = Number(coord[1]);
-            if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-              return null;
-            }
-            return [lng, lat];
-          })
-          .filter(Boolean)
-      : [];
-
+    const waypointCoordinates = this.getWaypointCoordinates();
     const waypointMatchCache = new Map();
     const coordinatesNearWaypoint = (candidate) => {
       if (!waypointCoordinates.length) {
         return false;
       }
-      if (!Array.isArray(candidate) || candidate.length < 2) {
+      const normalized = normalizeCoordinatePair(candidate);
+      if (!normalized) {
         return false;
       }
-      const lng = Number(candidate[0]);
-      const lat = Number(candidate[1]);
-      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-        return false;
-      }
+      const [lng, lat] = normalized;
       const cacheKey = `${lng.toFixed(6)},${lat.toFixed(6)}`;
       if (waypointMatchCache.has(cacheKey)) {
         return waypointMatchCache.get(cacheKey);
       }
-      const matches = waypointCoordinates.some((waypoint) => this.coordinatesMatch(waypoint, candidate));
+      const matches = waypointCoordinates.some((waypoint) => this.coordinatesMatch(waypoint, normalized));
       waypointMatchCache.set(cacheKey, matches);
       return matches;
     };
