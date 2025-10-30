@@ -427,6 +427,10 @@ const PROFILE_MODE_DEFINITIONS = Object.freeze({
 
 const PROFILE_GRADIENT_MODES = Object.freeze(['slope', 'surface']);
 
+const PROFILE_LEGEND_SHOW_DELAY_MS = 1000;
+
+const SLOPE_GRADIENT_LABELS = Object.freeze(['-18%', '-12%', '-6%', '0%', '6%', '12%', '18%', '>18%']);
+
 const PROFILE_MODE_LEGENDS = Object.freeze({
   slope: SLOPE_CLASSIFICATIONS,
   surface: SURFACE_CLASSIFICATIONS,
@@ -879,6 +883,28 @@ export class DirectionsManager {
       ? this.profileModeToggle.querySelector('.profile-mode-button__label')
       : null;
     this.profileLegend = profileLegend ?? null;
+    this.profileLegendVisible = false;
+    this.profileLegendHoldTimeout = null;
+
+    this.handleProfileLegendPointerEnter = this.handleProfileLegendPointerEnter.bind(this);
+    this.handleProfileLegendPointerLeave = this.handleProfileLegendPointerLeave.bind(this);
+    this.handleProfileLegendFocus = this.handleProfileLegendFocus.bind(this);
+    this.handleProfileLegendBlur = this.handleProfileLegendBlur.bind(this);
+    this.handleProfileLegendKeyDown = this.handleProfileLegendKeyDown.bind(this);
+
+    if (this.profileModeToggle) {
+      this.profileModeToggle.addEventListener('pointerenter', this.handleProfileLegendPointerEnter);
+      this.profileModeToggle.addEventListener('pointerleave', this.handleProfileLegendPointerLeave);
+      this.profileModeToggle.addEventListener('pointerdown', this.handleProfileLegendPointerEnter);
+      this.profileModeToggle.addEventListener('pointerup', this.handleProfileLegendPointerLeave);
+      this.profileModeToggle.addEventListener('pointercancel', this.handleProfileLegendPointerLeave);
+      this.profileModeToggle.addEventListener('focus', this.handleProfileLegendFocus);
+      this.profileModeToggle.addEventListener('blur', this.handleProfileLegendBlur);
+      this.profileModeToggle.addEventListener('keydown', this.handleProfileLegendKeyDown);
+      this.profileModeToggle.addEventListener('click', () => {
+        this.hideProfileLegend();
+      });
+    }
 
     if (this.routeStats) {
       this.routeStats.setAttribute('aria-live', 'polite');
@@ -1379,6 +1405,9 @@ export class DirectionsManager {
       this.profileLegend.innerHTML = '';
       this.profileLegend.setAttribute('aria-hidden', 'true');
       this.profileLegend.classList.remove('profile-legend--gradient');
+      this.profileLegend.dataset.ready = 'false';
+      this.profileLegendVisible = false;
+      this.cancelProfileLegendReveal();
       return;
     }
     const entries = this.getProfileLegendEntries(this.profileMode);
@@ -1386,6 +1415,9 @@ export class DirectionsManager {
       this.profileLegend.innerHTML = '';
       this.profileLegend.setAttribute('aria-hidden', 'true');
       this.profileLegend.classList.remove('profile-legend--gradient');
+      this.profileLegend.dataset.ready = 'false';
+      this.profileLegendVisible = false;
+      this.cancelProfileLegendReveal();
       return;
     }
     const fallbackColor = this.modeColors?.[this.currentMode] ?? '#3ab7c6';
@@ -1402,6 +1434,8 @@ export class DirectionsManager {
     const isGradientMode = this.profileMode === 'slope';
     this.profileLegend.classList.toggle('profile-legend--gradient', isGradientMode);
     this.profileLegend.innerHTML = '';
+    this.profileLegend.dataset.ready = 'true';
+    this.profileLegendVisible = this.profileLegendVisible && shouldDisplay;
     if (isGradientMode) {
       const totalStops = entries.length - 1;
       const gradientStops = entries
@@ -1440,31 +1474,33 @@ export class DirectionsManager {
         }
         return '';
       };
-      entries.forEach((entry) => {
+      const labels = this.profileMode === 'slope'
+        ? SLOPE_GRADIENT_LABELS
+        : entries.map((entry) => extractRangeLabel(entry)).filter((label) => typeof label === 'string' && label);
+      labels.forEach((labelText) => {
         const labelElement = document.createElement('span');
         labelElement.className = 'profile-legend__gradient-label';
-        labelElement.textContent = extractRangeLabel(entry);
+        labelElement.textContent = labelText;
         labelsWrapper.appendChild(labelElement);
       });
       this.profileLegend.appendChild(gradientBar);
       this.profileLegend.appendChild(labelsWrapper);
-      this.profileLegend.setAttribute('aria-hidden', 'false');
-      return;
-    }
-    const items = entries
-      .map((entry) => {
-        const color = normalizeColor(entry.color);
-        const safeLabel = escapeHtml(entry.label ?? entry.key ?? '');
-        return `
+    } else {
+      const items = entries
+        .map((entry) => {
+          const color = normalizeColor(entry.color);
+          const safeLabel = escapeHtml(entry.label ?? entry.key ?? '');
+          return `
           <li class="profile-legend__item">
             <span class="profile-legend__swatch" style="--legend-color:${color}"></span>
             <span class="profile-legend__label">${safeLabel}</span>
           </li>
         `.trim();
-      })
-      .join('');
-    this.profileLegend.innerHTML = `<ul class="profile-legend__list">${items}</ul>`;
-    this.profileLegend.setAttribute('aria-hidden', 'false');
+        })
+        .join('');
+      this.profileLegend.innerHTML = `<ul class="profile-legend__list">${items}</ul>`;
+    }
+    this.profileLegend.setAttribute('aria-hidden', this.profileLegendVisible ? 'false' : 'true');
   }
 
   openProfileMenu() {
@@ -1476,6 +1512,7 @@ export class DirectionsManager {
     if (this.profileModeMenu && typeof this.profileModeMenu.focus === 'function') {
       this.profileModeMenu.focus();
     }
+    this.hideProfileLegend();
   }
 
   closeProfileMenu({ restoreFocus = false } = {}) {
@@ -1487,6 +1524,7 @@ export class DirectionsManager {
     if (restoreFocus && this.profileModeToggle && typeof this.profileModeToggle.focus === 'function') {
       this.profileModeToggle.focus();
     }
+    this.hideProfileLegend();
   }
 
   toggleProfileMenu() {
@@ -1503,6 +1541,7 @@ export class DirectionsManager {
       : DEFAULT_PROFILE_MODE;
     this.profileMode = normalized;
     this.updateProfileModeUI();
+    this.hideProfileLegend();
     if (silent) {
       return;
     }
@@ -1510,6 +1549,80 @@ export class DirectionsManager {
     if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
       && this.routeGeojson.geometry.coordinates.length >= 2) {
       this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
+    }
+  }
+
+  hasProfileLegendContent() {
+    return Boolean(this.profileLegend) && this.profileLegend.dataset?.ready === 'true';
+  }
+
+  cancelProfileLegendReveal() {
+    if (this.profileLegendHoldTimeout !== null) {
+      clearTimeout(this.profileLegendHoldTimeout);
+      this.profileLegendHoldTimeout = null;
+    }
+  }
+
+  scheduleProfileLegendReveal() {
+    if (!this.hasProfileLegendContent() || this.profileMenuOpen || this.profileLegendVisible) {
+      return;
+    }
+    this.cancelProfileLegendReveal();
+    this.profileLegendHoldTimeout = globalThis.setTimeout(() => {
+      this.profileLegendHoldTimeout = null;
+      this.showProfileLegend();
+    }, PROFILE_LEGEND_SHOW_DELAY_MS);
+  }
+
+  showProfileLegend() {
+    if (!this.hasProfileLegendContent() || this.profileMenuOpen || !this.profileLegend) {
+      return;
+    }
+    this.cancelProfileLegendReveal();
+    this.profileLegendVisible = true;
+    this.profileLegend.setAttribute('aria-hidden', 'false');
+  }
+
+  hideProfileLegend() {
+    this.cancelProfileLegendReveal();
+    this.profileLegendVisible = false;
+    if (this.profileLegend) {
+      this.profileLegend.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  handleProfileLegendPointerEnter(event) {
+    if (!event) {
+      return;
+    }
+    if (event.type === 'pointerenter' && event.pointerType === 'touch') {
+      return;
+    }
+    if (event.type === 'pointerdown' && typeof event.button === 'number' && event.button !== 0) {
+      return;
+    }
+    this.scheduleProfileLegendReveal();
+  }
+
+  handleProfileLegendPointerLeave() {
+    this.cancelProfileLegendReveal();
+    if (this.profileModeToggle && document.activeElement === this.profileModeToggle) {
+      return;
+    }
+    this.hideProfileLegend();
+  }
+
+  handleProfileLegendFocus() {
+    this.scheduleProfileLegendReveal();
+  }
+
+  handleProfileLegendBlur() {
+    this.hideProfileLegend();
+  }
+
+  handleProfileLegendKeyDown(event) {
+    if (event?.key === 'Escape') {
+      this.hideProfileLegend();
     }
   }
 
