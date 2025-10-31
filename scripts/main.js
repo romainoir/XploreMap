@@ -66,52 +66,11 @@ const BASE_STYLE_OPTION_ID = 'vector-map';
 const IMAGERY_OPTIONS = Object.freeze([
   {
     id: BASE_STYLE_OPTION_ID,
-    label: 'Vector map',
+    label: 'Vector OSM',
     type: 'base-style',
     previewImage: './data/OSM_vector.png',
     defaultOpacity: BASE_STYLE_RELIEF_OPACITY,
     defaultVisible: true
-  },
-  {
-    id: 'eox-s2',
-    label: 'EOX Satellite',
-    sourceId: 's2cloudless',
-    layerId: 's2cloudless',
-    tileTemplate: S2C_URL,
-    tileSize: 256,
-    attribution: EOX_ATTRIBUTION,
-    defaultVisible: true,
-    paint: {
-      'raster-opacity': S2_OPACITY,
-      'raster-fade-duration': S2_FADE_DURATION
-    }
-  },
-  {
-    id: 'ign-lidar-hd-mns-shadow',
-    label: 'MNS',
-    sourceId: 'ign-lidar-hd-mns-shadow',
-    layerId: 'ign-lidar-hd-mns-shadow',
-    tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNS_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
-    tileSize: 256,
-    attribution: IGN_ATTRIBUTION
-  },
-  {
-    id: 'ign-lidar-hd-mnt-shadow',
-    label: 'MNT',
-    sourceId: 'ign-lidar-hd-mnt-shadow',
-    layerId: 'ign-lidar-hd-mnt-shadow',
-    tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
-    tileSize: 256,
-    attribution: IGN_ATTRIBUTION
-  },
-  {
-    id: 'ign-orthophotos',
-    label: 'IGN Orthophotos',
-    sourceId: 'ign-orthophotos',
-    layerId: 'ign-orthophotos',
-    tileTemplate: createIgnTileTemplate('ORTHOIMAGERY.ORTHOPHOTOS.BDORTHO', 'image/jpeg'),
-    tileSize: 256,
-    attribution: IGN_ATTRIBUTION
   },
   {
     id: 'ign-forest-inventory',
@@ -120,16 +79,9 @@ const IMAGERY_OPTIONS = Object.freeze([
     layerId: 'ign-forest-inventory',
     tileTemplate: createIgnTileTemplate('LANDCOVER.FORESTINVENTORY.V2', 'image/png'),
     tileSize: 256,
-    attribution: IGN_ATTRIBUTION
-  },
-  {
-    id: 'ign-cosia',
-    label: 'IGN Kosia 2021-2023',
-    sourceId: 'ign-cosia',
-    layerId: 'ign-cosia',
-    tileTemplate: createIgnTileTemplate('IGNF_COSIA_2021-2023', 'image/png'),
-    tileSize: 256,
-    attribution: IGN_ATTRIBUTION
+    attribution: IGN_ATTRIBUTION,
+    defaultVisible: false,
+    defaultOpacity: 0.5
   },
   {
     id: 'contours',
@@ -140,7 +92,76 @@ const IMAGERY_OPTIONS = Object.freeze([
     linkedLayerIds: ['contour-text'],
     previewImage: './data/contour.png',
     defaultVisible: true,
+    defaultOpacity: 0.5
+  },
+  {
+    id: 'ign-cosia',
+    label: 'IGN Kosia 2021-2023',
+    sourceId: 'ign-cosia',
+    layerId: 'ign-cosia',
+    tileTemplate: createIgnTileTemplate('IGNF_COSIA_2021-2023', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION,
+    defaultVisible: true,
+    defaultOpacity: 0.3
+  },
+  {
+    id: 'ign-orthophotos',
+    label: 'IGN Orthophotos',
+    sourceId: 'ign-orthophotos',
+    layerId: 'ign-orthophotos',
+    tileTemplate: createIgnTileTemplate('ORTHOIMAGERY.ORTHOPHOTOS.BDORTHO', 'image/jpeg'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION,
+    defaultVisible: false,
+    defaultOpacity: 0.4
+  },
+  {
+    id: 'ign-lidar-hd-mns-shadow',
+    label: 'MNS',
+    sourceId: 'ign-lidar-hd-mns-shadow',
+    layerId: 'ign-lidar-hd-mns-shadow',
+    tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNS_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION,
+    defaultVisible: true,
     defaultOpacity: 1
+  },
+  {
+    id: 'ign-lidar-hd-mnt-shadow',
+    label: 'MNT',
+    sourceId: 'ign-lidar-hd-mnt-shadow',
+    layerId: 'ign-lidar-hd-mnt-shadow',
+    tileTemplate: createIgnTileTemplate('IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'image/png'),
+    tileSize: 256,
+    attribution: IGN_ATTRIBUTION,
+    defaultVisible: false,
+    defaultOpacity: 1
+  },
+  {
+    id: 'hillshade',
+    label: 'Hillshade (MapLibre)',
+    type: 'hillshade',
+    sourceId: 'hillshadeSource',
+    layerId: 'hillshade',
+    previewImage: './data/style.png',
+    defaultVisible: false,
+    defaultOpacity: 1
+  },
+  {
+    id: 'eox-s2',
+    label: 'EOX Satellite',
+    sourceId: 's2cloudless',
+    layerId: 's2cloudless',
+    tileTemplate: S2C_URL,
+    tileSize: 256,
+    attribution: EOX_ATTRIBUTION,
+    defaultVisible: false,
+    defaultOpacity: 1,
+    paint: {
+      'raster-opacity': S2_OPACITY,
+      'raster-fade-duration': S2_FADE_DURATION
+    }
   }
 ]);
 
@@ -1997,6 +2018,10 @@ async function init() {
         applyContourLayersState(opacity, visible);
         return;
       }
+      if (option.type === 'hillshade') {
+        applyHillshadeAppearance();
+        return;
+      }
       if (!option.layerId || !map.getLayer(option.layerId)) return;
       map.setPaintProperty(option.layerId, 'raster-opacity', opacity);
       map.setLayoutProperty(option.layerId, 'visibility', visible ? 'visible' : 'none');
@@ -2229,6 +2254,54 @@ async function init() {
     }
   }
 
+  const HILLSHADE_METHOD_STYLES = Object.freeze({
+    combined: Object.freeze({
+      highlightColor: 'rgba(255,255,255,0.88)',
+      shadowColor: 'rgba(0,0,0,0.58)',
+      exaggeration: 0.23
+    }),
+    igor: Object.freeze({
+      highlightColor: 'rgba(255,255,255,0.9)',
+      shadowColor: 'rgba(0,0,0,0.6)',
+      exaggeration: 0.24
+    })
+  });
+
+  const DEFAULT_HILLSHADE_STYLE = HILLSHADE_METHOD_STYLES.igor ?? Object.freeze({
+    highlightColor: 'rgba(255,255,255,0.9)',
+    shadowColor: 'rgba(0,0,0,0.6)',
+    exaggeration: 0.24
+  });
+
+  function getHillshadeMethodStyle(method) {
+    return HILLSHADE_METHOD_STYLES[method] ?? DEFAULT_HILLSHADE_STYLE;
+  }
+
+  function getHillshadeImageryState() {
+    const state = imageryState.get('hillshade');
+    const opacity = clampOpacity(state?.opacity ?? 0);
+    const enabled = Boolean(state?.enabled && opacity > 0);
+    return { opacity, enabled };
+  }
+
+  function applyHillshadeAppearance() {
+    if (!map.getLayer('hillshade')) return;
+    const { opacity, enabled } = getHillshadeImageryState();
+    const method = currentHillshadeMethod ?? 'combined';
+    const style = getHillshadeMethodStyle(method);
+    const baseExaggeration = Number.isFinite(style?.exaggeration) ? style.exaggeration : 0;
+    const effectiveOpacity = enabled ? opacity : 0;
+
+    map.setPaintProperty('hillshade', 'hillshade-illumination-anchor', 'map');
+    map.setPaintProperty('hillshade', 'hillshade-illumination-direction', [270, 315, 0, 45]);
+    map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', [30, 30, 30, 30]);
+    map.setPaintProperty('hillshade', 'hillshade-method', method);
+    map.setPaintProperty('hillshade', 'hillshade-highlight-color', style.highlightColor);
+    map.setPaintProperty('hillshade', 'hillshade-shadow-color', style.shadowColor);
+    map.setPaintProperty('hillshade', 'hillshade-exaggeration', baseExaggeration * effectiveOpacity);
+    map.setLayoutProperty('hillshade', 'visibility', effectiveOpacity > 0 ? 'visible' : 'none');
+  }
+
   const hillshadeMethodButton = document.getElementById('cycleHillshadeMethod');
   const hillshadeMethodLabel = hillshadeMethodButton?.querySelector('.hillshade-method-button__label') ?? null;
   const hillshadeMethods = (() => {
@@ -2257,30 +2330,11 @@ async function init() {
     hillshadeMethodButton.setAttribute('title', `Cycle hillshade rendering (current: ${readable})`);
   }
 
-  function setHillshadeMethodOnMap(method) {
-    if (!map.getLayer('hillshade')) return;
-
-    map.setPaintProperty('hillshade', 'hillshade-illumination-anchor', 'map');
-    map.setPaintProperty('hillshade', 'hillshade-illumination-direction', [270, 315, 0, 45]);
-    map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', [30, 30, 30, 30]);
-    map.setPaintProperty('hillshade', 'hillshade-method', method);
-
-    if (method === 'combined') {
-      map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.23);
-      map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.88)');
-      map.setPaintProperty('hillshade', 'hillshade-shadow-color', 'rgba(0,0,0,0.58)');
-    } else {
-      map.setPaintProperty('hillshade', 'hillshade-exaggeration', 0.24);
-      map.setPaintProperty('hillshade', 'hillshade-highlight-color', 'rgba(255,255,255,0.9)');
-      map.setPaintProperty('hillshade', 'hillshade-shadow-color', 'rgba(0,0,0,0.6)');
-    }
-  }
-
   function applyHillshadeMethod(method) {
     currentHillshadeMethod = method;
     hillshadeMethodIndex = Math.max(0, hillshadeMethods.indexOf(method));
     updateHillshadeControl(method);
-    setHillshadeMethodOnMap(method);
+    applyHillshadeAppearance();
   }
 
   if (hillshadeMethodButton) {
@@ -2442,6 +2496,10 @@ async function init() {
           }
         }, topLabelId || undefined);
 
+        return;
+      }
+
+      if (option.type === 'hillshade') {
         return;
       }
 
