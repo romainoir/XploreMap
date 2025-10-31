@@ -549,14 +549,6 @@ html, body { margin:0; height:100%; }
 
 .directions-control {
   display: none;
-  width: calc(
-    (
-      100vw -
-      (
-        20px + env(safe-area-inset-left, 0px) + env(safe-area-inset-right, 0px)
-      )
-    ) / var(--ui-scale)
-  );
   max-width: none;
   margin-inline: 0;
   background: rgba(245, 248, 252, 0.94);
