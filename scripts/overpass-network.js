@@ -32,6 +32,16 @@ const POI_FILTERS = Object.freeze([
   'relation["building"="cabin"]'
 ]);
 const POI_NAME_TAGS = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
+const POI_ADDITIONAL_PROPERTY_TAGS = Object.freeze([
+  'ele',
+  'importance',
+  'importance:level',
+  'prominence',
+  'prominence:meters',
+  'prominence:metres',
+  'rank',
+  'peak'
+]);
 
 function normalizeNumber(value) {
   const numeric = Number(value);
@@ -275,6 +285,27 @@ function convertElementToPoiFeature(element) {
     const value = element.tags[tag];
     if (typeof value === 'string' && value.trim()) {
       properties[tag] = value.trim();
+    }
+  });
+  POI_ADDITIONAL_PROPERTY_TAGS.forEach((tag) => {
+    if (!Object.prototype.hasOwnProperty.call(element.tags, tag)) {
+      return;
+    }
+    const raw = element.tags[tag];
+    if (raw === null || raw === undefined) {
+      return;
+    }
+    if (typeof raw === 'number') {
+      if (Number.isFinite(raw)) {
+        properties[tag] = raw;
+      }
+      return;
+    }
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed) {
+        properties[tag] = trimmed;
+      }
     }
   });
   if (typeof element.tags.name === 'string' && element.tags.name.trim()) {

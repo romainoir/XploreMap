@@ -43,6 +43,16 @@ const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
 const DEFAULT_POI_COLOR = '#2d7bd6';
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
+const POI_ADDITIONAL_PROPERTY_TAGS = Object.freeze([
+  'ele',
+  'importance',
+  'importance:level',
+  'prominence',
+  'prominence:meters',
+  'prominence:metres',
+  'rank',
+  'peak'
+]);
 const POI_FALLBACK_MAX_BOUND_SPAN_DEGREES = 2.5;
 const POI_FALLBACK_TIMEOUT_SECONDS = 60;
 const POI_FALLBACK_ENDPOINT = OVERPASS_INTERPRETER_ENDPOINT;
@@ -93,6 +103,53 @@ const POI_CLUSTER_DISTANCE_SCALE = 120;
 
 const PEAK_CATEGORY_KEYS = Object.freeze(['peak', 'volcano']);
 const PEAK_CATEGORY_SET = new Set(PEAK_CATEGORY_KEYS);
+const PASS_CATEGORY_KEYS = Object.freeze(['mountain_pass', 'saddle']);
+const LABELLED_POI_CATEGORY_KEYS = Object.freeze([
+  ...PEAK_CATEGORY_KEYS,
+  ...PASS_CATEGORY_KEYS,
+  'viewpoint',
+  'alpine_hut',
+  'wilderness_hut',
+  'hut',
+  'cabin',
+  'shelter'
+]);
+const LABELLED_POI_CATEGORY_SET = new Set(LABELLED_POI_CATEGORY_KEYS);
+const PEAK_LABEL_ELEVATION_THRESHOLD_METERS = 3500;
+const PEAK_IMPORTANCE_VALUE_MAP = new Map([
+  ['international', 5],
+  ['continental', 5],
+  ['national', 4],
+  ['state', 4],
+  ['provincial', 4],
+  ['regional', 3],
+  ['cantonal', 3],
+  ['departmental', 3],
+  ['local', 2],
+  ['municipal', 2]
+]);
+const PEAK_ROLE_VALUE_MAP = new Map([
+  ['major', 4],
+  ['principal', 4],
+  ['main', 4],
+  ['primary', 4],
+  ['summit', 3],
+  ['mountain', 3],
+  ['secondary', 2],
+  ['minor', 1]
+]);
+const PEAK_PROMINENCE_THRESHOLDS = Object.freeze([
+  { min: 1500, score: 5 },
+  { min: 600, score: 4 },
+  { min: 300, score: 3 },
+  { min: 150, score: 2 }
+]);
+const PEAK_ELEVATION_THRESHOLDS = Object.freeze([
+  { min: 4200, score: 5 },
+  { min: 3600, score: 4 },
+  { min: 3000, score: 3 },
+  { min: 2400, score: 2 }
+]);
 
 const POI_ELEVATION_PROPERTY_KEYS = Object.freeze(['ele', 'elevation', 'height']);
 
@@ -110,25 +167,103 @@ function normalizePoiValue(value) {
   return value.trim().toLowerCase();
 }
 
+function parseNumericValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(',', '.');
+    if (!normalized) {
+      return null;
+    }
+    const match = normalized.match(/-?\d+(?:\.\d+)?/);
+    if (!match) {
+      return null;
+    }
+    const parsed = Number(match[0]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function parsePoiElevation(properties = {}) {
   for (const key of POI_ELEVATION_PROPERTY_KEYS) {
     const raw = properties?.[key];
     if (raw === null || raw === undefined) {
       continue;
     }
-    const numeric = Number(raw);
+    const numeric = parseNumericValue(raw);
     if (Number.isFinite(numeric)) {
       return numeric;
     }
-    if (typeof raw === 'string') {
-      const normalized = raw.trim().replace(',', '.');
-      const parsed = Number(normalized);
-      if (Number.isFinite(parsed)) {
-        return parsed;
+  }
+  return null;
+}
+
+function computePeakImportanceScore(properties = {}, fallbackElevation = null) {
+  const importanceValue = normalizePoiValue(properties?.importance || properties?.['importance:level']);
+  let score = importanceValue && PEAK_IMPORTANCE_VALUE_MAP.has(importanceValue)
+    ? PEAK_IMPORTANCE_VALUE_MAP.get(importanceValue)
+    : 0;
+
+  const rankValue = parseNumericValue(properties?.rank);
+  if (Number.isFinite(rankValue)) {
+    const clampedRank = Math.max(0, Math.min(rankValue, 9));
+    const rankScore = Math.max(0, 6 - Math.min(clampedRank, 6));
+    score = Math.max(score, rankScore);
+  }
+
+  const peakRoleValue = normalizePoiValue(properties?.peak);
+  if (peakRoleValue && PEAK_ROLE_VALUE_MAP.has(peakRoleValue)) {
+    score = Math.max(score, PEAK_ROLE_VALUE_MAP.get(peakRoleValue));
+  }
+
+  const prominenceCandidates = [
+    properties?.prominence,
+    properties?.['prominence:meters'],
+    properties?.['prominence:metres']
+  ];
+  let prominenceValue = null;
+  for (const candidate of prominenceCandidates) {
+    const numeric = parseNumericValue(candidate);
+    if (Number.isFinite(numeric)) {
+      prominenceValue = numeric;
+      break;
+    }
+  }
+  if (Number.isFinite(prominenceValue)) {
+    for (const threshold of PEAK_PROMINENCE_THRESHOLDS) {
+      if (prominenceValue >= threshold.min) {
+        score = Math.max(score, threshold.score);
+        break;
       }
     }
   }
-  return null;
+
+  let elevationValue = parsePoiElevation(properties);
+  if (!Number.isFinite(elevationValue) && Number.isFinite(fallbackElevation)) {
+    elevationValue = fallbackElevation;
+  }
+  if (Number.isFinite(elevationValue)) {
+    for (const threshold of PEAK_ELEVATION_THRESHOLDS) {
+      if (elevationValue >= threshold.min) {
+        score = Math.max(score, threshold.score);
+        break;
+      }
+    }
+  }
+
+  return {
+    score,
+    importance: importanceValue,
+    rank: Number.isFinite(rankValue) ? rankValue : null,
+    peakRole: peakRoleValue,
+    prominence: Number.isFinite(prominenceValue) ? prominenceValue : null,
+    elevation: Number.isFinite(elevationValue) ? elevationValue : null
+  };
 }
 
 function computePoiClusterSpacing(totalDistanceKm) {
@@ -147,17 +282,29 @@ function selectClusterRepresentative(items, categoryKey) {
   }
   if (PEAK_CATEGORY_SET.has(categoryKey)) {
     let chosen = null;
+    let bestScore = -Infinity;
     let bestElevation = -Infinity;
     items.forEach((item) => {
       if (!item) {
         return;
       }
+      const importanceScore = Number(item.peakImportanceScore);
+      const score = Number.isFinite(importanceScore) ? importanceScore : 0;
       const elevation = Number(item.elevation);
-      if (Number.isFinite(elevation)) {
-        if (elevation > bestElevation) {
-          bestElevation = elevation;
+      const normalizedElevation = Number.isFinite(elevation) ? elevation : -Infinity;
+      if (score > bestScore) {
+        bestScore = score;
+        bestElevation = normalizedElevation;
+        chosen = item;
+        return;
+      }
+      if (score === bestScore) {
+        if (normalizedElevation > bestElevation) {
+          bestElevation = normalizedElevation;
           chosen = item;
-        } else if (elevation === bestElevation) {
+          return;
+        }
+        if (normalizedElevation === bestElevation) {
           const chosenHasName = typeof chosen?.name === 'string' && chosen.name;
           const itemHasName = typeof item.name === 'string' && item.name;
           if (!chosenHasName && itemHasName) {
@@ -165,9 +312,6 @@ function selectClusterRepresentative(items, categoryKey) {
           }
         }
         return;
-      }
-      if (!chosen) {
-        chosen = item;
       }
     });
     return chosen ?? items[0];
@@ -240,11 +384,26 @@ function shouldShowPoiLabel(poi) {
   if (!poi) {
     return false;
   }
-  if (!PEAK_CATEGORY_SET.has(poi.categoryKey)) {
+  const categoryKey = typeof poi.categoryKey === 'string' ? poi.categoryKey : '';
+  if (!LABELLED_POI_CATEGORY_SET.has(categoryKey)) {
     return false;
   }
   const name = typeof poi.name === 'string' ? poi.name.trim() : '';
-  return Boolean(name);
+  if (!name) {
+    return false;
+  }
+  if (PEAK_CATEGORY_SET.has(categoryKey)) {
+    const score = Number(poi.peakImportanceScore);
+    if (Number.isFinite(score) && score > 0) {
+      return true;
+    }
+    const elevation = Number(poi.elevation);
+    if (Number.isFinite(elevation) && elevation >= PEAK_LABEL_ELEVATION_THRESHOLD_METERS) {
+      return true;
+    }
+    return false;
+  }
+  return true;
 }
 
 function resolvePoiName(properties = {}) {
@@ -500,6 +659,27 @@ function convertOverpassElementToFeature(element) {
     const tagValue = tags[propertyKey];
     if (typeof tagValue === 'string' && tagValue.trim()) {
       properties[propertyKey] = tagValue.trim();
+    }
+  });
+  POI_ADDITIONAL_PROPERTY_TAGS.forEach((propertyKey) => {
+    if (!Object.prototype.hasOwnProperty.call(tags, propertyKey)) {
+      return;
+    }
+    const raw = tags[propertyKey];
+    if (raw === null || raw === undefined) {
+      return;
+    }
+    if (typeof raw === 'number') {
+      if (Number.isFinite(raw)) {
+        properties[propertyKey] = raw;
+      }
+      return;
+    }
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed) {
+        properties[propertyKey] = trimmed;
+      }
     }
   });
   if (typeof tags.name === 'string' && tags.name.trim()) {
@@ -3017,15 +3197,25 @@ export class DirectionsManager {
           if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
             return null;
           }
+          const originalCoords = Array.isArray(geometry.coordinates)
+            ? geometry.coordinates
+            : [];
+          const elevation = originalCoords.length >= 3 ? Number(originalCoords[2]) : null;
           const properties = feature.properties && typeof feature.properties === 'object'
             ? { ...feature.properties }
             : {};
+          if (!Object.prototype.hasOwnProperty.call(properties, 'ele') && Number.isFinite(elevation)) {
+            properties.ele = elevation;
+          }
+          const coordinates = Number.isFinite(elevation)
+            ? [lng, lat, elevation]
+            : [lng, lat];
           return {
             type: 'Feature',
             properties,
             geometry: {
               type: 'Point',
-              coordinates: [lng, lat]
+              coordinates
             }
           };
         })
@@ -7580,6 +7770,17 @@ export class DirectionsManager {
         ? Math.max(0, Math.min(totalDistanceKm, distanceKm))
         : Math.max(0, distanceKm);
 
+      const coordsArray = Array.isArray(feature.geometry?.coordinates)
+        ? feature.geometry.coordinates
+        : [];
+      const coordinateElevation = coordsArray.length >= 3 ? Number(coordsArray[2]) : null;
+      let elevation = parsePoiElevation(feature.properties || {});
+      if (!Number.isFinite(elevation) && Number.isFinite(coordinateElevation)) {
+        elevation = coordinateElevation;
+      }
+      const peakImportance = computePeakImportanceScore(feature.properties || {}, elevation);
+      const peakImportanceScore = Number.isFinite(peakImportance?.score) ? peakImportance.score : 0;
+
       collected.push({
         id: identifier,
         name,
@@ -7590,7 +7791,8 @@ export class DirectionsManager {
         color: definition.definition.color ?? DEFAULT_POI_COLOR,
         distanceKm: clampedDistanceKm,
         coordinates: [lng, lat],
-        elevation: parsePoiElevation(feature.properties || {})
+        elevation,
+        peakImportanceScore
       });
     });
 
@@ -7615,7 +7817,9 @@ export class DirectionsManager {
           return;
         }
       }
-      resolved.push({ ...entry, icon, showLabel: shouldShowPoiLabel(entry) });
+      const decorated = { ...entry, icon };
+      decorated.showLabel = shouldShowPoiLabel(decorated);
+      resolved.push(decorated);
       if (this.pendingPoiRequest !== requestToken) {
         return;
       }
