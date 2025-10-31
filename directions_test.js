@@ -42,9 +42,8 @@ const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
 );
 const DEFAULT_POI_COLOR = '#2d7bd6';
 const ELEVATION_PROFILE_POI_MARKER_OFFSET_PX = -12;
-const ELEVATION_MARKER_CLUSTER_DISTANCE_THRESHOLD_PX = 48;
-const ELEVATION_MARKER_CLUSTER_BASE_SHIFT_PX = 0;
-const ELEVATION_MARKER_CLUSTER_SHIFT_INCREMENT_PX = 16;
+const ELEVATION_MARKER_LABEL_VERTICAL_GAP_PX = 4;
+const ELEVATION_MARKER_LABEL_HORIZONTAL_PADDING_PX = 6;
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
 const POI_ADDITIONAL_PROPERTY_TAGS = Object.freeze([
@@ -8469,34 +8468,48 @@ export class DirectionsManager {
         .filter((entry) => entry.hasLabel && (entry.isPoiMarker || entry.isBivouacMarker))
         .sort((a, b) => a.percent - b.percent);
 
-      const applyCluster = (cluster) => {
-        if (!Array.isArray(cluster) || cluster.length <= 1) {
-          return;
-        }
-        cluster.forEach((entry, index) => {
-          const shift = ELEVATION_MARKER_CLUSTER_BASE_SHIFT_PX
-            + index * ELEVATION_MARKER_CLUSTER_SHIFT_INCREMENT_PX;
-          clusterShiftMap.set(entry.marker, shift);
-        });
-      };
-
-      let cluster = [];
+      const placedLabels = [];
       labelledEntries.forEach((entry) => {
-        if (!cluster.length) {
-          cluster = [entry];
+        const labelElement = entry.marker.querySelector('.elevation-marker__label');
+        if (!labelElement) {
           return;
         }
-        const previous = cluster[cluster.length - 1];
-        const deltaPercent = Math.abs(entry.percent - previous.percent);
-        const deltaPx = (deltaPercent / 100) * containerWidth;
-        if (deltaPx <= ELEVATION_MARKER_CLUSTER_DISTANCE_THRESHOLD_PX) {
-          cluster.push(entry);
-        } else {
-          applyCluster(cluster);
-          cluster = [entry];
+
+        const labelRect = typeof labelElement.getBoundingClientRect === 'function'
+          ? labelElement.getBoundingClientRect()
+          : null;
+        const labelWidth = Number(labelElement.offsetWidth)
+          || Number(labelRect?.width)
+          || 0;
+        const labelHeight = Number(labelElement.offsetHeight)
+          || Number(labelRect?.height)
+          || 0;
+
+        if (labelWidth <= 0 || labelHeight <= 0) {
+          clusterShiftMap.set(entry.marker, 0);
+          return;
         }
+
+        const centerPx = (entry.percent / 100) * containerWidth;
+        const halfWidth = labelWidth / 2;
+        const horizontalPadding = ELEVATION_MARKER_LABEL_HORIZONTAL_PADDING_PX;
+        const left = centerPx - halfWidth - horizontalPadding;
+        const right = centerPx + halfWidth + horizontalPadding;
+
+        let requiredShift = 0;
+        for (const placed of placedLabels) {
+          if (right <= placed.left || left >= placed.right) {
+            continue;
+          }
+          const candidateShift = placed.shift + placed.height + ELEVATION_MARKER_LABEL_VERTICAL_GAP_PX;
+          if (candidateShift > requiredShift) {
+            requiredShift = candidateShift;
+          }
+        }
+
+        clusterShiftMap.set(entry.marker, requiredShift);
+        placedLabels.push({ left, right, shift: requiredShift, height: labelHeight });
       });
-      applyCluster(cluster);
     }
 
     markerEntries.forEach((entry) => {
