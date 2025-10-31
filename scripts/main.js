@@ -540,7 +540,7 @@ async function init() {
     text: 'Xplore',
     logoSrc: './data/logos/Xplore.png',
     logoAlt: 'Xplore',
-    minDuration: 600,
+    minDuration: 5000,
     background: '#05090f'
   });
 
