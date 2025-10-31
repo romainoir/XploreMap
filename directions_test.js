@@ -8438,7 +8438,6 @@ export class DirectionsManager {
             <div class="elevation-hit-targets">${hitTargetsHtml}</div>
             ${markerOverlay}
           </div>
-          <div class="elevation-hover-readout" aria-live="polite" aria-hidden="true"></div>
           <div class="elevation-x-axis">${xAxisLabels}</div>
         </div>
       </div>
@@ -8632,13 +8631,13 @@ export class DirectionsManager {
   }
 
   updateElevationHoverReadout(distanceKm) {
-    if (!this.elevationHoverReadout) {
-      return;
-    }
+    const hoverReadout = this.elevationHoverReadout;
 
     if (!Number.isFinite(distanceKm)) {
-      this.elevationHoverReadout.textContent = '';
-      this.elevationHoverReadout.setAttribute('aria-hidden', 'true');
+      if (hoverReadout) {
+        hoverReadout.textContent = '';
+        hoverReadout.setAttribute('aria-hidden', 'true');
+      }
       this.updateRouteStatsHover(null);
       return;
     }
@@ -8659,13 +8658,15 @@ export class DirectionsManager {
       detailMarkup = `<span class="profile">${modeLabel}: ${segmentLabel}</span>`;
     }
 
-    this.elevationHoverReadout.innerHTML = `
-      <span class="distance">${distanceLabel} km</span>
-      <span class="altitude">${altitudeLabel}</span>
-      <span class="grade">Slope ${gradeLabel}</span>
-      ${detailMarkup}
-    `;
-    this.elevationHoverReadout.setAttribute('aria-hidden', 'false');
+    if (hoverReadout) {
+      hoverReadout.innerHTML = `
+        <span class="distance">${distanceLabel} km</span>
+        <span class="altitude">${altitudeLabel}</span>
+        <span class="grade">Slope ${gradeLabel}</span>
+        ${detailMarkup}
+      `;
+      hoverReadout.setAttribute('aria-hidden', 'false');
+    }
     this.updateRouteStatsHover(distanceKm, { elevation, grade: gradeValue });
   }
 
