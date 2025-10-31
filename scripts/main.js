@@ -26,6 +26,7 @@ import { OfflineRouter, DEFAULT_NODE_CONNECTION_TOLERANCE_METERS } from './offli
 import { OrsRouter } from './openrouteservice-router.js';
 import { extractOverpassNetwork } from './overpass-network.js';
 import { extractOpenFreeMapNetwork } from './openfreemap-network.js';
+import { createViewModeController } from './view-mode-controller.js';
 
 const UI_ICON_SOURCES = Object.freeze({
   'view-toggle': './data/2d_3d.png',
@@ -1712,92 +1713,20 @@ async function init() {
   });
   demSource.setupMaplibre(maplibregl);
 
-  let currentViewMode = VIEW_MODES.THREED;
-  let last3DOrientation = { ...DEFAULT_3D_ORIENTATION };
   const vignetteEl = document.querySelector('.vignette');
   const viewToggleBtn = document.getElementById('toggle3D');
+  const terrainHdToggle = document.getElementById('terrainHdToggle');
 
-  function updateViewToggle(mode) {
-    if (!viewToggleBtn) return;
-    const is3D = mode === VIEW_MODES.THREED;
-    viewToggleBtn.classList.toggle('active', is3D);
-    const nextLabel = is3D ? 'Switch to 2D' : 'Switch to 3D';
-    viewToggleBtn.setAttribute('aria-pressed', String(is3D));
-    viewToggleBtn.setAttribute('aria-label', nextLabel);
-    viewToggleBtn.setAttribute('title', nextLabel);
-  }
-
-  function syncTerrainAndSky() {
-    const terrainSourceId = 'terrainSource';
-    const hasTerrainSource = Boolean(map.getSource(terrainSourceId));
-    if (currentViewMode === VIEW_MODES.THREED) {
-      if (hasTerrainSource) {
-        map.setTerrain({ source: terrainSourceId, exaggeration: 1 });
-      }
-      map.setSky(SKY_SETTINGS);
-    } else {
-      if (hasTerrainSource) {
-        map.setTerrain({ source: terrainSourceId, exaggeration: 0 });
-      } else {
-        map.setTerrain(null);
-      }
-      map.setSky(null);
-    }
-    if (vignetteEl) vignetteEl.dataset.mode = currentViewMode;
-  }
-
-  function applyViewMode(mode, { animate = true } = {}) {
-    if (mode === currentViewMode && animate) {
-      updateViewToggle(mode);
-      if (vignetteEl) vignetteEl.dataset.mode = currentViewMode;
-      return;
-    }
-
-    const is3D = mode === VIEW_MODES.THREED;
-    if (!is3D) {
-      last3DOrientation = {
-        pitch: map.getPitch(),
-        bearing: map.getBearing()
-      };
-    }
-
-    currentViewMode = mode;
-    updateViewToggle(mode);
-    if (vignetteEl) vignetteEl.dataset.mode = mode;
-
-    const targetOrientation = is3D ? last3DOrientation : { pitch: 0, bearing: 0 };
-    if (animate) {
-      map.easeTo({
-        pitch: targetOrientation.pitch,
-        bearing: targetOrientation.bearing,
-        duration: 1000
-      });
-    } else {
-      map.setPitch(targetOrientation.pitch);
-      map.setBearing(targetOrientation.bearing);
-    }
-
-    if (map.dragRotate && typeof map.dragRotate[is3D ? 'enable' : 'disable'] === 'function') {
-      map.dragRotate[is3D ? 'enable' : 'disable']();
-    }
-    if (map.touchZoomRotate && typeof map.touchZoomRotate[is3D ? 'enableRotation' : 'disableRotation'] === 'function') {
-      map.touchZoomRotate[is3D ? 'enableRotation' : 'disableRotation']();
-    }
-
-    syncTerrainAndSky();
-  }
-
-  if (viewToggleBtn) {
-    viewToggleBtn.addEventListener('click', () => {
-      const nextMode = currentViewMode === VIEW_MODES.THREED ? VIEW_MODES.TWOD : VIEW_MODES.THREED;
-      applyViewMode(nextMode);
-    });
-  }
-
-  if (vignetteEl) {
-    vignetteEl.dataset.mode = currentViewMode;
-  }
-  updateViewToggle(currentViewMode);
+  const viewModeController = createViewModeController(map, {
+    toggleButton: viewToggleBtn,
+    hdToggle: terrainHdToggle,
+    vignetteElement: vignetteEl,
+    skySettings: SKY_SETTINGS,
+    defaultMode: VIEW_MODES.THREED,
+    defaultOrientation: DEFAULT_3D_ORIENTATION,
+    terrainSourceId: 'terrainSource',
+    hdSources: ['terrainSource', 'hillshadeSource', 'reliefDem', 'color-relief']
+  });
 
   const imageryPanel = document.getElementById('imageryPanel');
   const imageryPanelToggle = document.getElementById('imageryPanelToggle');
@@ -2567,7 +2496,7 @@ async function init() {
       bringDebugNetworkToFront();
     }
 
-    syncTerrainAndSky();
+    viewModeController.onTerrainSourcesUpdated();
 
     updatePeakLabels(map);
   }
@@ -2575,7 +2504,7 @@ async function init() {
   map.on('style.load', applyOverlays);
   map.once('style.load', () => applyHillshadeMethod(currentHillshadeMethod));
 
-  map.once('style.load', () => applyViewMode(currentViewMode, { animate: false }));
+  map.once('style.load', () => viewModeController.applyCurrentMode({ animate: false }));
 }
 
 init().catch((error) => {
