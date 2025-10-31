@@ -44,6 +44,7 @@ const DEFAULT_POI_COLOR = '#2d7bd6';
 const ELEVATION_PROFILE_POI_MARKER_OFFSET_PX = -12;
 const ELEVATION_MARKER_LABEL_VERTICAL_GAP_PX = 4;
 const ELEVATION_MARKER_LABEL_HORIZONTAL_PADDING_PX = 6;
+const ELEVATION_MARKER_LABEL_TOP_PADDING_PX = 4;
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
 const POI_ADDITIONAL_PROPERTY_TAGS = Object.freeze([
@@ -8413,6 +8414,10 @@ export class DirectionsManager {
       return;
     }
 
+    markers.forEach((marker) => {
+      marker.style.removeProperty('--elevation-marker-label-shift');
+    });
+
     let domainMin = Number(this.elevationDomain?.min);
     let domainMax = Number(this.elevationDomain?.max);
     if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
@@ -8512,8 +8517,13 @@ export class DirectionsManager {
       });
     }
 
+    const containerRect = typeof this.elevationChartContainer.getBoundingClientRect === 'function'
+      ? this.elevationChartContainer.getBoundingClientRect()
+      : null;
+
     markerEntries.forEach((entry) => {
       const { marker, isPoiMarker, isBivouacMarker, clampedRatio, percent, hasLabel } = entry;
+      const labelElement = hasLabel ? marker.querySelector('.elevation-marker__label') : null;
       marker.style.left = `${percent.toFixed(6)}%`;
 
       const offsetValue = Number(marker.dataset.bottomOffset);
@@ -8540,10 +8550,23 @@ export class DirectionsManager {
       }
 
       const clusterShift = clusterShiftMap.get(marker);
-      if (Number.isFinite(clusterShift) && clusterShift > 0 && hasLabel) {
-        marker.style.setProperty('--elevation-marker-label-shift', `${clusterShift.toFixed(2)}px`);
-      } else {
-        marker.style.removeProperty('--elevation-marker-label-shift');
+      if (Number.isFinite(clusterShift) && clusterShift > 0 && labelElement) {
+        let appliedShift = clusterShift;
+        if (containerRect && typeof labelElement.getBoundingClientRect === 'function') {
+          const labelRect = labelElement.getBoundingClientRect();
+          const containerTop = Number(containerRect?.top);
+          const labelTop = Number(labelRect?.top);
+          if (Number.isFinite(containerTop) && Number.isFinite(labelTop)) {
+            const availableShift = labelTop - containerTop - ELEVATION_MARKER_LABEL_TOP_PADDING_PX;
+            if (Number.isFinite(availableShift)) {
+              appliedShift = Math.min(appliedShift, Math.max(0, availableShift));
+            }
+          }
+        }
+
+        if (appliedShift > 0.5) {
+          marker.style.setProperty('--elevation-marker-label-shift', `${appliedShift.toFixed(2)}px`);
+        }
       }
     });
   }
