@@ -607,19 +607,11 @@ html, body { margin:0; height:100%; }
 }
 
 .directions-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.directions-actions__primary {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .directions-actions .btn {
@@ -633,7 +625,6 @@ html, body { margin:0; height:100%; }
 }
 
 .chart-card {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -658,13 +649,6 @@ html, body { margin:0; height:100%; }
   justify-content: flex-end;
   gap: 16px;
   flex: 1 1 auto;
-  min-width: 0;
-}
-
-.chart-card__body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   min-width: 0;
 }
 
@@ -699,9 +683,7 @@ html, body { margin:0; height:100%; }
   border-radius: 14px;
   background: rgba(17, 34, 48, 0.04);
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.08);
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  min-width: 0;
+  align-self: flex-end;
 }
 
 .profile-legend {
@@ -1181,12 +1163,6 @@ html, body { margin:0; height:100%; }
   .transport-modes,
   .directions-actions {
     width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .directions-actions__primary {
-    width: 100%;
   }
 
   .btn--icon {
@@ -1195,10 +1171,6 @@ html, body { margin:0; height:100%; }
 
   .btn--icon.btn--icon-only {
     width: 44px;
-  }
-
-  .route-stats.has-stats {
-    justify-content: space-between;
   }
 
   .route-stats-list {
