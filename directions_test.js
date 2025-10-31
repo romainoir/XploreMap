@@ -1,4 +1,4 @@
-import { getOpenFreeMapIcon } from './scripts/openfreemap-sprites.js';
+import { ensurePoiIconImages, getPoiIconImageId, getPoiIconMetadata } from './scripts/xmap-poi-icons.js';
 import { OVERPASS_ENDPOINT as OVERPASS_INTERPRETER_ENDPOINT } from './scripts/overpass-network.js';
 
 const EMPTY_COLLECTION = {
@@ -60,17 +60,20 @@ const POI_ADDITIONAL_PROPERTY_TAGS = Object.freeze([
 const POI_FALLBACK_MAX_BOUND_SPAN_DEGREES = 2.5;
 const POI_FALLBACK_TIMEOUT_SECONDS = 60;
 const POI_FALLBACK_ENDPOINT = OVERPASS_INTERPRETER_ENDPOINT;
+const POI_ICON_TARGET_DISPLAY_SIZE_PX = 26;
+const PEAK_PRINCIPAL_ICON_THRESHOLD = 4;
+const ROUTE_POI_ICON_LAYER_ID = 'route-poi-icons';
 const POI_ICON_DEFINITIONS = Object.freeze({
-  peak: { icon: 'peak', label: 'Sommet', color: '#2d7bd6' },
-  volcano: { icon: 'peak', label: 'Volcan', color: '#2d7bd6' },
-  mountain_pass: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
-  saddle: { icon: 'mountain_pass', label: 'Col', color: '#4a6d8c' },
+  peak: { icon: 'peak_minor', label: 'Sommet', color: '#2d7bd6' },
+  volcano: { icon: 'peak_minor', label: 'Volcan', color: '#2d7bd6' },
+  mountain_pass: { icon: 'saddle', label: 'Col', color: '#4a6d8c' },
+  saddle: { icon: 'saddle', label: 'Col', color: '#4a6d8c' },
   viewpoint: { icon: 'viewpoint', label: 'Point de vue', color: '#35a3ad' },
-  alpine_hut: { icon: 'alpine_hut', label: 'Refuge', color: '#c26d2d' },
-  wilderness_hut: { icon: 'wilderness_hut', label: 'Cabane', color: '#c26d2d' },
-  hut: { icon: 'wilderness_hut', label: 'Cabane', color: '#c26d2d' },
-  cabin: { icon: 'wilderness_hut', label: 'Cabane', color: '#c26d2d' },
-  shelter: { icon: 'shelter', label: 'Abri', color: '#c26d2d' },
+  alpine_hut: { icon: 'cabin', label: 'Refuge', color: '#c26d2d' },
+  wilderness_hut: { icon: 'cabin', label: 'Cabane', color: '#c26d2d' },
+  hut: { icon: 'cabin', label: 'Cabane', color: '#c26d2d' },
+  cabin: { icon: 'cabin', label: 'Cabane', color: '#c26d2d' },
+  shelter: { icon: 'cabin', label: 'Abri', color: '#c26d2d' },
   parking: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   parking_underground: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   'parking_multi-storey': { icon: 'parking', label: 'Parking', color: '#4b5563' },
@@ -112,6 +115,48 @@ const ELEVATION_PROFILE_POI_CLUSTER_DISTANCE_SCALE = 30;
 const PEAK_CATEGORY_KEYS = Object.freeze(['peak', 'volcano']);
 const PEAK_CATEGORY_SET = new Set(PEAK_CATEGORY_KEYS);
 const PASS_CATEGORY_KEYS = Object.freeze(['mountain_pass', 'saddle']);
+function resolveRoutePoiIconKey(categoryKey, baseIconKey, peakImportanceScore) {
+  const normalizedBase = typeof baseIconKey === 'string' ? baseIconKey.trim() : '';
+  const normalizedCategory = typeof categoryKey === 'string' ? categoryKey.trim() : '';
+  if (PEAK_CATEGORY_SET.has(normalizedCategory)) {
+    const score = Number(peakImportanceScore);
+    if (Number.isFinite(score) && score >= PEAK_PRINCIPAL_ICON_THRESHOLD) {
+      return 'peak_principal';
+    }
+    return normalizedBase || 'peak_minor';
+  }
+  return normalizedBase || normalizedCategory;
+}
+function computePoiIconDisplayMetrics(iconMetadata) {
+  if (!iconMetadata) {
+    return null;
+  }
+  const width = Number(iconMetadata.width);
+  const height = Number(iconMetadata.height);
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+    return null;
+  }
+  const pixelRatio = Number(iconMetadata.pixelRatio) || 1;
+  const displayWidth = width / pixelRatio;
+  const displayHeight = height / pixelRatio;
+  if (!Number.isFinite(displayWidth) || displayWidth <= 0 || !Number.isFinite(displayHeight) || displayHeight <= 0) {
+    return null;
+  }
+  const maxDimension = Math.max(displayWidth, displayHeight);
+  if (!Number.isFinite(maxDimension) || maxDimension <= 0) {
+    return {
+      displayWidth,
+      displayHeight,
+      mapScale: 1
+    };
+  }
+  const scale = Math.min(1, POI_ICON_TARGET_DISPLAY_SIZE_PX / maxDimension);
+  return {
+    displayWidth: displayWidth * scale,
+    displayHeight: displayHeight * scale,
+    mapScale: scale
+  };
+}
 const LABELLED_POI_CATEGORY_KEYS = Object.freeze([
   ...PEAK_CATEGORY_KEYS,
   ...PASS_CATEGORY_KEYS,
@@ -1854,6 +1899,7 @@ export class DirectionsManager {
     removeLayer('waypoints-hit-area');
     removeLayer(SEGMENT_MARKER_LAYER_ID);
     removeLayer(ROUTE_POI_LABEL_LAYER_ID);
+    removeLayer(ROUTE_POI_ICON_LAYER_ID);
     removeLayer(ROUTE_POI_LAYER_ID);
 
     removeSource('route-line-source');
@@ -2001,17 +2047,56 @@ export class DirectionsManager {
         'circle-color': ['coalesce', ['get', 'color'], DEFAULT_POI_COLOR],
         'circle-stroke-color': 'rgba(255, 255, 255, 0.9)',
         'circle-stroke-width': [
-          'interpolate',
-          ['linear'],
-          ['zoom'],
-          8,
-          1,
-          12,
-          1.2,
-          16,
-          1.6
+          'case',
+          ['boolean', ['get', 'hasIcon'], false],
+          0,
+          [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            8,
+            1,
+            12,
+            1.2,
+            16,
+            1.6
+          ]
         ],
-        'circle-opacity': 0.95
+        'circle-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0, 0.95],
+        'circle-stroke-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0, 0.95]
+      },
+      filter: ['==', '$type', 'Point']
+    });
+
+    this.map.addLayer({
+      id: ROUTE_POI_ICON_LAYER_ID,
+      type: 'symbol',
+      source: ROUTE_POI_SOURCE_ID,
+      layout: {
+        'icon-image': ['coalesce', ['get', 'iconImageId'], ''],
+        'icon-size': [
+          '*',
+          ['coalesce', ['get', 'iconDisplayScale'], 1],
+          [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            8,
+            0.35,
+            12,
+            0.55,
+            16,
+            0.75
+          ]
+        ],
+        'icon-anchor': 'center',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-optional': true,
+        visibility: 'none'
+      },
+      paint: {
+        'icon-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0.95, 0]
       },
       filter: ['==', '$type', 'Point']
     });
@@ -3715,6 +3800,16 @@ export class DirectionsManager {
 
   setRoutePointsOfInterest(pois) {
     this.routePointsOfInterest = Array.isArray(pois) ? pois : [];
+    if (this.routePointsOfInterest.length) {
+      const iconKeys = Array.from(new Set(
+        this.routePointsOfInterest
+          .map((poi) => (typeof poi?.iconKey === 'string' ? poi.iconKey.trim() : ''))
+          .filter(Boolean)
+      ));
+      if (iconKeys.length) {
+        ensurePoiIconImages(this.map, iconKeys);
+      }
+    }
     this.updateRoutePoiData();
     this.updateRoutePoiLayerVisibility();
   }
@@ -3732,6 +3827,7 @@ export class DirectionsManager {
       source.setData(EMPTY_COLLECTION);
       return;
     }
+    const iconKeys = new Set();
     const features = pois
       .map((poi) => {
         if (!poi) {
@@ -3748,6 +3844,13 @@ export class DirectionsManager {
         }
         const name = typeof poi.name === 'string' ? poi.name.trim() : '';
         const title = typeof poi.title === 'string' ? poi.title : name;
+        const iconImageId = typeof poi.iconImageId === 'string' ? poi.iconImageId.trim() : '';
+        const iconDisplayScale = Number(poi.iconDisplayScale);
+        const hasIcon = Boolean(iconImageId);
+        const iconKey = typeof poi.iconKey === 'string' ? poi.iconKey.trim() : '';
+        if (hasIcon && iconKey) {
+          iconKeys.add(iconKey);
+        }
         return {
           type: 'Feature',
           properties: {
@@ -3756,7 +3859,12 @@ export class DirectionsManager {
             name,
             categoryKey: poi.categoryKey ?? '',
             color: typeof poi.color === 'string' && poi.color.trim() ? poi.color.trim() : DEFAULT_POI_COLOR,
-            showLabel: Boolean(poi.showLabel && name)
+            showLabel: Boolean(poi.showLabel && name),
+            iconImageId: hasIcon ? iconImageId : '',
+            iconDisplayScale: hasIcon && Number.isFinite(iconDisplayScale) && iconDisplayScale > 0
+              ? iconDisplayScale
+              : 1,
+            hasIcon
           },
           geometry: {
             type: 'Point',
@@ -3765,6 +3873,9 @@ export class DirectionsManager {
         };
       })
       .filter(Boolean);
+    if (iconKeys.size) {
+      ensurePoiIconImages(this.map, Array.from(iconKeys));
+    }
     source.setData(features.length ? { type: 'FeatureCollection', features } : EMPTY_COLLECTION);
   }
 
@@ -3775,7 +3886,7 @@ export class DirectionsManager {
     const hasPois = Array.isArray(this.routePointsOfInterest) && this.routePointsOfInterest.length > 0;
     const shouldShow = this.profileMode === 'poi' && hasPois;
     const visibility = shouldShow ? 'visible' : 'none';
-    [ROUTE_POI_LAYER_ID, ROUTE_POI_LABEL_LAYER_ID].forEach((layerId) => {
+    [ROUTE_POI_LAYER_ID, ROUTE_POI_ICON_LAYER_ID, ROUTE_POI_LABEL_LAYER_ID].forEach((layerId) => {
       if (this.map.getLayer(layerId)) {
         try {
           this.map.setLayoutProperty(layerId, 'visibility', visibility);
@@ -7957,13 +8068,18 @@ export class DirectionsManager {
       const peakImportance = computePeakImportanceScore(feature.properties || {}, elevation);
       const peakImportanceScore = Number.isFinite(peakImportance?.score) ? peakImportance.score : 0;
 
+      const baseIconKey = definition.definition.icon ?? definition.key;
+      const iconKey = resolveRoutePoiIconKey(definition.key, baseIconKey, peakImportanceScore);
+      const iconImageId = getPoiIconImageId(iconKey);
+
       collected.push({
         id: identifier,
         name,
         title: tooltip,
         categoryLabel,
         categoryKey: definition.key,
-        iconName: definition.definition.icon ?? definition.key,
+        iconKey,
+        iconImageId,
         color: definition.definition.color ?? DEFAULT_POI_COLOR,
         distanceKm: clampedDistanceKm,
         coordinates: [lng, lat],
@@ -7981,19 +8097,37 @@ export class DirectionsManager {
       if (!entry) {
         continue;
       }
-      let icon = null;
-      const iconName = typeof entry.iconName === 'string' ? entry.iconName.trim() : '';
-      if (iconName) {
+      let iconMetadata = null;
+      const iconKey = typeof entry.iconKey === 'string' ? entry.iconKey.trim() : '';
+      if (iconKey) {
         try {
-          icon = await getOpenFreeMapIcon(iconName);
+          iconMetadata = await getPoiIconMetadata(iconKey);
         } catch (error) {
-          console.warn('Failed to load OpenFreeMap icon', iconName, error);
+          console.warn('Failed to load POI icon metadata', iconKey, error);
         }
         if (this.pendingPoiRequest !== requestToken) {
           return;
         }
       }
-      const decorated = { ...entry, icon };
+      const decorated = { ...entry };
+      if (iconMetadata) {
+        const metrics = computePoiIconDisplayMetrics(iconMetadata);
+        decorated.icon = {
+          ...iconMetadata,
+          displayWidth: metrics?.displayWidth ?? null,
+          displayHeight: metrics?.displayHeight ?? null
+        };
+        decorated.iconDisplayWidth = metrics?.displayWidth ?? null;
+        decorated.iconDisplayHeight = metrics?.displayHeight ?? null;
+        decorated.iconDisplayScale = metrics?.mapScale ?? 1;
+        decorated.iconImageId = entry.iconImageId ?? getPoiIconImageId(iconKey);
+      } else {
+        decorated.icon = null;
+        decorated.iconDisplayWidth = null;
+        decorated.iconDisplayHeight = null;
+        decorated.iconDisplayScale = 1;
+        decorated.iconImageId = null;
+      }
       decorated.showLabel = shouldShowPoiLabel(decorated);
       resolved.push(decorated);
       if (this.pendingPoiRequest !== requestToken) {
@@ -8368,8 +8502,32 @@ export class DirectionsManager {
               ? poi.color.trim()
               : DEFAULT_POI_COLOR;
             const icon = poi?.icon ?? null;
-            const iconWidth = Number(icon?.width);
-            const iconHeight = Number(icon?.height);
+            const iconWidth = (() => {
+              if (Number.isFinite(poi?.iconDisplayWidth)) {
+                return Number(poi.iconDisplayWidth);
+              }
+              if (Number.isFinite(icon?.displayWidth)) {
+                return Number(icon.displayWidth);
+              }
+              if (Number.isFinite(icon?.width)) {
+                const pixelRatio = Number(icon?.pixelRatio) || 1;
+                return Number(icon.width) / pixelRatio;
+              }
+              return NaN;
+            })();
+            const iconHeight = (() => {
+              if (Number.isFinite(poi?.iconDisplayHeight)) {
+                return Number(poi.iconDisplayHeight);
+              }
+              if (Number.isFinite(icon?.displayHeight)) {
+                return Number(icon.displayHeight);
+              }
+              if (Number.isFinite(icon?.height)) {
+                const pixelRatio = Number(icon?.pixelRatio) || 1;
+                return Number(icon.height) / pixelRatio;
+              }
+              return NaN;
+            })();
             const styleParts = [`bottom:${ELEVATION_PROFILE_POI_MARKER_OFFSET_PX}px`];
             styleParts.push(`color:${colorValue}`);
             styleParts.push(`--poi-marker-color:${colorValue}`);
