@@ -2353,6 +2353,21 @@ export class DirectionsManager {
           this.closeProfileMenu({ restoreFocus: true });
         }
       });
+
+      this.handleDocumentClickForProfileMenu = (event) => {
+        if (!this.profileMenuOpen) {
+          return;
+        }
+        const target = event.target;
+        if (this.profileModeMenu?.contains(target)) {
+          return;
+        }
+        if (this.profileModeToggle && target === this.profileModeToggle) {
+          return;
+        }
+        this.closeProfileMenu();
+      };
+      document.addEventListener('click', this.handleDocumentClickForProfileMenu);
     }
 
     if (this.profileModeOptions.length) {
@@ -2518,22 +2533,6 @@ export class DirectionsManager {
     if (handled && event.cancelable) {
       event.preventDefault();
     }
-  }
-
-    this.handleDocumentClickForProfileMenu = (event) => {
-      if (!this.profileMenuOpen) {
-        return;
-      }
-      const target = event.target;
-      if (this.profileModeMenu?.contains(target)) {
-        return;
-      }
-      if (this.profileModeToggle && target === this.profileModeToggle) {
-        return;
-      }
-      this.closeProfileMenu();
-    };
-    document.addEventListener('click', this.handleDocumentClickForProfileMenu);
   }
 
   setupMapHandlers() {
