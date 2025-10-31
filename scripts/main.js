@@ -537,9 +537,11 @@ async function init() {
   });
 
   maplibrePreload(map, {
-    text: 'Preparing Matterhorn…',
+    text: 'Xplore',
+    logoSrc: './data/logos/Xplore.png',
+    logoAlt: 'Xplore',
     minDuration: 600,
-    background: 'linear-gradient(135deg, rgba(5,15,24,0.92) 0%, rgba(6,24,36,0.92) 50%, rgba(10,34,46,0.92) 100%)'
+    background: '#05090f'
   });
 
   const gpxFileInput = document.getElementById('gpxFileInput');

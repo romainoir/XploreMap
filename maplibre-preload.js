@@ -1,6 +1,8 @@
 (function (global) {
   const DEFAULTS = {
     text: 'Loading map…',
+    logoSrc: null,
+    logoAlt: '',
     background: 'linear-gradient(135deg, #0b1620 0%, #0d2433 50%, #0e1b29 100%)',
     minDuration: 500,
     transitionFallback: 600,
@@ -18,9 +20,19 @@
     const content = document.createElement('div');
     content.className = 'maplibre-preload__content';
 
-    const spinner = document.createElement('div');
-    spinner.className = 'maplibre-preload__spinner';
-    content.appendChild(spinner);
+    if (typeof options.logoSrc === 'string' && options.logoSrc.trim().length) {
+      const logoWrapper = document.createElement('div');
+      logoWrapper.className = 'maplibre-preload__logo';
+
+      const logo = document.createElement('img');
+      logo.src = options.logoSrc;
+      logo.alt = options.logoAlt || '';
+      logo.loading = 'eager';
+      logo.decoding = 'async';
+
+      logoWrapper.appendChild(logo);
+      content.appendChild(logoWrapper);
+    }
 
     if (options.text) {
       const text = document.createElement('div');
