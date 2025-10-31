@@ -583,8 +583,10 @@ html, body { margin:0; height:100%; }
 
 .directions-control {
   display: none;
-  max-width: none;
-  margin-inline: 0;
+  width: min(100%, 560px);
+  max-width: 100%;
+  align-self: center;
+  margin-inline: auto;
   background: rgba(245, 248, 252, 0.94);
   border-radius: 18px 18px 0 0;
   padding: 22px 24px 26px;
@@ -603,8 +605,19 @@ html, body { margin:0; height:100%; }
   gap: 24px;
 }
 
+.directions-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.directions-collapse-button {
+  flex: 0 0 auto;
+}
+
 .directions-swipe-handle {
-  width: 100%;
+  width: min(100%, 560px);
+  align-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
