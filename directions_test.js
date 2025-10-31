@@ -8935,9 +8935,22 @@ export class DirectionsManager {
       return;
     }
 
-    const distanceLabel = this.formatDistance(distanceKm);
     const profileSegment = this.getProfileSegmentForDistance(distanceKm);
     const cutSegment = this.getCutSegmentForDistance(distanceKm);
+
+    const segmentStartKm = (() => {
+      const rawStart = Number(cutSegment?.startKm);
+      if (!Number.isFinite(rawStart)) {
+        return 0;
+      }
+      if (!Number.isFinite(distanceKm)) {
+        return Math.max(0, rawStart);
+      }
+      return Math.max(0, Math.min(distanceKm, rawStart));
+    })();
+
+    const segmentMetrics = this.computeCumulativeMetrics(distanceKm, segmentStartKm);
+    const segmentDistanceLabel = this.formatDistance(segmentMetrics.distanceKm);
 
     const segmentLabelParts = [];
     if (cutSegment?.name) {
@@ -8955,13 +8968,12 @@ export class DirectionsManager {
       }
     }
 
-    const totalMetrics = this.computeCumulativeMetrics(distanceKm, 0);
     const roundMeters = (value) => (Number.isFinite(value) ? Math.round(value) : 0);
-    const totalAscent = roundMeters(totalMetrics.ascent);
-    const totalDescent = roundMeters(totalMetrics.descent);
-    const totalTimeLabel = escapeHtml(
+    const segmentAscent = roundMeters(segmentMetrics.ascent);
+    const segmentDescent = roundMeters(segmentMetrics.descent);
+    const segmentTimeLabel = escapeHtml(
       this.formatDurationHours(
-        this.estimateTravelTimeHours(totalMetrics.distanceKm, totalMetrics.ascent, totalMetrics.descent)
+        this.estimateTravelTimeHours(segmentMetrics.distanceKm, segmentMetrics.ascent, segmentMetrics.descent)
       )
     );
 
@@ -8970,10 +8982,10 @@ export class DirectionsManager {
       readoutParts.push(`<span class="segment-name" title="Segment">${segmentLabelParts.join(' · ')}</span>`);
     }
     readoutParts.push(
-      `<span class="distance" title="Distance cumulée">Dist. ${escapeHtml(distanceLabel)} km</span>`,
-      `<span class="ascent" title="Dénivelé positif cumulé">D+ ${totalAscent} m</span>`,
-      `<span class="descent" title="Dénivelé négatif cumulé">D- ${totalDescent} m</span>`,
-      `<span class="time" title="Estimation de temps cumulée">Temps ${totalTimeLabel}</span>`
+      `<span class="distance" title="Distance du segment">Dist. ${escapeHtml(segmentDistanceLabel)} km</span>`,
+      `<span class="ascent" title="Dénivelé positif du segment">D+ ${segmentAscent} m</span>`,
+      `<span class="descent" title="Dénivelé négatif du segment">D- ${segmentDescent} m</span>`,
+      `<span class="time" title="Estimation de temps du segment">Temps ${segmentTimeLabel}</span>`
     );
 
     if (hoverReadout) {
