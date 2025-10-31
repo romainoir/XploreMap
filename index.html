@@ -47,6 +47,20 @@
     <span class="directions-swipe-handle__bar"></span>
   </div>
   <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
+    <div class="directions-toolbar">
+      <button
+        id="directionsCollapseButton"
+        class="icon-button directions-collapse-button"
+        type="button"
+        aria-label="Hide directions panel"
+        title="Hide directions panel"
+      >
+        <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+          <path d="M7.05 5.64a1 1 0 0 1 1.41 0L12 9.17l3.54-3.53a1 1 0 0 1 1.41 1.41L13.42 10.6l3.53 3.53a1 1 0 1 1-1.41 1.42L12 12l-3.54 3.55a1 1 0 0 1-1.41-1.42l3.53-3.53-3.53-3.53a1 1 0 0 1 0-1.42Z" />
+        </svg>
+        <span class="sr-only">Close directions</span>
+      </button>
+    </div>
     <div class="directions-header">
       <div class="transport-modes" role="group" aria-label="Travel mode">
         <button
