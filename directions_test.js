@@ -987,13 +987,17 @@ const DESCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="fal
 const DISTANCE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor"><circle cx="6" cy="6" r="2.4"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="18" r="2.4"/><path d="M8.95 7.05 10.36 5.64 18.36 13.64 16.95 15.05 8.95 7.05Z"/></svg>';
 const ELEVATION_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 18h18l-6.2-9.3-4.1 6.3-2.8-3.9L3 18Zm8.1-4.3 2.1-3.3 3.5 5.3H8.7Z"/></svg>';
 const SLOPE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 18h16v-2H9.83l8.58-8.59L17 5l-9 9H6z"/><path d="m7 7.5-2.5-2.5L3 6.5 5.5 9z"/></svg>';
+const TIME_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2Zm0 18a8 8 0 1 1 8-8 8.009 8.009 0 0 1-8 8Z"/><path d="M12.75 7h-1.5v5l4.5 2.7.75-1.23-3.75-2.22Z"/></svg>';
+const ROUTE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.8"/><path d="M8.6 7.7 12.8 12a3 3 0 0 1 .9 2.14V17a1 1 0 0 0 2 0v-2.86a5 5 0 0 0-1.5-3.56L11 9.2A3.94 3.94 0 0 0 13 8h2a3 3 0 0 0 3-3V4a1 1 0 0 0-2 0v1a1 1 0 0 1-1 1h-2a5.94 5.94 0 0 0-4.24 1.76L7.41 8.1A4.94 4.94 0 0 0 6 12.73V17a1 1 0 0 0 2 0v-4.27A2.94 2.94 0 0 1 8.6 7.7Z"/></svg>';
 
 const SUMMARY_ICONS = {
   ascent: ASCENT_ICON,
   descent: DESCENT_ICON,
   distance: DISTANCE_ICON,
   elevation: ELEVATION_ICON,
-  slope: SLOPE_ICON
+  slope: SLOPE_ICON,
+  time: TIME_ICON,
+  trace: ROUTE_ICON
 };
 
 // Use the shared bivouac marker PNG so the UI references the canonical asset.
@@ -1770,6 +1774,9 @@ export class DirectionsManager {
     this.directionsToggle = directionsToggle ?? null;
     this.directionsDock = directionsDock ?? null;
     this.directionsControl = directionsControl ?? null;
+    this.directionsSwipeHandle = this.directionsDock
+      ? this.directionsDock.querySelector('.directions-swipe-handle')
+      : null;
     this.transportModes = transportModes ? Array.from(transportModes) : [];
     this.swapButton = swapButton ?? null;
     this.undoButton = undoButton ?? null;
@@ -1781,6 +1788,9 @@ export class DirectionsManager {
     this.elevationHoverLine = null;
     this.infoButton = directionsInfoButton ?? null;
     this.directionsHint = directionsHint ?? null;
+    this.directionsHeader = this.directionsControl
+      ? this.directionsControl.querySelector('.directions-header')
+      : null;
     this.profileModeToggle = profileModeToggle ?? null;
     this.profileModeMenu = profileModeMenu ?? null;
     this.profileModeOptions = this.profileModeMenu
@@ -1794,6 +1804,20 @@ export class DirectionsManager {
     this.profileLegendHoldTimeout = null;
 
     this.isRouteStatsHoverActive = false;
+    this.panelSwipeState = {
+      active: false,
+      pointerId: null,
+      startY: 0,
+      lastY: 0,
+      startTime: 0,
+      allowOpen: false,
+      allowClose: false,
+      hasExceededThreshold: false
+    };
+
+    this.handleDockPointerDown = this.handleDockPointerDown.bind(this);
+    this.handleDockPointerMove = this.handleDockPointerMove.bind(this);
+    this.handleDockPointerUp = this.handleDockPointerUp.bind(this);
 
     this.handleProfileLegendPointerEnter = this.handleProfileLegendPointerEnter.bind(this);
     this.handleProfileLegendPointerLeave = this.handleProfileLegendPointerLeave.bind(this);
@@ -1850,7 +1874,6 @@ export class DirectionsManager {
     this.routeLineGradientData = EMPTY_COLLECTION;
     this.routeLineFallbackData = EMPTY_COLLECTION;
     this.elevationChartContainer = null;
-    this.elevationHoverReadout = null;
     this.elevationHoverIndicator = null;
     this.elevationHoverLine = null;
     this.highlightedElevationBar = null;
@@ -2270,10 +2293,10 @@ export class DirectionsManager {
 
   setupUIHandlers() {
     this.directionsToggle?.addEventListener('click', () => {
-      this.directionsToggle.classList.toggle('active');
-      this.directionsControl?.classList.toggle('visible');
-      this.updatePanelVisibilityState();
+      this.setPanelVisible(!this.isPanelVisible());
     });
+
+    this.setupPanelGestures();
 
     this.transportModes.forEach((button) => {
       button.addEventListener('click', () => {
@@ -2339,9 +2362,162 @@ export class DirectionsManager {
           const mode = button.dataset.profileMode;
           this.setProfileMode(mode);
           this.closeProfileMenu();
-        });
       });
+    });
+  }
+
+  supportsPanelGestures() {
+    if (typeof window === 'undefined') {
+      return false;
     }
+    if (typeof window.matchMedia === 'function') {
+      try {
+        if (window.matchMedia('(pointer: coarse)').matches) {
+          return true;
+        }
+      } catch (_) {
+        // Ignore matchMedia errors and fall through to other checks.
+      }
+    }
+    if (typeof navigator !== 'undefined') {
+      if (Number.isFinite(navigator.maxTouchPoints) && navigator.maxTouchPoints > 0) {
+        return true;
+      }
+    }
+    if ('ontouchstart' in window) {
+      return true;
+    }
+    if (typeof document !== 'undefined' && document.documentElement
+      && 'ontouchstart' in document.documentElement) {
+      return true;
+    }
+    return false;
+  }
+
+  setupPanelGestures() {
+    if (!this.directionsDock || !this.supportsPanelGestures()) {
+      return;
+    }
+    this.directionsDock.addEventListener('pointerdown', this.handleDockPointerDown);
+  }
+
+  handleDockPointerDown(event) {
+    if (!event || event.pointerType !== 'touch' || !this.directionsDock) {
+      return;
+    }
+    const target = event.target;
+    if (!target) {
+      return;
+    }
+    const interactive = target.closest('button, a, input, select, textarea, [role="button"], [role="link"]');
+    if (interactive) {
+      return;
+    }
+    const handleElement = target.closest('.directions-swipe-handle');
+    const headerElement = this.directionsHeader
+      ? target.closest('.directions-header')
+      : null;
+    const isVisible = this.isPanelVisible();
+    const canOpen = !isVisible && Boolean(handleElement);
+    const canClose = isVisible && (Boolean(headerElement) || Boolean(handleElement));
+    if (!canOpen && !canClose) {
+      return;
+    }
+    const startY = Number.isFinite(event.clientY) ? event.clientY : 0;
+    const now = typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+    this.panelSwipeState = {
+      active: true,
+      pointerId: event.pointerId,
+      startY,
+      lastY: startY,
+      startTime: now,
+      allowOpen: canOpen,
+      allowClose: canClose,
+      hasExceededThreshold: false
+    };
+    try {
+      target.setPointerCapture?.(event.pointerId);
+    } catch (_) {
+      // Ignore pointer capture failures.
+    }
+    this.directionsDock.addEventListener('pointermove', this.handleDockPointerMove);
+    this.directionsDock.addEventListener('pointerup', this.handleDockPointerUp);
+    this.directionsDock.addEventListener('pointercancel', this.handleDockPointerUp);
+  }
+
+  handleDockPointerMove(event) {
+    const state = this.panelSwipeState;
+    if (!state?.active || event.pointerId !== state.pointerId) {
+      return;
+    }
+    const currentY = Number.isFinite(event.clientY) ? event.clientY : state.lastY;
+    const deltaY = currentY - state.startY;
+    state.lastY = currentY;
+    if (!state.hasExceededThreshold && Math.abs(deltaY) > 8 && event.cancelable) {
+      event.preventDefault();
+      state.hasExceededThreshold = true;
+    }
+  }
+
+  handleDockPointerUp(event) {
+    const state = this.panelSwipeState;
+    if (!state?.active || event.pointerId !== state.pointerId || !this.directionsDock) {
+      return;
+    }
+    const endY = Number.isFinite(event.clientY) ? event.clientY : state.lastY;
+    const deltaY = endY - state.startY;
+    const absDelta = Math.abs(deltaY);
+    const now = typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+    const duration = Math.max(1, now - state.startTime);
+    const quickSwipe = absDelta > 25 && duration < 320;
+    const threshold = 48;
+
+    let handled = false;
+    if (state.allowOpen && (deltaY <= -threshold || (quickSwipe && deltaY < -20))) {
+      this.setPanelVisible(true);
+      handled = true;
+    } else if (state.allowClose && (deltaY >= threshold || (quickSwipe && deltaY > 20))) {
+      this.setPanelVisible(false);
+      handled = true;
+    } else if (absDelta < 10) {
+      if (state.allowOpen) {
+        this.setPanelVisible(true);
+        handled = true;
+      } else if (state.allowClose) {
+        this.setPanelVisible(false);
+        handled = true;
+      }
+    }
+
+    try {
+      event.target.releasePointerCapture?.(state.pointerId);
+    } catch (_) {
+      // Ignore pointer release failures.
+    }
+
+    this.panelSwipeState = {
+      active: false,
+      pointerId: null,
+      startY: 0,
+      lastY: 0,
+      startTime: 0,
+      allowOpen: false,
+      allowClose: false,
+      hasExceededThreshold: false
+    };
+
+    this.directionsDock.removeEventListener('pointermove', this.handleDockPointerMove);
+    this.directionsDock.removeEventListener('pointerup', this.handleDockPointerUp);
+    this.directionsDock.removeEventListener('pointercancel', this.handleDockPointerUp);
+
+    if (handled && event.cancelable) {
+      event.preventDefault();
+    }
+  }
 
     this.handleDocumentClickForProfileMenu = (event) => {
       if (!this.profileMenuOpen) {
@@ -5440,6 +5616,17 @@ export class DirectionsManager {
     return Boolean(this.directionsControl?.classList.contains('visible'));
   }
 
+  setPanelVisible(shouldShow) {
+    const visible = Boolean(shouldShow);
+    if (this.directionsControl) {
+      this.directionsControl.classList.toggle('visible', visible);
+    }
+    if (this.directionsToggle) {
+      this.directionsToggle.classList.toggle('active', visible);
+    }
+    this.updatePanelVisibilityState();
+  }
+
   updatePanelVisibilityState() {
     const isVisible = this.isPanelVisible();
     if (this.directionsToggle) {
@@ -5464,10 +5651,8 @@ export class DirectionsManager {
   }
 
   ensurePanelVisible() {
-    if (this.directionsControl && !this.isPanelVisible()) {
-      this.directionsControl.classList.add('visible');
-      this.directionsToggle?.classList.add('active');
-      this.updatePanelVisibilityState();
+    if (!this.isPanelVisible()) {
+      this.setPanelVisible(true);
     }
   }
 
@@ -6790,7 +6975,6 @@ export class DirectionsManager {
     this.resetRouteCuts();
     this.detachElevationChartEvents();
     this.elevationChartContainer = null;
-    this.elevationHoverReadout = null;
     this.highlightedElevationBar = null;
     this.lastElevationHoverDistance = null;
     this.draggedBivouacIndex = null;
@@ -7954,6 +8138,50 @@ export class DirectionsManager {
     return `${minutes} min`;
   }
 
+  getRouteSummaryLabel() {
+    const markers = this.computeSegmentMarkers();
+    if (Array.isArray(markers) && markers.length >= 2) {
+      const startMarker = markers[0];
+      const endMarker = markers[markers.length - 1];
+      const startTitle = typeof startMarker?.title === 'string' ? startMarker.title.trim() : '';
+      const endTitle = typeof endMarker?.title === 'string' ? endMarker.title.trim() : '';
+      if (startTitle && endTitle) {
+        return `${startTitle} → ${endTitle}`;
+      }
+      if (endTitle) {
+        return endTitle;
+      }
+      if (startTitle) {
+        return startTitle;
+      }
+    }
+
+    if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
+      const firstSegmentName = this.cutSegments[0]?.name;
+      if (typeof firstSegmentName === 'string' && firstSegmentName.trim()) {
+        return firstSegmentName.trim();
+      }
+    }
+
+    if (Array.isArray(this.waypoints) && this.waypoints.length >= 2) {
+      const first = this.waypoints[0];
+      const last = this.waypoints[this.waypoints.length - 1];
+      const firstName = typeof first?.name === 'string' ? first.name.trim() : '';
+      const lastName = typeof last?.name === 'string' ? last.name.trim() : '';
+      if (firstName && lastName) {
+        return `${firstName} → ${lastName}`;
+      }
+      if (lastName) {
+        return lastName;
+      }
+      if (firstName) {
+        return firstName;
+      }
+    }
+
+    return '';
+  }
+
   renderRouteStatsSummary(metrics) {
     if (!this.routeStats) {
       return;
@@ -7970,11 +8198,18 @@ export class DirectionsManager {
     const distanceLabel = this.formatDistance(metrics.distanceKm);
     const ascent = Math.max(0, Math.round(metrics.ascent));
     const descent = Math.max(0, Math.round(metrics.descent));
+    const timeLabel = this.formatDurationHours(
+      this.estimateTravelTimeHours(metrics.distanceKm, ascent, descent)
+    );
+    const routeLabel = this.getRouteSummaryLabel();
+    const traceValue = routeLabel ? routeLabel : '—';
 
     const stats = [
+      { key: 'trace', label: 'Route', value: traceValue },
+      { key: 'time', label: 'Est. time', value: timeLabel },
+      { key: 'distance', label: 'Total distance', value: `${distanceLabel} km` },
       { key: 'ascent', label: 'Total ascent', value: `${ascent} m` },
-      { key: 'descent', label: 'Total descent', value: `${descent} m` },
-      { key: 'distance', label: 'Total distance', value: `${distanceLabel} km` }
+      { key: 'descent', label: 'Total descent', value: `${descent} m` }
     ];
 
     const listItems = stats
@@ -7996,7 +8231,17 @@ export class DirectionsManager {
       })
       .join('');
 
-    const srText = `Distance: ${distanceLabel} km. Ascent: ${ascent} m. Descent: ${descent} m.`;
+    const srParts = [];
+    if (routeLabel) {
+      srParts.push(`Route: ${routeLabel}`);
+    }
+    srParts.push(
+      `Distance: ${distanceLabel} km`,
+      `Ascent: ${ascent} m`,
+      `Descent: ${descent} m`,
+      `Estimated time: ${timeLabel}`
+    );
+    const srText = `${srParts.join('. ')}.`;
 
     this.routeStats.innerHTML = `
       <span class="sr-only">${escapeHtml(srText)}</span>
@@ -8007,6 +8252,7 @@ export class DirectionsManager {
     this.routeStats.classList.add('has-stats');
     this.routeStats.classList.remove('is-hover');
     this.routeStats.setAttribute('data-mode', 'summary');
+    this.isRouteStatsHoverActive = false;
   }
 
   updateRouteStatsHover(distanceKm) {
@@ -8014,23 +8260,108 @@ export class DirectionsManager {
       return;
     }
 
-    this.routeStats.classList.remove('is-hover');
-    this.routeStats.removeAttribute('data-mode');
-    this.isRouteStatsHoverActive = false;
-
-    if (this.latestMetrics) {
-      this.renderRouteStatsSummary(this.latestMetrics);
+    if (!Number.isFinite(distanceKm)) {
+      const summaryMetrics = this.latestMetrics
+        ?? (this.routeGeojson ? this.calculateRouteMetrics(this.routeGeojson) : null);
+      if (summaryMetrics) {
+        this.latestMetrics = summaryMetrics;
+      }
+      this.renderRouteStatsSummary(summaryMetrics ?? null);
       return;
     }
 
-    if (this.routeGeojson) {
-      const metrics = this.calculateRouteMetrics(this.routeGeojson);
-      this.latestMetrics = metrics;
-      this.renderRouteStatsSummary(metrics);
+    if (!this.routeProfile || !Array.isArray(this.routeProfile.coordinates)
+      || this.routeProfile.coordinates.length < 2) {
+      const fallbackMetrics = this.latestMetrics
+        ?? (this.routeGeojson ? this.calculateRouteMetrics(this.routeGeojson) : null);
+      if (fallbackMetrics) {
+        this.latestMetrics = fallbackMetrics;
+      }
+      this.renderRouteStatsSummary(fallbackMetrics ?? null);
       return;
     }
 
-    this.renderRouteStatsSummary(null);
+    const cutSegment = this.getCutSegmentForDistance(distanceKm);
+    const profileSegment = this.getProfileSegmentForDistance(distanceKm);
+
+    const segmentStartKm = (() => {
+      const rawStart = Number(cutSegment?.startKm);
+      if (!Number.isFinite(rawStart)) {
+        return 0;
+      }
+      return Math.max(0, Math.min(distanceKm, rawStart));
+    })();
+
+    const segmentMetrics = this.computeCumulativeMetrics(distanceKm, segmentStartKm);
+    const distanceLabel = this.formatDistance(segmentMetrics.distanceKm);
+    const ascent = Math.max(0, Math.round(segmentMetrics.ascent));
+    const descent = Math.max(0, Math.round(segmentMetrics.descent));
+    const timeLabel = this.formatDurationHours(
+      this.estimateTravelTimeHours(segmentMetrics.distanceKm, ascent, descent)
+    );
+
+    const segmentLabelParts = [];
+    if (typeof cutSegment?.name === 'string' && cutSegment.name.trim()) {
+      segmentLabelParts.push(cutSegment.name.trim());
+    }
+    if (profileSegment?.name) {
+      const definition = this.getProfileModeDefinition(this.profileMode);
+      const modeLabel = definition?.label ? `${definition.label}: ` : '';
+      const profileLabel = `${modeLabel}${profileSegment.name}`;
+      if (!segmentLabelParts.includes(profileLabel)) {
+        segmentLabelParts.push(profileLabel);
+      }
+    }
+    const segmentLabel = segmentLabelParts.join(' · ');
+
+    const stats = [
+      { key: 'trace', label: 'Segment', value: segmentLabel || '—' },
+      { key: 'time', label: 'Segment time', value: timeLabel },
+      { key: 'distance', label: 'Segment distance', value: `${distanceLabel} km` },
+      { key: 'ascent', label: 'Segment ascent', value: `D+ ${ascent} m` },
+      { key: 'descent', label: 'Segment descent', value: `D- ${descent} m` }
+    ];
+
+    const listItems = stats
+      .map(({ key, label, value }) => {
+        const icon = SUMMARY_ICONS[key] ?? '';
+        const iconMarkup = icon ? `${icon}` : '';
+        const safeLabel = escapeHtml(label);
+        const safeValue = escapeHtml(value);
+        return `
+        <li
+          class="summary-item ${key}"
+          aria-label="${safeLabel} ${safeValue}"
+          title="${safeLabel}"
+        >
+          ${iconMarkup}
+          <span aria-hidden="true">${safeValue}</span>
+        </li>
+      `.trim();
+      })
+      .join('');
+
+    const srParts = [];
+    if (segmentLabel) {
+      srParts.push(`Segment: ${segmentLabel}`);
+    }
+    srParts.push(
+      `Distance: ${distanceLabel} km`,
+      `Ascent: ${ascent} m`,
+      `Descent: ${descent} m`,
+      `Estimated time: ${timeLabel}`
+    );
+    const srText = `${srParts.join('. ')}.`;
+
+    this.routeStats.innerHTML = `
+      <span class="sr-only">${escapeHtml(srText)}</span>
+      <ul class="route-stats-list">
+        ${listItems}
+      </ul>
+    `;
+    this.routeStats.classList.add('has-stats', 'is-hover');
+    this.routeStats.setAttribute('data-mode', 'hover');
+    this.isRouteStatsHoverActive = true;
   }
 
   updateStats(route) {
@@ -8289,7 +8620,6 @@ export class DirectionsManager {
       this.elevationDomain = null;
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
-      this.elevationHoverReadout = null;
       this.elevationHoverIndicator = null;
       this.elevationHoverLine = null;
       this.highlightedElevationBar = null;
@@ -8305,7 +8635,6 @@ export class DirectionsManager {
       this.elevationDomain = null;
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
-      this.elevationHoverReadout = null;
       this.elevationHoverIndicator = null;
       this.elevationHoverLine = null;
       this.highlightedElevationBar = null;
@@ -8722,7 +9051,6 @@ export class DirectionsManager {
             <div class="elevation-hit-targets">${hitTargetsHtml}</div>
             ${markerOverlay}
           </div>
-          <div class="elevation-hover-readout" aria-hidden="true"></div>
           <div class="elevation-x-axis">${xAxisLabels}</div>
         </div>
       </div>
@@ -8733,7 +9061,6 @@ export class DirectionsManager {
     this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
     this.elevationHoverIndicator = this.elevationChart.querySelector('.elevation-hover-indicator');
     this.elevationHoverLine = this.elevationChart.querySelector('.elevation-hover-line');
-    this.elevationHoverReadout = this.elevationChart.querySelector('.elevation-hover-readout');
     this.highlightedElevationBar = null;
     if (this.elevationHoverIndicator) {
       this.elevationHoverIndicator.setAttribute('aria-hidden', 'true');
@@ -8921,13 +9248,7 @@ export class DirectionsManager {
   }
 
   updateElevationHoverReadout(distanceKm) {
-    const hoverReadout = this.elevationHoverReadout;
-
     if (!Number.isFinite(distanceKm)) {
-      if (hoverReadout) {
-        hoverReadout.textContent = '';
-        hoverReadout.setAttribute('aria-hidden', 'true');
-      }
       if (this.elevationHoverIndicator) {
         this.elevationHoverIndicator.setAttribute('aria-hidden', 'true');
       }
@@ -8935,63 +9256,6 @@ export class DirectionsManager {
       return;
     }
 
-    const profileSegment = this.getProfileSegmentForDistance(distanceKm);
-    const cutSegment = this.getCutSegmentForDistance(distanceKm);
-
-    const segmentStartKm = (() => {
-      const rawStart = Number(cutSegment?.startKm);
-      if (!Number.isFinite(rawStart)) {
-        return 0;
-      }
-      if (!Number.isFinite(distanceKm)) {
-        return Math.max(0, rawStart);
-      }
-      return Math.max(0, Math.min(distanceKm, rawStart));
-    })();
-
-    const segmentMetrics = this.computeCumulativeMetrics(distanceKm, segmentStartKm);
-    const segmentDistanceLabel = this.formatDistance(segmentMetrics.distanceKm);
-
-    const segmentLabelParts = [];
-    if (cutSegment?.name) {
-      segmentLabelParts.push(escapeHtml(cutSegment.name));
-    }
-    if (profileSegment?.name) {
-      const profileLabel = (() => {
-        const definition = this.getProfileModeDefinition(this.profileMode);
-        const modeLabel = definition?.label ? `${definition.label}: ` : '';
-        return `${modeLabel}${profileSegment.name}`;
-      })();
-      const escapedProfileLabel = escapeHtml(profileLabel);
-      if (!segmentLabelParts.includes(escapedProfileLabel)) {
-        segmentLabelParts.push(escapedProfileLabel);
-      }
-    }
-
-    const roundMeters = (value) => (Number.isFinite(value) ? Math.round(value) : 0);
-    const segmentAscent = roundMeters(segmentMetrics.ascent);
-    const segmentDescent = roundMeters(segmentMetrics.descent);
-    const segmentTimeLabel = escapeHtml(
-      this.formatDurationHours(
-        this.estimateTravelTimeHours(segmentMetrics.distanceKm, segmentMetrics.ascent, segmentMetrics.descent)
-      )
-    );
-
-    const readoutParts = [];
-    if (segmentLabelParts.length) {
-      readoutParts.push(`<span class="segment-name" title="Segment">${segmentLabelParts.join(' · ')}</span>`);
-    }
-    readoutParts.push(
-      `<span class="distance" title="Distance du segment">Dist. ${escapeHtml(segmentDistanceLabel)} km</span>`,
-      `<span class="ascent" title="Dénivelé positif du segment">D+ ${segmentAscent} m</span>`,
-      `<span class="descent" title="Dénivelé négatif du segment">D- ${segmentDescent} m</span>`,
-      `<span class="time" title="Estimation de temps du segment">Temps ${segmentTimeLabel}</span>`
-    );
-
-    if (hoverReadout) {
-      hoverReadout.innerHTML = readoutParts.join('');
-      hoverReadout.setAttribute('aria-hidden', 'false');
-    }
     this.updateRouteStatsHover(distanceKm);
   }
 
