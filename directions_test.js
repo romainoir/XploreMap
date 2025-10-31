@@ -81,6 +81,16 @@ const POI_ICON_DEFINITIONS = Object.freeze({
   parking_multi_storey: { icon: 'parking', label: 'Parking', color: '#4b5563' }
 });
 
+const PARKING_CATEGORY_KEYS = Object.freeze([
+  'parking',
+  'parking_underground',
+  'parking_multi-storey',
+  'parking_multistorey',
+  'parking_multi_storey'
+]);
+const PARKING_CATEGORY_SET = new Set(PARKING_CATEGORY_KEYS);
+const PARKING_CLUSTER_MIN_SPACING_KM = 1;
+
 const ELEVATION_PROFILE_POI_CATEGORY_KEYS = Object.freeze([
   'peak',
   'volcano',
@@ -107,6 +117,10 @@ const ROUTE_POI_LABEL_LAYER_ID = 'route-poi-labels';
 const POI_CLUSTER_MIN_SPACING_KM = 0.05;
 const POI_CLUSTER_MAX_SPACING_KM = 1.5;
 const POI_CLUSTER_DISTANCE_SCALE = 120;
+
+const HIKING_BASE_SPEED_KMPH = 4;
+const ASCENT_METERS_PER_HOUR = 400;
+const DESCENT_METERS_PER_HOUR = 600;
 
 const ELEVATION_PROFILE_POI_CLUSTER_MIN_WINDOW_KM = 0.4;
 const ELEVATION_PROFILE_POI_CLUSTER_MAX_WINDOW_KM = 2;
@@ -400,6 +414,9 @@ function clusterRoutePointsOfInterest(pois, totalDistanceKm) {
     }
     let cluster = [];
     let clusterBase = null;
+    const activeSpacingKm = PARKING_CATEGORY_SET.has(categoryKey)
+      ? Math.max(spacingKm, PARKING_CLUSTER_MIN_SPACING_KM)
+      : spacingKm;
     sorted.forEach((poi) => {
       const distance = Number(poi.distanceKm);
       if (!Number.isFinite(distance)) {
@@ -410,7 +427,7 @@ function clusterRoutePointsOfInterest(pois, totalDistanceKm) {
         clusterBase = distance;
         return;
       }
-      if (Math.abs(distance - clusterBase) <= spacingKm) {
+      if (Math.abs(distance - clusterBase) <= activeSpacingKm) {
         cluster.push(poi);
       } else {
         const representative = selectClusterRepresentative(cluster, categoryKey);
@@ -1760,6 +1777,8 @@ export class DirectionsManager {
     this.clearButton = clearButton ?? null;
     this.routeStats = routeStats ?? null;
     this.elevationChart = elevationChart ?? null;
+    this.elevationHoverIndicator = null;
+    this.elevationHoverLine = null;
     this.infoButton = directionsInfoButton ?? null;
     this.directionsHint = directionsHint ?? null;
     this.profileModeToggle = profileModeToggle ?? null;
@@ -1832,6 +1851,8 @@ export class DirectionsManager {
     this.routeLineFallbackData = EMPTY_COLLECTION;
     this.elevationChartContainer = null;
     this.elevationHoverReadout = null;
+    this.elevationHoverIndicator = null;
+    this.elevationHoverLine = null;
     this.highlightedElevationBar = null;
     this.activeHoverSource = null;
     this.lastElevationHoverDistance = null;
@@ -6508,50 +6529,48 @@ export class DirectionsManager {
   }
 
   highlightElevationAt(distanceKm) {
-    if (!this.elevationChartContainer) return;
-    const bars = Array.from(this.elevationChartContainer.querySelectorAll('.elevation-bar'));
-    let targetBar = null;
-    let fallbackBar = null;
-    let fallbackDelta = Infinity;
-
-    if (Number.isFinite(distanceKm)) {
-      for (const bar of bars) {
-        const startKm = Number(bar.dataset.startKm);
-        const endKm = Number(bar.dataset.endKm);
-        if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
-          continue;
-        }
-        const segmentSpan = Math.max(endKm - startKm, 0);
-        const tolerance = Math.max(0.0005, segmentSpan * 0.6);
-        if (distanceKm >= startKm - tolerance && distanceKm <= endKm + tolerance) {
-          targetBar = bar;
-          break;
-        }
-        const center = startKm + segmentSpan / 2;
-        const delta = Math.abs(center - distanceKm);
-        if (delta < fallbackDelta) {
-          fallbackDelta = delta;
-          fallbackBar = bar;
-        }
-      }
-
-      if (!targetBar && fallbackBar) {
-        targetBar = fallbackBar;
-      }
+    if (!this.elevationChartContainer) {
+      return;
     }
 
-    if (this.highlightedElevationBar && this.highlightedElevationBar !== targetBar) {
+    if (this.highlightedElevationBar) {
       this.highlightedElevationBar.classList.remove('highlighted');
-    }
-
-    if (targetBar) {
-      if (targetBar !== this.highlightedElevationBar) {
-        targetBar.classList.add('highlighted');
-      }
-      this.highlightedElevationBar = targetBar;
-    } else {
       this.highlightedElevationBar = null;
     }
+
+    if (!this.elevationHoverIndicator || !this.elevationHoverLine) {
+      return;
+    }
+
+    if (!Number.isFinite(distanceKm)) {
+      this.elevationHoverIndicator.setAttribute('aria-hidden', 'true');
+      return;
+    }
+
+    let domainMin = Number(this.elevationDomain?.min);
+    let domainMax = Number(this.elevationDomain?.max);
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+      if (Number.isFinite(totalDistance) && totalDistance > 0) {
+        domainMin = 0;
+        domainMax = totalDistance;
+      }
+    }
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      this.elevationHoverIndicator.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    const span = domainMax - domainMin;
+    if (!(span > 0)) {
+      this.elevationHoverIndicator.setAttribute('aria-hidden', 'true');
+      return;
+    }
+
+    const ratio = (distanceKm - domainMin) / span;
+    const clampedRatio = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
+    const percent = clampedRatio * 100;
+    this.elevationHoverLine.style.left = `${percent}%`;
+    this.elevationHoverIndicator.setAttribute('aria-hidden', 'false');
   }
 
   detachElevationChartEvents() {
@@ -6575,48 +6594,53 @@ export class DirectionsManager {
       return;
     }
 
-    const bars = Array.from(this.elevationChartContainer.querySelectorAll('.elevation-bar'));
-    if (!bars.length) {
+    const rect = this.elevationChartContainer.getBoundingClientRect();
+    const width = Number(rect?.width) || 0;
+    if (!(width > 0)) {
       return;
     }
 
-    let target = event.target?.closest?.('.elevation-bar') ?? null;
-    if (!target || !this.elevationChartContainer.contains(target)) {
-      const rect = this.elevationChartContainer.getBoundingClientRect();
-      const relativeX = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
-      const ratio = Math.max(0, Math.min(0.9999, relativeX));
-      const index = Math.max(0, Math.min(bars.length - 1, Math.floor(ratio * bars.length)));
-      target = bars[index];
+    let domainMin = Number(this.elevationDomain?.min);
+    let domainMax = Number(this.elevationDomain?.max);
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+      if (Number.isFinite(totalDistance) && totalDistance > 0) {
+        domainMin = 0;
+        domainMax = totalDistance;
+      }
     }
-
-    if (!target) {
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
       return;
     }
 
-    const startKm = Number(target.dataset.startKm);
-    const endKm = Number(target.dataset.endKm);
-    if (!Number.isFinite(startKm) || !Number.isFinite(endKm)) {
+    const span = domainMax - domainMin;
+    if (!(span > 0)) {
       return;
     }
 
-    const midpoint = Number(target.dataset.midKm);
-    const distanceKm = Number.isFinite(midpoint)
-      ? midpoint
-      : Math.max(0, startKm + Math.max(0, endKm - startKm) / 2);
+    const relativeX = (event.clientX - rect.left) / width;
+    const clampedRatio = Math.max(0, Math.min(1, Number.isFinite(relativeX) ? relativeX : 0));
+    const rawDistance = domainMin + span * clampedRatio;
+    const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+    const distanceKm = Number.isFinite(totalDistance) && totalDistance > 0
+      ? Math.max(0, Math.min(totalDistance, rawDistance))
+      : Math.max(0, rawDistance);
 
     if (this.activeHoverSource === 'chart' && this.lastElevationHoverDistance !== null
       && Math.abs(this.lastElevationHoverDistance - distanceKm) < 1e-4) {
+      this.highlightElevationAt(distanceKm);
       return;
     }
 
     this.lastElevationHoverDistance = distanceKm;
-    this.updateElevationHoverReadout(distanceKm);
+    this.highlightElevationAt(distanceKm);
     this.showRouteHoverAtDistance(distanceKm, { source: 'chart' });
   }
 
   onElevationPointerLeave() {
     this.lastElevationHoverDistance = null;
     this.resetSegmentHover('chart');
+    this.highlightElevationAt(null);
     this.updateElevationHoverReadout(null);
   }
 
@@ -7826,6 +7850,110 @@ export class DirectionsManager {
     return metrics;
   }
 
+  computeCumulativeMetrics(distanceKm, startDistanceKm = 0) {
+    const normalizedEnd = Number(distanceKm);
+    const normalizedStart = Number(startDistanceKm);
+    const result = { distanceKm: 0, ascent: 0, descent: 0 };
+
+    const totalDistance = Math.max(0, Number(this.routeProfile?.totalDistanceKm) || 0);
+    const endKm = Number.isFinite(normalizedEnd)
+      ? Math.max(0, Math.min(totalDistance || normalizedEnd, normalizedEnd))
+      : 0;
+    const startKm = Number.isFinite(normalizedStart)
+      ? Math.max(0, Math.min(endKm, normalizedStart))
+      : 0;
+
+    result.distanceKm = Math.max(0, endKm - startKm);
+
+    const distances = Array.isArray(this.routeProfile?.cumulativeDistances)
+      ? this.routeProfile.cumulativeDistances
+      : [];
+
+    if (!Array.isArray(distances) || distances.length < 2) {
+      return result;
+    }
+
+    const points = [];
+    points.push(startKm, endKm);
+    distances.forEach((value) => {
+      if (!Number.isFinite(value)) {
+        return;
+      }
+      if (value <= startKm || value >= endKm) {
+        return;
+      }
+      points.push(value);
+    });
+
+    points.sort((a, b) => a - b);
+    const uniquePoints = [];
+    points.forEach((value) => {
+      if (!Number.isFinite(value)) {
+        return;
+      }
+      if (!uniquePoints.length || Math.abs(uniquePoints[uniquePoints.length - 1] - value) > 1e-6) {
+        uniquePoints.push(value);
+      }
+    });
+
+    if (uniquePoints.length < 2) {
+      return result;
+    }
+
+    let ascent = 0;
+    let descent = 0;
+    for (let index = 1; index < uniquePoints.length; index += 1) {
+      const previousDistance = uniquePoints[index - 1];
+      const nextDistance = uniquePoints[index];
+      if (nextDistance <= previousDistance) {
+        continue;
+      }
+      const startElevation = this.getElevationAtDistance(previousDistance);
+      const endElevation = this.getElevationAtDistance(nextDistance);
+      if (!Number.isFinite(startElevation) || !Number.isFinite(endElevation)) {
+        continue;
+      }
+      const delta = endElevation - startElevation;
+      if (delta > 0) {
+        ascent += delta;
+      } else if (delta < 0) {
+        descent += Math.abs(delta);
+      }
+    }
+
+    result.ascent = ascent;
+    result.descent = descent;
+    return result;
+  }
+
+  estimateTravelTimeHours(distanceKm, ascentMeters = 0, descentMeters = 0) {
+    const distance = Math.max(0, Number(distanceKm) || 0);
+    const ascent = Math.max(0, Number(ascentMeters) || 0);
+    const descent = Math.max(0, Number(descentMeters) || 0);
+
+    const horizontalHours = distance / Math.max(HIKING_BASE_SPEED_KMPH, 0.1);
+    const ascentHours = ascent / Math.max(ASCENT_METERS_PER_HOUR, 0.1);
+    const descentHours = descent / Math.max(DESCENT_METERS_PER_HOUR, 0.1);
+    const total = horizontalHours + ascentHours + descentHours;
+    return Number.isFinite(total) && total > 0 ? total : 0;
+  }
+
+  formatDurationHours(hours) {
+    if (!Number.isFinite(hours) || hours <= 0) {
+      return '0 min';
+    }
+    const totalMinutes = Math.max(1, Math.round(hours * 60));
+    const wholeHours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (wholeHours && minutes) {
+      return `${wholeHours} h ${minutes} min`;
+    }
+    if (wholeHours) {
+      return `${wholeHours} h`;
+    }
+    return `${minutes} min`;
+  }
+
   renderRouteStatsSummary(metrics) {
     if (!this.routeStats) {
       return;
@@ -8162,6 +8290,8 @@ export class DirectionsManager {
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
       this.elevationHoverReadout = null;
+      this.elevationHoverIndicator = null;
+      this.elevationHoverLine = null;
       this.highlightedElevationBar = null;
       this.updateProfileLegend(false);
       return;
@@ -8176,6 +8306,8 @@ export class DirectionsManager {
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
       this.elevationHoverReadout = null;
+      this.elevationHoverIndicator = null;
+      this.elevationHoverLine = null;
       this.highlightedElevationBar = null;
       this.lastElevationHoverDistance = null;
       this.updateProfileLegend(false);
@@ -8584,9 +8716,13 @@ export class DirectionsManager {
         <div class="elevation-plot-area">
           <div class="elevation-chart-container" role="presentation">
             ${areaSvg}
+            <div class="elevation-hover-indicator" aria-hidden="true">
+              <div class="elevation-hover-line"></div>
+            </div>
             <div class="elevation-hit-targets">${hitTargetsHtml}</div>
             ${markerOverlay}
           </div>
+          <div class="elevation-hover-readout" aria-hidden="true"></div>
           <div class="elevation-x-axis">${xAxisLabels}</div>
         </div>
       </div>
@@ -8595,8 +8731,13 @@ export class DirectionsManager {
     this.updateProfileLegend(true);
 
     this.elevationChartContainer = this.elevationChart.querySelector('.elevation-chart-container');
+    this.elevationHoverIndicator = this.elevationChart.querySelector('.elevation-hover-indicator');
+    this.elevationHoverLine = this.elevationChart.querySelector('.elevation-hover-line');
     this.elevationHoverReadout = this.elevationChart.querySelector('.elevation-hover-readout');
     this.highlightedElevationBar = null;
+    if (this.elevationHoverIndicator) {
+      this.elevationHoverIndicator.setAttribute('aria-hidden', 'true');
+    }
     this.attachElevationChartEvents();
     this.updateElevationMarkerPositions();
     if (this.elevationChartContainer && typeof ResizeObserver !== 'undefined') {
@@ -8787,6 +8928,9 @@ export class DirectionsManager {
         hoverReadout.textContent = '';
         hoverReadout.setAttribute('aria-hidden', 'true');
       }
+      if (this.elevationHoverIndicator) {
+        this.elevationHoverIndicator.setAttribute('aria-hidden', 'true');
+      }
       this.updateRouteStatsHover(null);
       return;
     }
@@ -8799,19 +8943,57 @@ export class DirectionsManager {
     const gradeLabel = escapeHtml(this.formatGrade(gradeValue));
 
     const profileSegment = this.getProfileSegmentForDistance(distanceKm);
+    const cutSegment = this.getCutSegmentForDistance(distanceKm);
+    const segmentStartKm = Number.isFinite(cutSegment?.startKm) ? cutSegment.startKm : 0;
+
+    const totalMetrics = this.computeCumulativeMetrics(distanceKm, 0);
+    const segmentMetrics = this.computeCumulativeMetrics(distanceKm, segmentStartKm);
+
+    const roundMeters = (value) => (Number.isFinite(value) ? Math.round(value) : 0);
+    const totalAscent = roundMeters(totalMetrics.ascent);
+    const totalDescent = roundMeters(totalMetrics.descent);
+    const segmentAscent = roundMeters(segmentMetrics.ascent);
+    const segmentDescent = roundMeters(segmentMetrics.descent);
+
+    const segmentDistanceLabel = this.formatDistance(segmentMetrics.distanceKm);
+    const totalTimeLabel = escapeHtml(
+      this.formatDurationHours(
+        this.estimateTravelTimeHours(totalMetrics.distanceKm, totalMetrics.ascent, totalMetrics.descent)
+      )
+    );
+    const segmentTimeLabel = escapeHtml(
+      this.formatDurationHours(
+        this.estimateTravelTimeHours(segmentMetrics.distanceKm, segmentMetrics.ascent, segmentMetrics.descent)
+      )
+    );
+
     let detailMarkup = '';
+    const detailParts = [];
     if (profileSegment?.name) {
       const definition = this.getProfileModeDefinition(this.profileMode);
       const modeLabel = escapeHtml(definition?.label ?? 'Difficulty');
       const segmentLabel = escapeHtml(profileSegment.name);
-      detailMarkup = `<span class="profile">${modeLabel}: ${segmentLabel}</span>`;
+      detailParts.push(`${modeLabel}: ${segmentLabel}`);
+    }
+    if (cutSegment?.name) {
+      detailParts.push(escapeHtml(cutSegment.name));
+    }
+    if (detailParts.length) {
+      detailMarkup = `<span class="profile">${detailParts.join(' · ')}</span>`;
     }
 
     if (hoverReadout) {
       hoverReadout.innerHTML = `
-        <span class="distance">${distanceLabel} km</span>
-        <span class="altitude">${altitudeLabel}</span>
-        <span class="grade">Slope ${gradeLabel}</span>
+        <span class="distance" title="Distance cumulée">Dist. ${escapeHtml(distanceLabel)} km</span>
+        <span class="segment-distance" title="Distance depuis le dernier bivouac">Segment ${escapeHtml(segmentDistanceLabel)} km</span>
+        <span class="altitude" title="Altitude">Alt. ${escapeHtml(altitudeLabel)}</span>
+        <span class="ascent" title="Dénivelé positif cumulé">D+ ${totalAscent} m</span>
+        <span class="descent" title="Dénivelé négatif cumulé">D- ${totalDescent} m</span>
+        <span class="segment-ascent" title="Dénivelé positif du segment">Seg D+ ${segmentAscent} m</span>
+        <span class="segment-descent" title="Dénivelé négatif du segment">Seg D- ${segmentDescent} m</span>
+        <span class="time" title="Estimation de temps cumulée">Temps ${totalTimeLabel}</span>
+        <span class="segment-time" title="Estimation de temps du segment">Seg ${segmentTimeLabel}</span>
+        <span class="grade" title="Pente instantanée">Pente ${gradeLabel}</span>
         ${detailMarkup}
       `;
       hoverReadout.setAttribute('aria-hidden', 'false');

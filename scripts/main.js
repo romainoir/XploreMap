@@ -645,7 +645,7 @@ async function init() {
   ]);
   const DEBUG_NETWORK_POI_LABEL_TEXT_EXPRESSION = Object.freeze([
     'let',
-    'rawName',
+    'rawNameCandidate',
     [
       'coalesce',
       ['get', 'name:fr'],
@@ -655,20 +655,40 @@ async function init() {
       ''
     ],
     'let',
-    'category',
+    'rawCategoryCandidate',
     [
       'coalesce',
       ['get', 'subclass'],
       ['get', 'class'],
       ''
     ],
+    'let',
+    'labelName',
     [
       'case',
-      ['!=', ['var', 'rawName'], ''],
-      ['var', 'rawName'],
+      ['==', ['typeof', ['var', 'rawNameCandidate']], 'string'],
+      ['var', 'rawNameCandidate'],
+      ['==', ['typeof', ['var', 'rawNameCandidate']], 'number'],
+      ['to-string', ['var', 'rawNameCandidate']],
+      ''
+    ],
+    'let',
+    'labelCategory',
+    [
+      'case',
+      ['==', ['typeof', ['var', 'rawCategoryCandidate']], 'string'],
+      ['var', 'rawCategoryCandidate'],
+      ['==', ['typeof', ['var', 'rawCategoryCandidate']], 'number'],
+      ['to-string', ['var', 'rawCategoryCandidate']],
+      ''
+    ],
+    [
+      'case',
+      ['!=', ['var', 'labelName'], ''],
+      ['var', 'labelName'],
       [
         'match',
-        ['var', 'category'],
+        ['var', 'labelCategory'],
         'peak', 'Sommet',
         'volcano', 'Volcan',
         'mountain_pass', 'Col',
