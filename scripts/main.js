@@ -61,9 +61,11 @@ function createTilePreviewUrl(template, coords = WMTS_PREVIEW_COORDS) {
   return replacements.reduce((acc, entry) => acc.replace(entry.token, entry.value), template);
 }
 
+const BASE_STYLE_OPTION_ID = 'vector-map';
+
 const IMAGERY_OPTIONS = Object.freeze([
   {
-    id: 'vector-map',
+    id: BASE_STYLE_OPTION_ID,
     label: 'Vector map',
     type: 'base-style',
     previewImage: './data/OSM_vector.png',
@@ -260,6 +262,8 @@ function scaleExpression(expression, factor) {
 }
 
 const IMAGERY_OPTIONS_BY_ID = new Map(IMAGERY_OPTIONS.map((option) => [option.id, option]));
+
+let baseStyleContentLayerIds = [];
 
 function getAvailableHillshadeMethods() {
   const styleSpec = typeof maplibregl !== 'undefined' ? maplibregl?.styleSpec : null;
@@ -474,6 +478,29 @@ async function init() {
   versaStyle.glyphs = 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf';
   versaStyle.sprite = MAPLIBRE_SPRITE_URL;
 
+  const landcoverSourcePrefixes = ['landcover'];
+  if (Array.isArray(versaStyle.layers)) {
+    baseStyleContentLayerIds = versaStyle.layers
+      .filter((layer) => {
+        if (!layer || typeof layer.id !== 'string') {
+          return false;
+        }
+        if (layer.type === 'background') {
+          return false;
+        }
+        const sourceLayer = typeof layer['source-layer'] === 'string'
+          ? layer['source-layer'].toLowerCase()
+          : '';
+        if (landcoverSourcePrefixes.some((prefix) => sourceLayer.startsWith(prefix))) {
+          return false;
+        }
+        return true;
+      })
+      .map((layer) => layer.id);
+  } else {
+    baseStyleContentLayerIds = [];
+  }
+
   const map = new maplibregl.Map({
     container: 'map',
     hash: true,
@@ -654,7 +681,6 @@ async function init() {
       ['get', 'ref'],
       ''
     ],
-    'let',
     'rawCategoryCandidate',
     [
       'coalesce',
@@ -662,7 +688,6 @@ async function init() {
       ['get', 'class'],
       ''
     ],
-    'let',
     'labelName',
     [
       'case',
@@ -672,7 +697,6 @@ async function init() {
       ['to-string', ['var', 'rawNameCandidate']],
       ''
     ],
-    'let',
     'labelCategory',
     [
       'case',
@@ -1819,15 +1843,24 @@ async function init() {
       }
     }
 
-    const orderedOptions = imageryOrder
-      .map((id) => IMAGERY_OPTIONS_BY_ID.get(id))
-      .filter((option) => option && typeof option.layerId === 'string' && map.getLayer(option.layerId));
+    const orderedEntries = [];
 
-    let beforeId = topLabelId ?? undefined;
-    for (let i = 0; i < orderedOptions.length; i += 1) {
-      const option = orderedOptions[i];
-      if (!option) continue;
-      const layerSequence = [option.layerId];
+    imageryOrder.forEach((id) => {
+      if (id === BASE_STYLE_OPTION_ID) {
+        const layerSequence = baseStyleContentLayerIds
+          .filter((layerId) => typeof layerId === 'string' && map.getLayer(layerId));
+        if (layerSequence.length) {
+          orderedEntries.push({ layerSequence });
+        }
+        return;
+      }
+
+      const option = IMAGERY_OPTIONS_BY_ID.get(id);
+      if (!option) return;
+      const layerSequence = [];
+      if (typeof option.layerId === 'string' && map.getLayer(option.layerId)) {
+        layerSequence.push(option.layerId);
+      }
       if (Array.isArray(option.linkedLayerIds)) {
         option.linkedLayerIds.forEach((linkedId) => {
           if (typeof linkedId === 'string' && map.getLayer(linkedId)) {
@@ -1835,6 +1868,16 @@ async function init() {
           }
         });
       }
+      if (layerSequence.length) {
+        orderedEntries.push({ layerSequence });
+      }
+    });
+
+    let beforeId = topLabelId ?? undefined;
+    for (let i = 0; i < orderedEntries.length; i += 1) {
+      const entry = orderedEntries[i];
+      if (!entry) continue;
+      const { layerSequence } = entry;
       for (let j = layerSequence.length - 1; j >= 0; j -= 1) {
         const layerId = layerSequence[j];
         if (!layerId || !map.getLayer(layerId)) continue;
