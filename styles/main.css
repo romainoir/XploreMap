@@ -130,20 +130,20 @@ html, body { margin:0; height:100%; }
 
 .ui {
   position: absolute;
-  top: auto;
-  left: 50%;
-  bottom: calc((32px + env(safe-area-inset-bottom, 0px)) / var(--ui-scale));
-  z-index: 3;
+  top: calc((32px + env(safe-area-inset-top, 0px)) / var(--ui-scale));
+  left: calc((32px + env(safe-area-inset-left, 0px)) / var(--ui-scale));
+  bottom: auto;
+  z-index: 2;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   width: auto;
   padding: 0;
   background: none;
   box-shadow: none;
   font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  transform: translateX(-50%) scale(var(--ui-scale));
-  transform-origin: bottom center;
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
 }
 
 .ui__row {
@@ -1651,7 +1651,8 @@ html, body { margin:0; height:100%; }
 @media (max-width: 540px) {
   .ui {
     width: auto;
-    bottom: calc((26px + env(safe-area-inset-bottom, 0px)) / var(--ui-scale));
+    top: calc((24px + env(safe-area-inset-top, 0px)) / var(--ui-scale));
+    left: calc((20px + env(safe-area-inset-left, 0px)) / var(--ui-scale));
   }
 
   .hs-panel {
