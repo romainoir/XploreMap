@@ -607,11 +607,29 @@ html, body { margin:0; height:100%; }
 }
 
 .directions-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.directions-actions__primary {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.directions-actions__meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-left: auto;
+  justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 .directions-actions .btn {
@@ -683,7 +701,9 @@ html, body { margin:0; height:100%; }
   border-radius: 14px;
   background: rgba(17, 34, 48, 0.04);
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.08);
-  align-self: flex-end;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  min-width: 0;
 }
 
 .profile-legend {
@@ -1163,6 +1183,19 @@ html, body { margin:0; height:100%; }
   .transport-modes,
   .directions-actions {
     width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .directions-actions__primary,
+  .directions-actions__meta {
+    width: 100%;
+  }
+
+  .directions-actions__meta {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
   }
 
   .btn--icon {
@@ -1171,6 +1204,10 @@ html, body { margin:0; height:100%; }
 
   .btn--icon.btn--icon-only {
     width: 44px;
+  }
+
+  .route-stats.has-stats {
+    justify-content: space-between;
   }
 
   .route-stats-list {

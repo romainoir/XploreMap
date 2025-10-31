@@ -923,11 +923,15 @@ const SEGMENT_COLOR_PALETTE = [
 const ASCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 18a1 1 0 0 1-.7-1.7l6.3-6.3a1 1 0 0 1 1.4 0l3.3 3.3 4.9-6.7H17a1 1 0 0 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V7.41l-5.6 7.6a1 1 0 0 1-1.5.12l-3.3-3.3-5.6 5.6a1 1 0 0 1-.7.27Z"/></svg>';
 const DESCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 6a1 1 0 0 1 .7 1.7l-6.3 6.3a1 1 0 0 1-1.4 0l-3.3-3.3-4.9 6.7H7a1 1 0 0 1 0 2H2a1 1 0 0 1-1-1v-5a1 1 0 0 1 2 0v3.59l5.6-7.6a1 1 0 0 1 1.5-.12l3.3 3.3 5.6-5.6a1 1 0 0 1 .7-.27Z"/></svg>';
 const DISTANCE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor"><circle cx="6" cy="6" r="2.4"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="18" r="2.4"/><path d="M8.95 7.05 10.36 5.64 18.36 13.64 16.95 15.05 8.95 7.05Z"/></svg>';
+const ELEVATION_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 18h18l-6.2-9.3-4.1 6.3-2.8-3.9L3 18Zm8.1-4.3 2.1-3.3 3.5 5.3H8.7Z"/></svg>';
+const SLOPE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 18h16v-2H9.83l8.58-8.59L17 5l-9 9H6z"/><path d="m7 7.5-2.5-2.5L3 6.5 5.5 9z"/></svg>';
 
 const SUMMARY_ICONS = {
   ascent: ASCENT_ICON,
   descent: DESCENT_ICON,
-  distance: DISTANCE_ICON
+  distance: DISTANCE_ICON,
+  elevation: ELEVATION_ICON,
+  slope: SLOPE_ICON
 };
 
 // Use the shared bivouac marker PNG so the UI references the canonical asset.
@@ -1724,6 +1728,8 @@ export class DirectionsManager {
     this.profileLegend = profileLegend ?? null;
     this.profileLegendVisible = false;
     this.profileLegendHoldTimeout = null;
+
+    this.isRouteStatsHoverActive = false;
 
     this.handleProfileLegendPointerEnter = this.handleProfileLegendPointerEnter.bind(this);
     this.handleProfileLegendPointerLeave = this.handleProfileLegendPointerLeave.bind(this);
@@ -7715,15 +7721,19 @@ export class DirectionsManager {
     return metrics;
   }
 
-  updateStats(route) {
-    if (!this.routeStats) return;
-    if (!route || !route.geometry?.coordinates || route.geometry.coordinates.length < 2) {
-      this.routeStats.innerHTML = '';
-      this.routeStats.classList.remove('has-stats');
+  renderRouteStatsSummary(metrics) {
+    if (!this.routeStats) {
       return;
     }
 
-    const metrics = this.latestMetrics ?? this.calculateRouteMetrics(route);
+    if (!metrics) {
+      this.routeStats.innerHTML = '';
+      this.routeStats.classList.remove('has-stats', 'is-hover');
+      this.routeStats.removeAttribute('data-mode');
+      this.isRouteStatsHoverActive = false;
+      return;
+    }
+
     const distanceLabel = this.formatDistance(metrics.distanceKm);
     const ascent = Math.max(0, Math.round(metrics.ascent));
     const descent = Math.max(0, Math.round(metrics.descent));
@@ -7738,28 +7748,126 @@ export class DirectionsManager {
       .map(({ key, label, value }) => {
         const icon = SUMMARY_ICONS[key] ?? '';
         const iconMarkup = icon ? `${icon}` : '';
+        const safeLabel = escapeHtml(label);
+        const safeValue = escapeHtml(value);
         return `
         <li
           class="summary-item ${key}"
-          aria-label="${label} ${value}"
-          title="${label}"
+          aria-label="${safeLabel} ${safeValue}"
+          title="${safeLabel}"
         >
           ${iconMarkup}
-          <span aria-hidden="true">${value}</span>
+          <span aria-hidden="true">${safeValue}</span>
         </li>
       `.trim();
       })
       .join('');
 
+    const srText = `Distance: ${distanceLabel} km. Ascent: ${ascent} m. Descent: ${descent} m.`;
+
     this.routeStats.innerHTML = `
-      <span class="sr-only">
-        Distance: ${distanceLabel} km. Ascent: ${ascent} m. Descent: ${descent} m.
-      </span>
+      <span class="sr-only">${escapeHtml(srText)}</span>
       <ul class="route-stats-list">
         ${listItems}
       </ul>
     `;
     this.routeStats.classList.add('has-stats');
+    this.routeStats.classList.remove('is-hover');
+    this.routeStats.setAttribute('data-mode', 'summary');
+  }
+
+  updateRouteStatsHover(distanceKm, overrides = {}) {
+    if (!this.routeStats) {
+      return;
+    }
+
+    if (!Number.isFinite(distanceKm) || !this.routeGeojson) {
+      this.isRouteStatsHoverActive = false;
+      this.routeStats.classList.remove('is-hover');
+      this.routeStats.removeAttribute('data-mode');
+      if (this.latestMetrics) {
+        this.renderRouteStatsSummary(this.latestMetrics);
+      } else {
+        this.routeStats.innerHTML = '';
+        this.routeStats.classList.remove('has-stats');
+      }
+      return;
+    }
+
+    const metrics = this.latestMetrics ?? this.calculateRouteMetrics(this.routeGeojson);
+    if (!metrics) {
+      this.isRouteStatsHoverActive = false;
+      this.renderRouteStatsSummary(null);
+      return;
+    }
+
+    const distanceLabel = this.formatDistance(distanceKm);
+    const resolvedElevation = Number.isFinite(overrides?.elevation)
+      ? overrides.elevation
+      : this.getElevationAtDistance(distanceKm);
+    const altitudeLabel = Number.isFinite(resolvedElevation)
+      ? `${Math.round(resolvedElevation)} m`
+      : 'N/A';
+    const resolvedGrade = Number.isFinite(overrides?.grade)
+      ? overrides.grade
+      : this.computeGradeAtDistance(distanceKm);
+    const slopeLabel = this.formatGrade(resolvedGrade);
+
+    const stats = [
+      { key: 'distance', label: 'Distance at cursor', value: `${distanceLabel} km` },
+      { key: 'elevation', label: 'Elevation at cursor', value: altitudeLabel },
+      { key: 'slope', label: 'Slope at cursor', value: slopeLabel }
+    ];
+
+    const listItems = stats
+      .map(({ key, label, value }) => {
+        const icon = SUMMARY_ICONS[key] ?? '';
+        const iconMarkup = icon ? `${icon}` : '';
+        const safeLabel = escapeHtml(label);
+        const safeValue = escapeHtml(value);
+        return `
+        <li
+          class="summary-item ${key}"
+          aria-label="${safeLabel} ${safeValue}"
+          title="${safeLabel}"
+        >
+          ${iconMarkup}
+          <span aria-hidden="true">${safeValue}</span>
+        </li>
+      `.trim();
+      })
+      .join('');
+
+    const srText = `At ${distanceLabel} km: elevation ${altitudeLabel}. Slope ${slopeLabel}.`;
+
+    this.routeStats.innerHTML = `
+      <span class="sr-only">${escapeHtml(srText)}</span>
+      <ul class="route-stats-list">
+        ${listItems}
+      </ul>
+    `;
+    this.routeStats.classList.add('has-stats', 'is-hover');
+    this.routeStats.setAttribute('data-mode', 'hover');
+    this.isRouteStatsHoverActive = true;
+  }
+
+  updateStats(route) {
+    if (!this.routeStats) {
+      return;
+    }
+    if (!route || !Array.isArray(route.geometry?.coordinates) || route.geometry.coordinates.length < 2) {
+      this.latestMetrics = null;
+      this.renderRouteStatsSummary(null);
+      return;
+    }
+
+    const metrics = this.latestMetrics ?? this.calculateRouteMetrics(route);
+    this.latestMetrics = metrics;
+    this.renderRouteStatsSummary(metrics);
+
+    if (this.isRouteStatsHoverActive && Number.isFinite(this.lastElevationHoverDistance)) {
+      this.updateRouteStatsHover(this.lastElevationHoverDistance);
+    }
   }
 
   async refreshRoutePointsOfInterest() {
@@ -8579,6 +8687,7 @@ export class DirectionsManager {
     if (!Number.isFinite(distanceKm)) {
       this.elevationHoverReadout.textContent = '';
       this.elevationHoverReadout.setAttribute('aria-hidden', 'true');
+      this.updateRouteStatsHover(null);
       return;
     }
 
@@ -8605,6 +8714,7 @@ export class DirectionsManager {
       ${detailMarkup}
     `;
     this.elevationHoverReadout.setAttribute('aria-hidden', 'false');
+    this.updateRouteStatsHover(distanceKm, { elevation, grade: gradeValue });
   }
 
   updateDistanceMarkers(route) {
