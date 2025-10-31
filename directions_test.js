@@ -1750,7 +1750,6 @@ export class DirectionsManager {
       directionsToggle,
       directionsDock,
       directionsControl,
-      collapseButton,
       transportModes,
       swapButton,
       undoButton,
@@ -1775,7 +1774,6 @@ export class DirectionsManager {
     this.directionsToggle = directionsToggle ?? null;
     this.directionsDock = directionsDock ?? null;
     this.directionsControl = directionsControl ?? null;
-    this.collapseButton = collapseButton ?? null;
     this.directionsSwipeHandle = this.directionsDock
       ? this.directionsDock.querySelector('.directions-swipe-handle')
       : null;
@@ -2296,13 +2294,6 @@ export class DirectionsManager {
   setupUIHandlers() {
     this.directionsToggle?.addEventListener('click', () => {
       this.setPanelVisible(!this.isPanelVisible());
-    });
-
-    this.collapseButton?.addEventListener('click', () => {
-      this.setPanelVisible(false);
-      if (typeof this.directionsToggle?.focus === 'function') {
-        this.directionsToggle.focus();
-      }
     });
 
     this.setupPanelGestures();

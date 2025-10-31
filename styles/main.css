@@ -583,10 +583,8 @@ html, body { margin:0; height:100%; }
 
 .directions-control {
   display: none;
-  width: min(100%, 560px);
-  max-width: 100%;
-  align-self: center;
-  margin-inline: auto;
+  max-width: none;
+  margin-inline: 0;
   background: rgba(245, 248, 252, 0.94);
   border-radius: 18px 18px 0 0;
   padding: 22px 24px 26px;
@@ -597,10 +595,6 @@ html, body { margin:0; height:100%; }
   transform: scale(var(--ui-scale));
   transform-origin: bottom center;
   box-sizing: border-box;
-  min-height: 260px;
-  max-height: calc(100vh - 120px);
-  overflow: auto;
-  resize: vertical;
 }
 
 .directions-control.visible {
@@ -609,20 +603,8 @@ html, body { margin:0; height:100%; }
   gap: 24px;
 }
 
-.directions-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-}
-
-.directions-collapse-button {
-  flex: 0 0 auto;
-}
-
 .directions-swipe-handle {
-  width: min(100%, 560px);
-  align-self: center;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -648,15 +630,6 @@ html, body { margin:0; height:100%; }
   flex-wrap: wrap;
   gap: 18px;
   align-items: center;
-}
-
-.directions-header__actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 18px;
-  margin-inline-start: auto;
 }
 
 .directions-control .btn {
@@ -1207,17 +1180,15 @@ html, body { margin:0; height:100%; }
 
   .directions-header {
     align-items: center;
+    justify-content: space-between;
   }
 
   .transport-modes {
     flex: 1 1 auto;
   }
 
-  .directions-header__actions {
-    margin-inline-start: auto;
-  }
-
   .directions-actions {
+    margin-inline-start: auto;
     justify-content: flex-end;
   }
 
@@ -1241,22 +1212,8 @@ html, body { margin:0; height:100%; }
   }
 
   .transport-modes,
-  .directions-actions,
-  .directions-toolbar {
+  .directions-actions {
     width: 100%;
-  }
-
-  .directions-header__actions {
-    width: 100%;
-    margin-inline-start: 0;
-    justify-content: flex-start;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .directions-toolbar {
-    justify-content: flex-start;
   }
 
   .btn--icon {
