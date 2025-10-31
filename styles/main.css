@@ -609,6 +609,7 @@ html, body { margin:0; height:100%; }
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  gap: 12px;
 }
 
 .directions-collapse-button {
