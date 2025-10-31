@@ -430,6 +430,13 @@ html, body { margin:0; height:100%; }
   font-weight: 600;
 }
 
+.elevation-hover-readout .segment-name {
+  display: inline-flex;
+  align-items: center;
+  color: #0c3d4b;
+  font-weight: 600;
+}
+
 .elevation-hover-readout .grade {
   color: #0c3d4b;
   font-weight: 600;

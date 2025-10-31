@@ -8936,69 +8936,51 @@ export class DirectionsManager {
     }
 
     const distanceLabel = this.formatDistance(distanceKm);
-    const elevation = this.getElevationAtDistance(distanceKm);
-    const altitudeLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : 'N/A';
-
-    const gradeValue = this.computeGradeAtDistance(distanceKm);
-    const gradeLabel = escapeHtml(this.formatGrade(gradeValue));
-
     const profileSegment = this.getProfileSegmentForDistance(distanceKm);
     const cutSegment = this.getCutSegmentForDistance(distanceKm);
-    const segmentStartKm = Number.isFinite(cutSegment?.startKm) ? cutSegment.startKm : 0;
+
+    const segmentLabelParts = [];
+    if (cutSegment?.name) {
+      segmentLabelParts.push(escapeHtml(cutSegment.name));
+    }
+    if (profileSegment?.name) {
+      const profileLabel = (() => {
+        const definition = this.getProfileModeDefinition(this.profileMode);
+        const modeLabel = definition?.label ? `${definition.label}: ` : '';
+        return `${modeLabel}${profileSegment.name}`;
+      })();
+      const escapedProfileLabel = escapeHtml(profileLabel);
+      if (!segmentLabelParts.includes(escapedProfileLabel)) {
+        segmentLabelParts.push(escapedProfileLabel);
+      }
+    }
 
     const totalMetrics = this.computeCumulativeMetrics(distanceKm, 0);
-    const segmentMetrics = this.computeCumulativeMetrics(distanceKm, segmentStartKm);
-
     const roundMeters = (value) => (Number.isFinite(value) ? Math.round(value) : 0);
     const totalAscent = roundMeters(totalMetrics.ascent);
     const totalDescent = roundMeters(totalMetrics.descent);
-    const segmentAscent = roundMeters(segmentMetrics.ascent);
-    const segmentDescent = roundMeters(segmentMetrics.descent);
-
-    const segmentDistanceLabel = this.formatDistance(segmentMetrics.distanceKm);
     const totalTimeLabel = escapeHtml(
       this.formatDurationHours(
         this.estimateTravelTimeHours(totalMetrics.distanceKm, totalMetrics.ascent, totalMetrics.descent)
       )
     );
-    const segmentTimeLabel = escapeHtml(
-      this.formatDurationHours(
-        this.estimateTravelTimeHours(segmentMetrics.distanceKm, segmentMetrics.ascent, segmentMetrics.descent)
-      )
+
+    const readoutParts = [];
+    if (segmentLabelParts.length) {
+      readoutParts.push(`<span class="segment-name" title="Segment">${segmentLabelParts.join(' · ')}</span>`);
+    }
+    readoutParts.push(
+      `<span class="distance" title="Distance cumulée">Dist. ${escapeHtml(distanceLabel)} km</span>`,
+      `<span class="ascent" title="Dénivelé positif cumulé">D+ ${totalAscent} m</span>`,
+      `<span class="descent" title="Dénivelé négatif cumulé">D- ${totalDescent} m</span>`,
+      `<span class="time" title="Estimation de temps cumulée">Temps ${totalTimeLabel}</span>`
     );
 
-    let detailMarkup = '';
-    const detailParts = [];
-    if (profileSegment?.name) {
-      const definition = this.getProfileModeDefinition(this.profileMode);
-      const modeLabel = escapeHtml(definition?.label ?? 'Difficulty');
-      const segmentLabel = escapeHtml(profileSegment.name);
-      detailParts.push(`${modeLabel}: ${segmentLabel}`);
-    }
-    if (cutSegment?.name) {
-      detailParts.push(escapeHtml(cutSegment.name));
-    }
-    if (detailParts.length) {
-      detailMarkup = `<span class="profile">${detailParts.join(' · ')}</span>`;
-    }
-
     if (hoverReadout) {
-      hoverReadout.innerHTML = `
-        <span class="distance" title="Distance cumulée">Dist. ${escapeHtml(distanceLabel)} km</span>
-        <span class="segment-distance" title="Distance depuis le dernier bivouac">Segment ${escapeHtml(segmentDistanceLabel)} km</span>
-        <span class="altitude" title="Altitude">Alt. ${escapeHtml(altitudeLabel)}</span>
-        <span class="ascent" title="Dénivelé positif cumulé">D+ ${totalAscent} m</span>
-        <span class="descent" title="Dénivelé négatif cumulé">D- ${totalDescent} m</span>
-        <span class="segment-ascent" title="Dénivelé positif du segment">Seg D+ ${segmentAscent} m</span>
-        <span class="segment-descent" title="Dénivelé négatif du segment">Seg D- ${segmentDescent} m</span>
-        <span class="time" title="Estimation de temps cumulée">Temps ${totalTimeLabel}</span>
-        <span class="segment-time" title="Estimation de temps du segment">Seg ${segmentTimeLabel}</span>
-        <span class="grade" title="Pente instantanée">Pente ${gradeLabel}</span>
-        ${detailMarkup}
-      `;
+      hoverReadout.innerHTML = readoutParts.join('');
       hoverReadout.setAttribute('aria-hidden', 'false');
     }
-    this.updateRouteStatsHover(distanceKm, { elevation, grade: gradeValue });
+    this.updateRouteStatsHover(distanceKm);
   }
 
   updateDistanceMarkers(route) {
