@@ -1804,15 +1804,6 @@ export class DirectionsManager {
     this.profileLegend = profileLegend ?? null;
     this.profileLegendVisible = false;
     this.profileLegendHoldTimeout = null;
-    this.profileMenuListenersActive = false;
-    this.profileMenuPositionRaf = null;
-    this.handleWindowResizeForProfileMenu = this.handleWindowResizeForProfileMenu.bind(this);
-    this.handleWindowScrollForProfileMenu = this.handleWindowScrollForProfileMenu.bind(this);
-    this.directionsHintVisible = false;
-    this.directionsHintListenersActive = false;
-    this.directionsHintPositionRaf = null;
-    this.handleWindowResizeForHint = this.handleWindowResizeForHint.bind(this);
-    this.handleWindowScrollForHint = this.handleWindowScrollForHint.bind(this);
 
     this.isRouteStatsHoverActive = false;
     this.panelSwipeState = {
@@ -2714,117 +2705,6 @@ export class DirectionsManager {
     this.profileLegend.setAttribute('aria-hidden', this.profileLegendVisible ? 'false' : 'true');
   }
 
-  attachProfileMenuPositionListeners() {
-    if (this.profileMenuListenersActive || typeof window === 'undefined') {
-      return;
-    }
-    window.addEventListener('resize', this.handleWindowResizeForProfileMenu);
-    window.addEventListener('scroll', this.handleWindowScrollForProfileMenu, true);
-    this.profileMenuListenersActive = true;
-  }
-
-  detachProfileMenuPositionListeners() {
-    if (!this.profileMenuListenersActive || typeof window === 'undefined') {
-      return;
-    }
-    window.removeEventListener('resize', this.handleWindowResizeForProfileMenu);
-    window.removeEventListener('scroll', this.handleWindowScrollForProfileMenu, true);
-    this.profileMenuListenersActive = false;
-  }
-
-  scheduleProfileMenuPositionUpdate() {
-    if (!this.profileMenuOpen || !this.profileModeToggle || !this.profileModeMenu) {
-      return;
-    }
-    this.cancelProfileMenuPositionUpdate();
-    if (typeof requestAnimationFrame === 'function') {
-      this.profileMenuPositionRaf = requestAnimationFrame(() => {
-        this.profileMenuPositionRaf = null;
-        this.positionProfileMenu();
-      });
-    } else {
-      this.positionProfileMenu();
-    }
-  }
-
-  cancelProfileMenuPositionUpdate() {
-    if (this.profileMenuPositionRaf !== null && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(this.profileMenuPositionRaf);
-    }
-    this.profileMenuPositionRaf = null;
-  }
-
-  resetProfileMenuPosition() {
-    if (!this.profileModeMenu) {
-      return;
-    }
-    this.profileModeMenu.classList.remove('profile-mode-menu__list--floating');
-    this.profileModeMenu.style.removeProperty('--profile-menu-gap');
-    this.profileModeMenu.style.removeProperty('--profile-menu-left');
-    this.profileModeMenu.style.removeProperty('--profile-menu-anchor-top');
-    this.profileModeMenu.style.removeProperty('--profile-menu-min-width');
-    delete this.profileModeMenu.dataset.placement;
-  }
-
-  positionProfileMenu() {
-    if (!this.profileMenuOpen || !this.profileModeToggle || !this.profileModeMenu) {
-      return;
-    }
-    const toggleRect = this.profileModeToggle.getBoundingClientRect();
-    const menu = this.profileModeMenu;
-    const viewportWidth = typeof window !== 'undefined'
-      ? (window.innerWidth || document.documentElement?.clientWidth || 0)
-      : 0;
-    const viewportHeight = typeof window !== 'undefined'
-      ? (window.innerHeight || document.documentElement?.clientHeight || 0)
-      : 0;
-    const gap = 12;
-    const margin = 16;
-    const centerX = toggleRect.left + (toggleRect.width / 2);
-    menu.classList.add('profile-mode-menu__list--floating');
-    menu.dataset.placement = 'above';
-    menu.style.setProperty('--profile-menu-gap', `${gap}px`);
-    menu.style.setProperty('--profile-menu-min-width', `${Math.max(toggleRect.width, 0)}px`);
-    menu.style.setProperty('--profile-menu-anchor-top', `${toggleRect.top}px`);
-    menu.style.setProperty('--profile-menu-left', `${centerX}px`);
-
-    let menuRect = menu.getBoundingClientRect();
-    if (viewportWidth && menuRect.width) {
-      const halfWidth = menuRect.width / 2;
-      const minCenter = margin + halfWidth;
-      const maxCenter = viewportWidth - margin - halfWidth;
-      const clampedCenter = minCenter <= maxCenter
-        ? Math.min(Math.max(centerX, minCenter), maxCenter)
-        : centerX;
-      menu.style.setProperty('--profile-menu-left', `${clampedCenter}px`);
-      menuRect = menu.getBoundingClientRect();
-    }
-
-    const availableAbove = toggleRect.top;
-    const availableBelow = viewportHeight ? (viewportHeight - toggleRect.bottom) : 0;
-    const requiredHeight = menuRect.height + gap;
-    if (viewportHeight && requiredHeight > availableAbove && availableBelow > availableAbove) {
-      menu.dataset.placement = 'below';
-      menu.style.setProperty('--profile-menu-anchor-top', `${toggleRect.bottom}px`);
-      menuRect = menu.getBoundingClientRect();
-      if (viewportHeight) {
-        const overshoot = (menuRect.bottom + margin) - viewportHeight;
-        if (overshoot > 0) {
-          const offset = Math.min(overshoot, Math.max(menuRect.height - gap, 0));
-          menu.style.setProperty('--profile-menu-gap', `${Math.max(gap - offset, 0)}px`);
-        }
-      }
-    }
-  }
-
-  handleWindowResizeForProfileMenu() {
-    this.scheduleProfileMenuPositionUpdate();
-  }
-
-  handleWindowScrollForProfileMenu() {
-    this.scheduleProfileMenuPositionUpdate();
-  }
-
   openProfileMenu() {
     if (this.profileMenuOpen) {
       return;
@@ -2835,15 +2715,10 @@ export class DirectionsManager {
       this.profileModeMenu.focus();
     }
     this.hideProfileLegend();
-    this.scheduleProfileMenuPositionUpdate();
-    this.attachProfileMenuPositionListeners();
   }
 
   closeProfileMenu({ restoreFocus = false } = {}) {
     if (!this.profileMenuOpen) {
-      this.resetProfileMenuPosition();
-      this.detachProfileMenuPositionListeners();
-      this.cancelProfileMenuPositionUpdate();
       return;
     }
     this.profileMenuOpen = false;
@@ -2852,9 +2727,6 @@ export class DirectionsManager {
       this.profileModeToggle.focus();
     }
     this.hideProfileLegend();
-    this.detachProfileMenuPositionListeners();
-    this.cancelProfileMenuPositionUpdate();
-    this.resetProfileMenuPosition();
   }
 
   toggleProfileMenu() {
@@ -5747,20 +5619,6 @@ export class DirectionsManager {
     if (this.infoButton) {
       this.infoButton.classList.toggle('show-tooltip', visible);
     }
-    const wasVisible = this.directionsHintVisible;
-    this.directionsHintVisible = visible;
-    if (visible) {
-      if (!wasVisible) {
-        this.attachDirectionsHintListeners();
-      }
-      this.scheduleDirectionsHintPositionUpdate();
-    } else {
-      if (wasVisible) {
-        this.detachDirectionsHintListeners();
-      }
-      this.cancelDirectionsHintPositionUpdate();
-      this.resetDirectionsHintPosition();
-    }
   }
 
   isPanelVisible() {
@@ -5796,7 +5654,6 @@ export class DirectionsManager {
       this.elevationChart.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
     }
     if (!isVisible) {
-      this.closeProfileMenu();
       this.setHintVisible(false);
       this.hideRouteHover();
     }
@@ -5944,122 +5801,6 @@ export class DirectionsManager {
       this.getRoute();
     }
     this.updateModeAvailability();
-  }
-
-  attachDirectionsHintListeners() {
-    if (this.directionsHintListenersActive || typeof window === 'undefined') {
-      return;
-    }
-    window.addEventListener('resize', this.handleWindowResizeForHint);
-    window.addEventListener('scroll', this.handleWindowScrollForHint, true);
-    this.directionsHintListenersActive = true;
-  }
-
-  detachDirectionsHintListeners() {
-    if (!this.directionsHintListenersActive || typeof window === 'undefined') {
-      return;
-    }
-    window.removeEventListener('resize', this.handleWindowResizeForHint);
-    window.removeEventListener('scroll', this.handleWindowScrollForHint, true);
-    this.directionsHintListenersActive = false;
-  }
-
-  scheduleDirectionsHintPositionUpdate() {
-    if (!this.directionsHintVisible || !this.infoButton || !this.directionsHint) {
-      return;
-    }
-    this.cancelDirectionsHintPositionUpdate();
-    if (typeof requestAnimationFrame === 'function') {
-      this.directionsHintPositionRaf = requestAnimationFrame(() => {
-        this.directionsHintPositionRaf = null;
-        this.positionDirectionsHint();
-      });
-    } else {
-      this.positionDirectionsHint();
-    }
-  }
-
-  cancelDirectionsHintPositionUpdate() {
-    if (this.directionsHintPositionRaf !== null && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(this.directionsHintPositionRaf);
-    }
-    this.directionsHintPositionRaf = null;
-  }
-
-  resetDirectionsHintPosition() {
-    if (!this.directionsHint) {
-      return;
-    }
-    this.directionsHint.classList.remove('directions-hint--floating');
-    this.directionsHint.style.removeProperty('--directions-hint-top');
-    this.directionsHint.style.removeProperty('--directions-hint-left');
-    this.directionsHint.style.removeProperty('--directions-hint-gap');
-    this.directionsHint.style.removeProperty('--directions-hint-offset-y');
-    delete this.directionsHint.dataset.placement;
-  }
-
-  positionDirectionsHint() {
-    if (!this.directionsHintVisible || !this.infoButton || !this.directionsHint) {
-      return;
-    }
-    const buttonRect = this.infoButton.getBoundingClientRect();
-    const tooltip = this.directionsHint;
-    const viewportWidth = typeof window !== 'undefined'
-      ? (window.innerWidth || document.documentElement?.clientWidth || 0)
-      : 0;
-    const viewportHeight = typeof window !== 'undefined'
-      ? (window.innerHeight || document.documentElement?.clientHeight || 0)
-      : 0;
-    const gap = 10;
-    const margin = 16;
-    const centerX = buttonRect.left + (buttonRect.width / 2);
-    tooltip.classList.add('directions-hint--floating');
-    tooltip.dataset.placement = 'above';
-    tooltip.style.setProperty('--directions-hint-gap', `${gap}px`);
-    tooltip.style.setProperty('--directions-hint-top', `${buttonRect.top}px`);
-    tooltip.style.setProperty('--directions-hint-left', `${centerX}px`);
-    tooltip.style.setProperty('--directions-hint-offset-y', '0px');
-
-    let tooltipRect = tooltip.getBoundingClientRect();
-    if (viewportWidth && tooltipRect.width) {
-      const halfWidth = tooltipRect.width / 2;
-      const minCenter = margin + halfWidth;
-      const maxCenter = viewportWidth - margin - halfWidth;
-      const clampedCenter = minCenter <= maxCenter
-        ? Math.min(Math.max(centerX, minCenter), maxCenter)
-        : centerX;
-      tooltip.style.setProperty('--directions-hint-left', `${clampedCenter}px`);
-      tooltipRect = tooltip.getBoundingClientRect();
-    }
-
-    const availableAbove = buttonRect.top;
-    const availableBelow = viewportHeight ? (viewportHeight - buttonRect.bottom) : 0;
-    const requiredHeight = tooltipRect.height + gap;
-    if (viewportHeight && requiredHeight > availableAbove && availableBelow > availableAbove) {
-      tooltip.dataset.placement = 'below';
-      tooltip.style.setProperty('--directions-hint-top', `${buttonRect.bottom}px`);
-      tooltipRect = tooltip.getBoundingClientRect();
-    }
-
-    if (viewportHeight && tooltipRect.height) {
-      const topLimit = margin;
-      const bottomLimit = viewportHeight - margin;
-      let offsetY = 0;
-      if (tooltipRect.top < topLimit) {
-        offsetY = topLimit - tooltipRect.top;
-      } else if (tooltipRect.bottom > bottomLimit) {
-        offsetY = bottomLimit - tooltipRect.bottom;
-      }
-      tooltip.style.setProperty('--directions-hint-offset-y', `${offsetY}px`);
-    }
-  }
-
-  handleWindowResizeForHint() {
-    this.scheduleDirectionsHintPositionUpdate();
-  }
-
-  handleWindowScrollForHint() {
-    this.scheduleDirectionsHintPositionUpdate();
   }
 
   onWaypointDoubleClick(event) {
