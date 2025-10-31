@@ -2047,20 +2047,15 @@ export class DirectionsManager {
         'circle-color': ['coalesce', ['get', 'color'], DEFAULT_POI_COLOR],
         'circle-stroke-color': 'rgba(255, 255, 255, 0.9)',
         'circle-stroke-width': [
-          'case',
-          ['boolean', ['get', 'hasIcon'], false],
-          0,
-          [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            8,
-            1,
-            12,
-            1.2,
-            16,
-            1.6
-          ]
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          8,
+          ['case', ['boolean', ['get', 'hasIcon'], false], 0, 1],
+          12,
+          ['case', ['boolean', ['get', 'hasIcon'], false], 0, 1.2],
+          16,
+          ['case', ['boolean', ['get', 'hasIcon'], false], 0, 1.6]
         ],
         'circle-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0, 0.95],
         'circle-stroke-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0, 0.95]
@@ -2075,19 +2070,15 @@ export class DirectionsManager {
       layout: {
         'icon-image': ['coalesce', ['get', 'iconImageId'], ''],
         'icon-size': [
-          '*',
-          ['coalesce', ['get', 'iconDisplayScale'], 1],
-          [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            8,
-            0.35,
-            12,
-            0.55,
-            16,
-            0.75
-          ]
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          8,
+          ['*', ['coalesce', ['get', 'iconDisplayScale'], 1], 0.35],
+          12,
+          ['*', ['coalesce', ['get', 'iconDisplayScale'], 1], 0.55],
+          16,
+          ['*', ['coalesce', ['get', 'iconDisplayScale'], 1], 0.75]
         ],
         'icon-anchor': 'center',
         'icon-allow-overlap': true,
