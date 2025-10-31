@@ -549,6 +549,7 @@ html, body { margin:0; height:100%; }
   display: none;
   width: calc(100% / var(--ui-scale));
   max-width: calc(100% / var(--ui-scale));
+  margin-inline: auto;
   background: rgba(245, 248, 252, 0.94);
   border-radius: 18px 18px 0 0;
   padding: 22px 24px 26px;
