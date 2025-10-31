@@ -550,7 +550,6 @@ async function init() {
   const directionsToggle = document.getElementById('directionsToggle');
   const directionsDock = document.getElementById('directionsDock');
   const directionsControl = document.getElementById('directionsControl');
-  const directionsCollapseButton = document.getElementById('directionsCollapseButton');
   const transportModes = directionsControl?.querySelectorAll('[data-mode]') ?? [];
   const swapButton = document.getElementById('swapDirectionsButton');
   const undoButton = document.getElementById('undoDirectionsButton');
@@ -1450,7 +1449,6 @@ async function init() {
         directionsToggle,
         directionsDock,
         directionsControl,
-        directionsCollapseButton,
         transportModes,
         swapButton,
         undoButton,
