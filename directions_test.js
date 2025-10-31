@@ -41,6 +41,8 @@ const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
   ...Object.values(POI_CATEGORY_DISTANCE_OVERRIDES)
 );
 const DEFAULT_POI_COLOR = '#2d7bd6';
+const ELEVATION_MARKER_LABEL_BASE_SHIFT_PX = 6;
+const ELEVATION_MARKER_LABEL_EXTRA_SHIFT_PX = 28;
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
 const POI_ADDITIONAL_PROPERTY_TAGS = Object.freeze([
@@ -8248,7 +8250,11 @@ export class DirectionsManager {
             const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
             const safeTitle = escapeHtml(rawTitle);
             const colorValue = typeof marker?.labelColor === 'string' ? marker.labelColor.trim() : '';
-            const styleParts = ['--elevation-marker-icon-width:26px', '--elevation-marker-icon-height:26px'];
+            const styleParts = [
+              '--elevation-marker-icon-width:26px',
+              '--elevation-marker-icon-height:26px',
+              'bottom:0'
+            ];
             if (colorValue) {
               styleParts.push(`--bivouac-marker-color:${colorValue}`);
             }
@@ -8257,7 +8263,7 @@ export class DirectionsManager {
               <div
                 class="elevation-marker bivouac"
                 data-distance-km="${distanceKm.toFixed(6)}"
-                data-bottom-offset="12"${styleAttribute}
+                data-bottom-offset="0"${styleAttribute}
                 title="${safeTitle}"
                 aria-label="${safeTitle}"
               >
@@ -8302,8 +8308,7 @@ export class DirectionsManager {
             const icon = poi?.icon ?? null;
             const iconWidth = Number(icon?.width);
             const iconHeight = Number(icon?.height);
-            const styleParts = [];
-            styleParts.push('bottom:calc(100% + 8px)');
+            const styleParts = ['bottom:0'];
             styleParts.push(`color:${colorValue}`);
             styleParts.push(`--poi-marker-color:${colorValue}`);
             if (Number.isFinite(iconWidth) && iconWidth > 0) {
@@ -8332,11 +8337,18 @@ export class DirectionsManager {
                 />
               `
               : '<span class="elevation-marker__icon elevation-marker__icon--fallback" aria-hidden="true"></span>';
+            const datasetAttributes = [
+              `data-distance-km="${distanceKm.toFixed(6)}"`,
+              'data-bottom-offset="0"'
+            ];
+            const poiElevation = Number(poi?.elevation);
+            if (Number.isFinite(poiElevation)) {
+              datasetAttributes.push(`data-elevation="${poiElevation.toFixed(2)}"`);
+            }
             return `
               <div
                 class="elevation-marker poi"
-                data-distance-km="${distanceKm.toFixed(6)}"
-                data-bottom-offset="8"
+                ${datasetAttributes.join(' ')}
                 style="${styleParts.join(';')}"
                 title="${safeTitle}"
                 aria-label="${safeTitle}"
@@ -8453,17 +8465,37 @@ export class DirectionsManager {
           } else {
             marker.style.bottom = `${elevationPercent}%`;
           }
+          const markerElevationValue = Number(marker.dataset.elevation);
+          const labelElevation = Number.isFinite(markerElevationValue)
+            ? markerElevationValue
+            : elevation;
+          if (Number.isFinite(labelElevation)) {
+            const normalizedLabel = (labelElevation - yMin) / ySpan;
+            const clampedLabel = Math.max(0, Math.min(1, normalizedLabel));
+            const labelShift = ELEVATION_MARKER_LABEL_BASE_SHIFT_PX
+              + clampedLabel * ELEVATION_MARKER_LABEL_EXTRA_SHIFT_PX;
+            marker.style.setProperty(
+              '--elevation-marker-label-shift',
+              `${labelShift.toFixed(2)}px`
+            );
+          } else {
+            marker.style.removeProperty('--elevation-marker-label-shift');
+          }
         } else {
           const offsetValue = Number(marker.dataset.bottomOffset);
           if (Number.isFinite(offsetValue)) {
-            marker.style.bottom = `calc(100% + ${offsetValue}px)`;
+            marker.style.bottom = `${Math.max(0, offsetValue)}px`;
           }
+          marker.style.removeProperty('--elevation-marker-label-shift');
         }
       } else if (isPoiMarker || isBivouacMarker) {
         const offsetValue = Number(marker.dataset.bottomOffset);
         if (Number.isFinite(offsetValue)) {
-          marker.style.bottom = `calc(100% + ${offsetValue}px)`;
+          marker.style.bottom = `${Math.max(0, offsetValue)}px`;
         }
+        marker.style.removeProperty('--elevation-marker-label-shift');
+      } else {
+        marker.style.removeProperty('--elevation-marker-label-shift');
       }
     });
   }
