@@ -583,10 +583,7 @@ html, body { margin:0; height:100%; }
 
 .directions-control {
   display: none;
-  width: min(100%, 560px);
   max-width: 100%;
-  align-self: center;
-  margin-inline: auto;
   background: rgba(245, 248, 252, 0.94);
   border-radius: 18px 18px 0 0;
   padding: 22px 24px 26px;
@@ -600,7 +597,6 @@ html, body { margin:0; height:100%; }
   min-height: 260px;
   max-height: calc(100vh - 120px);
   overflow: auto;
-  resize: vertical;
 }
 
 .directions-control.visible {
