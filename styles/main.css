@@ -535,6 +535,8 @@ html, body { margin:0; height:100%; }
   align-items: stretch;
   gap: 10px;
   pointer-events: none;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .directions-dock[aria-hidden="true"] {
@@ -547,8 +549,8 @@ html, body { margin:0; height:100%; }
 
 .directions-control {
   display: none;
-  width: min(560px, calc((100% - 24px) / var(--ui-scale)));
-  max-width: min(560px, calc((100% - 24px) / var(--ui-scale)));
+  width: min(560px, calc((100vw - 24px) / var(--ui-scale)));
+  max-width: min(560px, calc((100vw - 24px) / var(--ui-scale)));
   margin-inline: auto;
   background: rgba(245, 248, 252, 0.94);
   border-radius: 18px 18px 0 0;
