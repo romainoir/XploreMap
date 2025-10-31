@@ -101,6 +101,10 @@ const POI_CLUSTER_MIN_SPACING_KM = 0.05;
 const POI_CLUSTER_MAX_SPACING_KM = 1.5;
 const POI_CLUSTER_DISTANCE_SCALE = 120;
 
+const ELEVATION_PROFILE_POI_CLUSTER_MIN_WINDOW_KM = 0.4;
+const ELEVATION_PROFILE_POI_CLUSTER_MAX_WINDOW_KM = 2;
+const ELEVATION_PROFILE_POI_CLUSTER_DISTANCE_SCALE = 30;
+
 const PEAK_CATEGORY_KEYS = Object.freeze(['peak', 'volcano']);
 const PEAK_CATEGORY_SET = new Set(PEAK_CATEGORY_KEYS);
 const PASS_CATEGORY_KEYS = Object.freeze(['mountain_pass', 'saddle']);
@@ -378,6 +382,114 @@ function clusterRoutePointsOfInterest(pois, totalDistanceKm) {
 
   results.sort((a, b) => a.distanceKm - b.distanceKm);
   return results;
+}
+
+function computeElevationProfilePoiClusterWindow(totalDistanceKm) {
+  const distance = Number(totalDistanceKm);
+  if (!Number.isFinite(distance) || distance <= 0) {
+    return ELEVATION_PROFILE_POI_CLUSTER_MIN_WINDOW_KM;
+  }
+  const scaled = distance / ELEVATION_PROFILE_POI_CLUSTER_DISTANCE_SCALE;
+  const clamped = Math.min(
+    ELEVATION_PROFILE_POI_CLUSTER_MAX_WINDOW_KM,
+    Math.max(ELEVATION_PROFILE_POI_CLUSTER_MIN_WINDOW_KM, scaled)
+  );
+  return clamped;
+}
+
+function selectElevationProfileLabelLeader(items) {
+  if (!Array.isArray(items) || !items.length) {
+    return null;
+  }
+  let chosen = null;
+  let bestScore = -Infinity;
+  let bestElevation = -Infinity;
+  items.forEach((item) => {
+    if (!item) {
+      return;
+    }
+    const peakImportanceScore = Number(item.peakImportanceScore);
+    const elevation = Number(item.elevation);
+    const hasElevation = Number.isFinite(elevation);
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    const weightedScore = (Number.isFinite(peakImportanceScore) ? peakImportanceScore : 0) * 10
+      + (hasElevation ? elevation / 1000 : 0)
+      + (name ? 0.01 : 0);
+    if (weightedScore > bestScore) {
+      bestScore = weightedScore;
+      bestElevation = hasElevation ? elevation : -Infinity;
+      chosen = item;
+      return;
+    }
+    if (weightedScore === bestScore) {
+      if (hasElevation && (!Number.isFinite(bestElevation) || elevation > bestElevation)) {
+        bestElevation = elevation;
+        chosen = item;
+        return;
+      }
+      if (hasElevation && elevation === bestElevation) {
+        const chosenHasName = typeof chosen?.name === 'string' && chosen.name.trim();
+        if (!chosenHasName && name) {
+          chosen = item;
+        }
+      }
+    }
+  });
+  return chosen ?? items[0] ?? null;
+}
+
+function markElevationProfileLabelLeaders(pois, totalDistanceKm) {
+  if (!Array.isArray(pois) || !pois.length) {
+    return Array.isArray(pois) ? pois : [];
+  }
+  const windowKm = Math.max(
+    Number.EPSILON,
+    computeElevationProfilePoiClusterWindow(totalDistanceKm)
+  );
+  const sorted = pois
+    .filter((poi) => poi && Number.isFinite(poi.distanceKm))
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+
+  pois.forEach((poi) => {
+    if (poi) {
+      poi.showElevationProfileLabel = false;
+    }
+  });
+
+  const eligible = sorted.filter((poi) => poi && poi.showLabel);
+  if (!eligible.length) {
+    return pois;
+  }
+
+  let cluster = [];
+  let clusterBase = null;
+  eligible.forEach((poi) => {
+    const distance = Number(poi.distanceKm);
+    if (!cluster.length) {
+      cluster = [poi];
+      clusterBase = distance;
+      return;
+    }
+    if (Math.abs(distance - clusterBase) <= windowKm) {
+      cluster.push(poi);
+      return;
+    }
+    const leader = selectElevationProfileLabelLeader(cluster);
+    if (leader) {
+      leader.showElevationProfileLabel = true;
+    }
+    cluster = [poi];
+    clusterBase = distance;
+  });
+
+  if (cluster.length) {
+    const leader = selectElevationProfileLabelLeader(cluster);
+    if (leader) {
+      leader.showElevationProfileLabel = true;
+    }
+  }
+
+  return pois;
 }
 
 function shouldShowPoiLabel(poi) {
@@ -7829,6 +7941,8 @@ export class DirectionsManager {
       return;
     }
 
+    markElevationProfileLabelLeaders(resolved, totalDistanceKm);
+
     this.setRoutePointsOfInterest(resolved);
 
     if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
@@ -8198,7 +8312,10 @@ export class DirectionsManager {
             if (Number.isFinite(iconHeight) && iconHeight > 0) {
               styleParts.push(`--elevation-marker-icon-height:${iconHeight.toFixed(2)}px`);
             }
-            const shouldShowLabel = Boolean(poi?.showLabel && safeLabel);
+            const shouldShowLabel = Boolean(
+              (poi?.showElevationProfileLabel ?? poi?.showLabel)
+                && safeLabel
+            );
             const labelMarkup = shouldShowLabel
               ? `<span class="elevation-marker__label">${safeLabel}</span>`
               : '';
