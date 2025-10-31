@@ -83,6 +83,19 @@ const ELEVATION_PROFILE_POI_CATEGORY_KEYS = Object.freeze([
 ]);
 const ELEVATION_PROFILE_POI_CATEGORY_SET = new Set(ELEVATION_PROFILE_POI_CATEGORY_KEYS);
 
+const ROUTE_POI_SOURCE_ID = 'route-pois';
+const ROUTE_POI_LAYER_ID = 'route-pois';
+const ROUTE_POI_LABEL_LAYER_ID = 'route-poi-labels';
+
+const POI_CLUSTER_MIN_SPACING_KM = 0.05;
+const POI_CLUSTER_MAX_SPACING_KM = 1.5;
+const POI_CLUSTER_DISTANCE_SCALE = 120;
+
+const PEAK_CATEGORY_KEYS = Object.freeze(['peak', 'volcano']);
+const PEAK_CATEGORY_SET = new Set(PEAK_CATEGORY_KEYS);
+
+const POI_ELEVATION_PROPERTY_KEYS = Object.freeze(['ele', 'elevation', 'height']);
+
 function isElevationProfilePoiCategory(key) {
   if (typeof key !== 'string' || !key) {
     return false;
@@ -95,6 +108,143 @@ function normalizePoiValue(value) {
     return '';
   }
   return value.trim().toLowerCase();
+}
+
+function parsePoiElevation(properties = {}) {
+  for (const key of POI_ELEVATION_PROPERTY_KEYS) {
+    const raw = properties?.[key];
+    if (raw === null || raw === undefined) {
+      continue;
+    }
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+    if (typeof raw === 'string') {
+      const normalized = raw.trim().replace(',', '.');
+      const parsed = Number(normalized);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+
+function computePoiClusterSpacing(totalDistanceKm) {
+  const normalizedDistance = Number(totalDistanceKm);
+  if (!Number.isFinite(normalizedDistance) || normalizedDistance <= 0) {
+    return POI_CLUSTER_MIN_SPACING_KM;
+  }
+  const scaled = normalizedDistance / POI_CLUSTER_DISTANCE_SCALE;
+  const clamped = Math.max(POI_CLUSTER_MIN_SPACING_KM, Math.min(POI_CLUSTER_MAX_SPACING_KM, scaled));
+  return clamped;
+}
+
+function selectClusterRepresentative(items, categoryKey) {
+  if (!Array.isArray(items) || !items.length) {
+    return null;
+  }
+  if (PEAK_CATEGORY_SET.has(categoryKey)) {
+    let chosen = null;
+    let bestElevation = -Infinity;
+    items.forEach((item) => {
+      if (!item) {
+        return;
+      }
+      const elevation = Number(item.elevation);
+      if (Number.isFinite(elevation)) {
+        if (elevation > bestElevation) {
+          bestElevation = elevation;
+          chosen = item;
+        } else if (elevation === bestElevation) {
+          const chosenHasName = typeof chosen?.name === 'string' && chosen.name;
+          const itemHasName = typeof item.name === 'string' && item.name;
+          if (!chosenHasName && itemHasName) {
+            chosen = item;
+          }
+        }
+        return;
+      }
+      if (!chosen) {
+        chosen = item;
+      }
+    });
+    return chosen ?? items[0];
+  }
+  const named = items.find((item) => typeof item?.name === 'string' && item.name.trim());
+  return named ?? items[0];
+}
+
+function clusterRoutePointsOfInterest(pois, totalDistanceKm) {
+  if (!Array.isArray(pois) || !pois.length) {
+    return [];
+  }
+  const spacingKm = computePoiClusterSpacing(totalDistanceKm);
+  const grouped = new Map();
+  pois.forEach((poi) => {
+    if (!poi || !Number.isFinite(poi.distanceKm)) {
+      return;
+    }
+    const key = poi.categoryKey ?? 'default';
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key).push(poi);
+  });
+
+  const results = [];
+  grouped.forEach((list, categoryKey) => {
+    const sorted = list
+      .filter((poi) => poi && Number.isFinite(poi.distanceKm))
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+    if (!sorted.length) {
+      return;
+    }
+    let cluster = [];
+    let clusterBase = null;
+    sorted.forEach((poi) => {
+      const distance = Number(poi.distanceKm);
+      if (!Number.isFinite(distance)) {
+        return;
+      }
+      if (!cluster.length) {
+        cluster = [poi];
+        clusterBase = distance;
+        return;
+      }
+      if (Math.abs(distance - clusterBase) <= spacingKm) {
+        cluster.push(poi);
+      } else {
+        const representative = selectClusterRepresentative(cluster, categoryKey);
+        if (representative) {
+          results.push(representative);
+        }
+        cluster = [poi];
+        clusterBase = distance;
+      }
+    });
+    if (cluster.length) {
+      const representative = selectClusterRepresentative(cluster, categoryKey);
+      if (representative) {
+        results.push(representative);
+      }
+    }
+  });
+
+  results.sort((a, b) => a.distanceKm - b.distanceKm);
+  return results;
+}
+
+function shouldShowPoiLabel(poi) {
+  if (!poi) {
+    return false;
+  }
+  if (!PEAK_CATEGORY_SET.has(poi.categoryKey)) {
+    return false;
+  }
+  const name = typeof poi.name === 'string' ? poi.name.trim() : '';
+  return Boolean(name);
 }
 
 function resolvePoiName(properties = {}) {
@@ -1338,7 +1488,7 @@ export class DirectionsManager {
     this.highlightedElevationBar = null;
     this.activeHoverSource = null;
     this.lastElevationHoverDistance = null;
-    this.routePointsOfInterest = [];
+    this.setRoutePointsOfInterest([]);
     this.pendingPoiRequest = null;
     this.offlinePoiCollection = EMPTY_COLLECTION;
 
@@ -1401,6 +1551,8 @@ export class DirectionsManager {
     removeLayer('waypoints');
     removeLayer('waypoints-hit-area');
     removeLayer(SEGMENT_MARKER_LAYER_ID);
+    removeLayer(ROUTE_POI_LABEL_LAYER_ID);
+    removeLayer(ROUTE_POI_LAYER_ID);
 
     removeSource('route-line-source');
     removeSource('route-segments-source');
@@ -1408,6 +1560,7 @@ export class DirectionsManager {
     removeSource('route-hover-point-source');
     removeSource('waypoints');
     removeSource(SEGMENT_MARKER_SOURCE_ID);
+    removeSource(ROUTE_POI_SOURCE_ID);
 
     this.map.addSource('route-line-source', {
       type: 'geojson',
@@ -1436,6 +1589,11 @@ export class DirectionsManager {
     });
 
     this.map.addSource(SEGMENT_MARKER_SOURCE_ID, {
+      type: 'geojson',
+      data: EMPTY_COLLECTION
+    });
+
+    this.map.addSource(ROUTE_POI_SOURCE_ID, {
       type: 'geojson',
       data: EMPTY_COLLECTION
     });
@@ -1517,6 +1675,65 @@ export class DirectionsManager {
         'circle-color': 'transparent'
       },
       filter: ['==', '$type', 'Point']
+    });
+
+    this.map.addLayer({
+      id: ROUTE_POI_LAYER_ID,
+      type: 'circle',
+      source: ROUTE_POI_SOURCE_ID,
+      layout: {
+        visibility: 'none'
+      },
+      paint: {
+        'circle-radius': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          8,
+          3,
+          12,
+          5,
+          16,
+          7
+        ],
+        'circle-color': ['coalesce', ['get', 'color'], DEFAULT_POI_COLOR],
+        'circle-stroke-color': 'rgba(255, 255, 255, 0.9)',
+        'circle-stroke-width': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          8,
+          1,
+          12,
+          1.2,
+          16,
+          1.6
+        ],
+        'circle-opacity': 0.95
+      },
+      filter: ['==', '$type', 'Point']
+    });
+
+    this.map.addLayer({
+      id: ROUTE_POI_LABEL_LAYER_ID,
+      type: 'symbol',
+      source: ROUTE_POI_SOURCE_ID,
+      layout: {
+        'text-field': ['coalesce', ['get', 'name'], ['get', 'title'], ''],
+        'text-size': 12,
+        'text-offset': [0, 1.2],
+        'text-anchor': 'top',
+        'text-font': ['Noto Sans Bold'],
+        'text-optional': true,
+        visibility: 'none'
+      },
+      paint: {
+        'text-color': ['coalesce', ['get', 'color'], DEFAULT_POI_COLOR],
+        'text-halo-color': 'rgba(255, 255, 255, 0.95)',
+        'text-halo-width': 1.1,
+        'text-halo-blur': 0.25
+      },
+      filter: ['==', ['get', 'showLabel'], true]
     });
 
     ensureSegmentMarkerImages(this.map);
@@ -1648,6 +1865,8 @@ export class DirectionsManager {
     });
 
     this.updateSegmentMarkers();
+    this.updateRoutePoiData();
+    this.updateRoutePoiLayerVisibility();
   }
 
   setupUIHandlers() {
@@ -1941,6 +2160,7 @@ export class DirectionsManager {
     this.profileMode = normalized;
     this.updateProfileModeUI();
     this.hideProfileLegend();
+    this.updateRoutePoiLayerVisibility();
     if (silent) {
       return;
     }
@@ -2818,7 +3038,7 @@ export class DirectionsManager {
     if (Array.isArray(this.routeProfile?.coordinates) && this.routeProfile.coordinates.length >= 2) {
       this.refreshRoutePointsOfInterest().catch(() => {});
     } else {
-      this.routePointsOfInterest = [];
+      this.setRoutePointsOfInterest([]);
       this.pendingPoiRequest = null;
     }
   }
@@ -3178,6 +3398,79 @@ export class DirectionsManager {
     source.setData({
       type: 'FeatureCollection',
       features
+    });
+  }
+
+  setRoutePointsOfInterest(pois) {
+    this.routePointsOfInterest = Array.isArray(pois) ? pois : [];
+    this.updateRoutePoiData();
+    this.updateRoutePoiLayerVisibility();
+  }
+
+  updateRoutePoiData() {
+    if (!this.map || typeof this.map.getSource !== 'function') {
+      return;
+    }
+    const source = this.map.getSource(ROUTE_POI_SOURCE_ID);
+    if (!source || typeof source.setData !== 'function') {
+      return;
+    }
+    const pois = Array.isArray(this.routePointsOfInterest) ? this.routePointsOfInterest : [];
+    if (!pois.length) {
+      source.setData(EMPTY_COLLECTION);
+      return;
+    }
+    const features = pois
+      .map((poi) => {
+        if (!poi) {
+          return null;
+        }
+        const coords = Array.isArray(poi.coordinates) ? poi.coordinates : null;
+        if (!coords || coords.length < 2) {
+          return null;
+        }
+        const lng = Number(coords[0]);
+        const lat = Number(coords[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+          return null;
+        }
+        const name = typeof poi.name === 'string' ? poi.name.trim() : '';
+        const title = typeof poi.title === 'string' ? poi.title : name;
+        return {
+          type: 'Feature',
+          properties: {
+            id: poi.id ?? null,
+            title: title || '',
+            name,
+            categoryKey: poi.categoryKey ?? '',
+            color: typeof poi.color === 'string' && poi.color.trim() ? poi.color.trim() : DEFAULT_POI_COLOR,
+            showLabel: Boolean(poi.showLabel && name)
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [lng, lat]
+          }
+        };
+      })
+      .filter(Boolean);
+    source.setData(features.length ? { type: 'FeatureCollection', features } : EMPTY_COLLECTION);
+  }
+
+  updateRoutePoiLayerVisibility() {
+    if (!this.map || typeof this.map.getLayer !== 'function' || typeof this.map.setLayoutProperty !== 'function') {
+      return;
+    }
+    const hasPois = Array.isArray(this.routePointsOfInterest) && this.routePointsOfInterest.length > 0;
+    const shouldShow = this.profileMode === 'poi' && hasPois;
+    const visibility = shouldShow ? 'visible' : 'none';
+    [ROUTE_POI_LAYER_ID, ROUTE_POI_LABEL_LAYER_ID].forEach((layerId) => {
+      if (this.map.getLayer(layerId)) {
+        try {
+          this.map.setLayoutProperty(layerId, 'visibility', visibility);
+        } catch (error) {
+          console.warn('Failed to set POI layer visibility', layerId, error);
+        }
+      }
     });
   }
 
@@ -6051,7 +6344,7 @@ export class DirectionsManager {
     this.elevationSamples = [];
     this.elevationDomain = null;
     this.elevationYAxis = null;
-    this.routePointsOfInterest = [];
+    this.setRoutePointsOfInterest([]);
     this.pendingPoiRequest = null;
     this.resetRouteCuts();
     this.detachElevationChartEvents();
@@ -7168,7 +7461,7 @@ export class DirectionsManager {
     const coordinates = Array.isArray(profile?.coordinates) ? profile.coordinates : [];
     if (!this.map || coordinates.length < 2 || !turfApi || typeof turfApi.lineString !== 'function'
       || typeof turfApi.nearestPointOnLine !== 'function') {
-      this.routePointsOfInterest = [];
+      this.setRoutePointsOfInterest([]);
       return;
     }
 
@@ -7187,7 +7480,8 @@ export class DirectionsManager {
     const totalDistanceKm = Number(profile?.totalDistanceKm);
 
     const sourceCollection = this.offlinePoiCollection;
-    const sourceFeatures = Array.isArray(sourceCollection?.features) ? sourceCollection.features : [];
+    let sourceFeatures = Array.isArray(sourceCollection?.features) ? sourceCollection.features : [];
+    const shouldRetry = false;
 
     if ((!Array.isArray(sourceFeatures) || !sourceFeatures.length) && !shouldRetry) {
       let abortController = null;
@@ -7216,7 +7510,7 @@ export class DirectionsManager {
     }
 
     if (!Array.isArray(sourceFeatures) || !sourceFeatures.length) {
-      this.routePointsOfInterest = [];
+      this.setRoutePointsOfInterest([]);
       if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
         && this.routeGeojson.geometry.coordinates.length >= 2) {
         this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
@@ -7295,14 +7589,17 @@ export class DirectionsManager {
         iconName: definition.definition.icon ?? definition.key,
         color: definition.definition.color ?? DEFAULT_POI_COLOR,
         distanceKm: clampedDistanceKm,
-        coordinates: [lng, lat]
+        coordinates: [lng, lat],
+        elevation: parsePoiElevation(feature.properties || {})
       });
     });
 
     collected.sort((a, b) => a.distanceKm - b.distanceKm);
 
+    const clustered = clusterRoutePointsOfInterest(collected, totalDistanceKm);
+
     const resolved = [];
-    for (const entry of collected) {
+    for (const entry of clustered) {
       if (!entry) {
         continue;
       }
@@ -7318,7 +7615,7 @@ export class DirectionsManager {
           return;
         }
       }
-      resolved.push({ ...entry, icon });
+      resolved.push({ ...entry, icon, showLabel: shouldShowPoiLabel(entry) });
       if (this.pendingPoiRequest !== requestToken) {
         return;
       }
@@ -7328,7 +7625,7 @@ export class DirectionsManager {
       return;
     }
 
-    this.routePointsOfInterest = resolved;
+    this.setRoutePointsOfInterest(resolved);
 
     if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
       && this.routeGeojson.geometry.coordinates.length >= 2) {
@@ -7697,7 +7994,8 @@ export class DirectionsManager {
             if (Number.isFinite(iconHeight) && iconHeight > 0) {
               styleParts.push(`--elevation-marker-icon-height:${iconHeight.toFixed(2)}px`);
             }
-            const labelMarkup = safeLabel
+            const shouldShowLabel = Boolean(poi?.showLabel && safeLabel);
+            const labelMarkup = shouldShowLabel
               ? `<span class="elevation-marker__label">${safeLabel}</span>`
               : '';
             const hasIconImage = icon && typeof icon.url === 'string' && icon.url;
@@ -7971,7 +8269,7 @@ export class DirectionsManager {
     }
     const coordinates = route?.geometry?.coordinates ?? [];
     this.routeProfile = this.buildRouteProfile(coordinates);
-    this.routePointsOfInterest = [];
+    this.setRoutePointsOfInterest([]);
     this.pendingPoiRequest = null;
     const profileCoordinates = Array.isArray(this.routeProfile?.coordinates)
       ? this.routeProfile.coordinates
