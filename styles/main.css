@@ -895,6 +895,31 @@ html, body { margin:0; height:100%; }
   align-items: stretch;
   gap: 1px;
   padding-bottom: 0;
+  z-index: 2;
+}
+
+.elevation-hover-indicator {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 3;
+}
+
+.elevation-hover-indicator[aria-hidden="false"] {
+  opacity: 1;
+}
+
+.elevation-hover-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(0, 0, 0, 0.82);
+  left: 0;
+  transform: translateX(-50%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.65);
 }
 
 .elevation-bar {
@@ -922,6 +947,8 @@ html, body { margin:0; height:100%; }
   color: #133540;
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+  row-gap: 4px;
   padding: 2px 6px;
   margin-top: 6px;
   border-radius: 4px;
@@ -933,6 +960,8 @@ html, body { margin:0; height:100%; }
 .elevation-hover-readout span {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
 }
 
 .elevation-hover-readout[aria-hidden="true"] {
@@ -953,6 +982,7 @@ html, body { margin:0; height:100%; }
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 4;
 }
 
 .elevation-marker {
