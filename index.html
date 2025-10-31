@@ -47,35 +47,6 @@
     <span class="directions-swipe-handle__bar"></span>
   </div>
   <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
-    <div class="directions-toolbar">
-      <button
-        id="directionsInfoButton"
-        class="icon-button has-tooltip"
-        type="button"
-        aria-label="Directions information"
-        aria-describedby="directionsHint"
-        title="How to use directions"
-      >
-        <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
-          <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z" />
-        </svg>
-        <span id="directionsHint" class="directions-hint" role="tooltip" aria-hidden="true">
-          Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
-        </span>
-      </button>
-      <button
-        id="directionsCollapseButton"
-        class="icon-button directions-collapse-button"
-        type="button"
-        aria-label="Hide directions panel"
-        title="Hide directions panel"
-      >
-        <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
-          <path d="M7.05 5.64a1 1 0 0 1 1.41 0L12 9.17l3.54-3.53a1 1 0 0 1 1.41 1.41L13.42 10.6l3.53 3.53a1 1 0 1 1-1.41 1.42L12 12l-3.54 3.55a1 1 0 0 1-1.41-1.42l3.53-3.53-3.53-3.53a1 1 0 0 1 0-1.42Z" />
-        </svg>
-        <span class="sr-only">Close directions</span>
-      </button>
-    </div>
     <div class="directions-header">
       <div class="transport-modes" role="group" aria-label="Travel mode">
         <button
@@ -99,7 +70,8 @@
           <span class="sr-only">Manual line</span>
         </button>
       </div>
-      <div class="directions-actions">
+      <div class="directions-header__actions">
+        <div class="directions-actions">
         <button
           id="swapDirectionsButton"
           class="btn btn--icon btn--icon-only"
@@ -266,6 +238,36 @@
           <img data-icon-id="debug-network" alt="" aria-hidden="true" loading="lazy" decoding="async" />
           <span class="sr-only">Debug network</span>
         </label>
+        </div>
+        <div class="directions-toolbar">
+          <button
+            id="directionsInfoButton"
+            class="icon-button has-tooltip"
+            type="button"
+            aria-label="Directions information"
+            aria-describedby="directionsHint"
+            title="How to use directions"
+          >
+            <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+              <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Zm2.1 12.2h-4.2v-1.8h1v-3.8h-1V10h3.2v5.8h1z" />
+            </svg>
+            <span id="directionsHint" class="directions-hint" role="tooltip" aria-hidden="true">
+              Left-click the map to set start and end points or add via markers along the route. Right-click the route to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
+            </span>
+          </button>
+          <button
+            id="directionsCollapseButton"
+            class="icon-button directions-collapse-button"
+            type="button"
+            aria-label="Hide directions panel"
+            title="Hide directions panel"
+          >
+            <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+              <path d="M7.05 5.64a1 1 0 0 1 1.41 0L12 9.17l3.54-3.53a1 1 0 0 1 1.41 1.41L13.42 10.6l3.53 3.53a1 1 0 1 1-1.41 1.42L12 12l-3.54 3.55a1 1 0 0 1-1.41-1.42l3.53-3.53-3.53-3.53a1 1 0 0 1 0-1.42Z" />
+            </svg>
+            <span class="sr-only">Close directions</span>
+          </button>
+        </div>
       </div>
     </div>
     <div id="routeStats" class="route-stats" aria-live="polite"></div>

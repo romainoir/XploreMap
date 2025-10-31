@@ -597,6 +597,10 @@ html, body { margin:0; height:100%; }
   transform: scale(var(--ui-scale));
   transform-origin: bottom center;
   box-sizing: border-box;
+  min-height: 260px;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  resize: vertical;
 }
 
 .directions-control.visible {
@@ -644,6 +648,15 @@ html, body { margin:0; height:100%; }
   flex-wrap: wrap;
   gap: 18px;
   align-items: center;
+}
+
+.directions-header__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-inline-start: auto;
 }
 
 .directions-control .btn {
@@ -1194,15 +1207,17 @@ html, body { margin:0; height:100%; }
 
   .directions-header {
     align-items: center;
-    justify-content: space-between;
   }
 
   .transport-modes {
     flex: 1 1 auto;
   }
 
-  .directions-actions {
+  .directions-header__actions {
     margin-inline-start: auto;
+  }
+
+  .directions-actions {
     justify-content: flex-end;
   }
 
@@ -1226,8 +1241,22 @@ html, body { margin:0; height:100%; }
   }
 
   .transport-modes,
-  .directions-actions {
+  .directions-actions,
+  .directions-toolbar {
     width: 100%;
+  }
+
+  .directions-header__actions {
+    width: 100%;
+    margin-inline-start: 0;
+    justify-content: flex-start;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .directions-toolbar {
+    justify-content: flex-start;
   }
 
   .btn--icon {
