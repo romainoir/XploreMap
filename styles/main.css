@@ -621,6 +621,7 @@ html, body { margin:0; height:100%; }
 .directions-body {
   display: flex;
   flex-direction: column;
+  gap: 16px;
 }
 
 .chart-card {
@@ -675,13 +676,14 @@ html, body { margin:0; height:100%; }
 }
 
 .route-stats.has-stats {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 16px;
   padding: 10px 16px;
   border-radius: 14px;
   background: rgba(17, 34, 48, 0.04);
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.08);
+  align-self: flex-end;
 }
 
 .profile-legend {
