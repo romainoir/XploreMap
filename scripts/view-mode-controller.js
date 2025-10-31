@@ -99,13 +99,31 @@ export function createViewModeController(map, options = {}) {
   }
 
   function applySky(is3D) {
-    if (!skySettings || typeof map.setSky !== 'function') {
-      if (!is3D && typeof map.setSky === 'function') {
-        map.setSky(null);
+    if (typeof map.setSky !== 'function') {
+      return;
+    }
+
+    if (!skySettings && is3D) {
+      return;
+    }
+
+    const apply = () => {
+      map.setSky(is3D ? skySettings : null);
+    };
+
+    if (typeof map.isStyleLoaded === 'function' && !map.isStyleLoaded()) {
+      if (typeof map.once === 'function') {
+        map.once('styledata', apply);
+      } else {
+        map.on('styledata', function handleStyleData() {
+          map.off('styledata', handleStyleData);
+          apply();
+        });
       }
       return;
     }
-    map.setSky(is3D ? skySettings : null);
+
+    apply();
   }
 
   function setTerrainExaggeration(value) {
