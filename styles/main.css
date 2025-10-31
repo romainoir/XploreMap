@@ -622,16 +622,6 @@ html, body { margin:0; height:100%; }
   min-width: 0;
 }
 
-.directions-actions__meta {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-left: auto;
-  justify-content: flex-end;
-  flex: 0 0 auto;
-}
-
 .directions-actions .btn {
   flex: 0 0 auto;
 }
@@ -643,6 +633,7 @@ html, body { margin:0; height:100%; }
 }
 
 .chart-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -667,6 +658,13 @@ html, body { margin:0; height:100%; }
   justify-content: flex-end;
   gap: 16px;
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chart-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -1187,15 +1185,8 @@ html, body { margin:0; height:100%; }
     align-items: stretch;
   }
 
-  .directions-actions__primary,
-  .directions-actions__meta {
+  .directions-actions__primary {
     width: 100%;
-  }
-
-  .directions-actions__meta {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
   }
 
   .btn--icon {
