@@ -6532,6 +6532,7 @@ export class DirectionsManager {
     }
     this.highlightElevationAt(null);
     this.updateElevationHoverReadout(null);
+    this.updateRouteStatsHover(null);
   }
 
   updateRouteHoverDisplay(mousePoint, segment, projection) {
@@ -6554,6 +6555,8 @@ export class DirectionsManager {
     }
     const altitudeLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : 'N/A';
     const gradeLabel = this.formatGrade(gradeValue);
+
+    this.updateRouteStatsHover(distanceKm, { elevation, grade: gradeValue });
 
     let screenPoint = mousePoint;
     if ((!screenPoint || !Number.isFinite(screenPoint.x) || !Number.isFinite(screenPoint.y)) && projection.coordinates) {
