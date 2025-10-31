@@ -7779,79 +7779,28 @@ export class DirectionsManager {
     this.routeStats.setAttribute('data-mode', 'summary');
   }
 
-  updateRouteStatsHover(distanceKm, overrides = {}) {
+  updateRouteStatsHover(distanceKm) {
     if (!this.routeStats) {
       return;
     }
 
-    if (!Number.isFinite(distanceKm) || !this.routeGeojson) {
-      this.isRouteStatsHoverActive = false;
-      this.routeStats.classList.remove('is-hover');
-      this.routeStats.removeAttribute('data-mode');
-      if (this.latestMetrics) {
-        this.renderRouteStatsSummary(this.latestMetrics);
-      } else {
-        this.routeStats.innerHTML = '';
-        this.routeStats.classList.remove('has-stats');
-      }
+    this.routeStats.classList.remove('is-hover');
+    this.routeStats.removeAttribute('data-mode');
+    this.isRouteStatsHoverActive = false;
+
+    if (this.latestMetrics) {
+      this.renderRouteStatsSummary(this.latestMetrics);
       return;
     }
 
-    const metrics = this.latestMetrics ?? this.calculateRouteMetrics(this.routeGeojson);
-    if (!metrics) {
-      this.isRouteStatsHoverActive = false;
-      this.renderRouteStatsSummary(null);
+    if (this.routeGeojson) {
+      const metrics = this.calculateRouteMetrics(this.routeGeojson);
+      this.latestMetrics = metrics;
+      this.renderRouteStatsSummary(metrics);
       return;
     }
 
-    const distanceLabel = this.formatDistance(distanceKm);
-    const resolvedElevation = Number.isFinite(overrides?.elevation)
-      ? overrides.elevation
-      : this.getElevationAtDistance(distanceKm);
-    const altitudeLabel = Number.isFinite(resolvedElevation)
-      ? `${Math.round(resolvedElevation)} m`
-      : 'N/A';
-    const resolvedGrade = Number.isFinite(overrides?.grade)
-      ? overrides.grade
-      : this.computeGradeAtDistance(distanceKm);
-    const slopeLabel = this.formatGrade(resolvedGrade);
-
-    const stats = [
-      { key: 'distance', label: 'Distance at cursor', value: `${distanceLabel} km` },
-      { key: 'elevation', label: 'Elevation at cursor', value: altitudeLabel },
-      { key: 'slope', label: 'Slope at cursor', value: slopeLabel }
-    ];
-
-    const listItems = stats
-      .map(({ key, label, value }) => {
-        const icon = SUMMARY_ICONS[key] ?? '';
-        const iconMarkup = icon ? `${icon}` : '';
-        const safeLabel = escapeHtml(label);
-        const safeValue = escapeHtml(value);
-        return `
-        <li
-          class="summary-item ${key}"
-          aria-label="${safeLabel} ${safeValue}"
-          title="${safeLabel}"
-        >
-          ${iconMarkup}
-          <span aria-hidden="true">${safeValue}</span>
-        </li>
-      `.trim();
-      })
-      .join('');
-
-    const srText = `At ${distanceLabel} km: elevation ${altitudeLabel}. Slope ${slopeLabel}.`;
-
-    this.routeStats.innerHTML = `
-      <span class="sr-only">${escapeHtml(srText)}</span>
-      <ul class="route-stats-list">
-        ${listItems}
-      </ul>
-    `;
-    this.routeStats.classList.add('has-stats', 'is-hover');
-    this.routeStats.setAttribute('data-mode', 'hover');
-    this.isRouteStatsHoverActive = true;
+    this.renderRouteStatsSummary(null);
   }
 
   updateStats(route) {
