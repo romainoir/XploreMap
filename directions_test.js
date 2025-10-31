@@ -41,8 +41,10 @@ const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
   ...Object.values(POI_CATEGORY_DISTANCE_OVERRIDES)
 );
 const DEFAULT_POI_COLOR = '#2d7bd6';
-const ELEVATION_MARKER_LABEL_BASE_SHIFT_PX = 6;
-const ELEVATION_MARKER_LABEL_EXTRA_SHIFT_PX = 28;
+const ELEVATION_PROFILE_POI_MARKER_OFFSET_PX = -12;
+const ELEVATION_MARKER_CLUSTER_DISTANCE_THRESHOLD_PX = 48;
+const ELEVATION_MARKER_CLUSTER_BASE_SHIFT_PX = 0;
+const ELEVATION_MARKER_CLUSTER_SHIFT_INCREMENT_PX = 16;
 const DEFAULT_POI_TITLE = 'Point d’intérêt';
 const POI_NAME_PROPERTIES = Object.freeze(['name:fr', 'name', 'name:en', 'ref']);
 const POI_ADDITIONAL_PROPERTY_TAGS = Object.freeze([
@@ -8308,7 +8310,7 @@ export class DirectionsManager {
             const icon = poi?.icon ?? null;
             const iconWidth = Number(icon?.width);
             const iconHeight = Number(icon?.height);
-            const styleParts = ['bottom:0'];
+            const styleParts = [`bottom:${ELEVATION_PROFILE_POI_MARKER_OFFSET_PX}px`];
             styleParts.push(`color:${colorValue}`);
             styleParts.push(`--poi-marker-color:${colorValue}`);
             if (Number.isFinite(iconWidth) && iconWidth > 0) {
@@ -8339,7 +8341,7 @@ export class DirectionsManager {
               : '<span class="elevation-marker__icon elevation-marker__icon--fallback" aria-hidden="true"></span>';
             const datasetAttributes = [
               `data-distance-km="${distanceKm.toFixed(6)}"`,
-              'data-bottom-offset="0"'
+              `data-bottom-offset="${ELEVATION_PROFILE_POI_MARKER_OFFSET_PX}"`
             ];
             const poiElevation = Number(poi?.elevation);
             if (Number.isFinite(poiElevation)) {
@@ -8438,17 +8440,71 @@ export class DirectionsManager {
       && Number.isFinite(yMax)
       && Math.abs(ySpan) > Number.EPSILON;
 
-    markers.forEach((marker) => {
-      const distanceKm = Number(marker.dataset.distanceKm);
-      if (!Number.isFinite(distanceKm)) {
-        return;
-      }
-      const isPoiMarker = marker.classList.contains('poi');
-      const isBivouacMarker = marker.classList.contains('bivouac');
-      const ratio = span > 0 ? (distanceKm - domainLow) / span : 0;
-      const clampedRatio = Math.max(0, Math.min(1, ratio));
-      const percent = clampedRatio * 100;
+    const containerWidth = Number(this.elevationChartContainer?.clientWidth) || 0;
+    const markerEntries = markers
+      .map((marker) => {
+        const distanceKm = Number(marker.dataset.distanceKm);
+        if (!Number.isFinite(distanceKm)) {
+          return null;
+        }
+        const isPoiMarker = marker.classList.contains('poi');
+        const isBivouacMarker = marker.classList.contains('bivouac');
+        const ratio = span > 0 ? (distanceKm - domainLow) / span : 0;
+        const clampedRatio = Math.max(0, Math.min(1, ratio));
+        const percent = clampedRatio * 100;
+        return {
+          marker,
+          isPoiMarker,
+          isBivouacMarker,
+          clampedRatio,
+          percent,
+          hasLabel: Boolean(marker.querySelector('.elevation-marker__label'))
+        };
+      })
+      .filter(Boolean);
+
+    const clusterShiftMap = new Map();
+    if (containerWidth > 0) {
+      const labelledEntries = markerEntries
+        .filter((entry) => entry.hasLabel && (entry.isPoiMarker || entry.isBivouacMarker))
+        .sort((a, b) => a.percent - b.percent);
+
+      const applyCluster = (cluster) => {
+        if (!Array.isArray(cluster) || cluster.length <= 1) {
+          return;
+        }
+        cluster.forEach((entry, index) => {
+          const shift = ELEVATION_MARKER_CLUSTER_BASE_SHIFT_PX
+            + index * ELEVATION_MARKER_CLUSTER_SHIFT_INCREMENT_PX;
+          clusterShiftMap.set(entry.marker, shift);
+        });
+      };
+
+      let cluster = [];
+      labelledEntries.forEach((entry) => {
+        if (!cluster.length) {
+          cluster = [entry];
+          return;
+        }
+        const previous = cluster[cluster.length - 1];
+        const deltaPercent = Math.abs(entry.percent - previous.percent);
+        const deltaPx = (deltaPercent / 100) * containerWidth;
+        if (deltaPx <= ELEVATION_MARKER_CLUSTER_DISTANCE_THRESHOLD_PX) {
+          cluster.push(entry);
+        } else {
+          applyCluster(cluster);
+          cluster = [entry];
+        }
+      });
+      applyCluster(cluster);
+    }
+
+    markerEntries.forEach((entry) => {
+      const { marker, isPoiMarker, isBivouacMarker, clampedRatio, percent, hasLabel } = entry;
       marker.style.left = `${percent.toFixed(6)}%`;
+
+      const offsetValue = Number(marker.dataset.bottomOffset);
+      const offsetPx = Number.isFinite(offsetValue) ? offsetValue : 0;
 
       if ((isPoiMarker || isBivouacMarker) && canPositionVertically) {
         const clampedDistanceKm = domainLow + clampedRatio * span;
@@ -8457,43 +8513,22 @@ export class DirectionsManager {
           const normalized = (elevation - yMin) / ySpan;
           const clampedElevation = Math.max(0, Math.min(1, normalized));
           const elevationPercent = (clampedElevation * 100).toFixed(6);
-          const offsetValue = Number(marker.dataset.bottomOffset);
-          const offsetPx = Number.isFinite(offsetValue) ? offsetValue : 0;
           const offsetSuffix = offsetPx !== 0 ? ` + ${offsetPx}px` : '';
           if (offsetSuffix) {
             marker.style.bottom = `calc(${elevationPercent}%${offsetSuffix})`;
           } else {
             marker.style.bottom = `${elevationPercent}%`;
           }
-          const markerElevationValue = Number(marker.dataset.elevation);
-          const labelElevation = Number.isFinite(markerElevationValue)
-            ? markerElevationValue
-            : elevation;
-          if (Number.isFinite(labelElevation)) {
-            const normalizedLabel = (labelElevation - yMin) / ySpan;
-            const clampedLabel = Math.max(0, Math.min(1, normalizedLabel));
-            const labelShift = ELEVATION_MARKER_LABEL_BASE_SHIFT_PX
-              + clampedLabel * ELEVATION_MARKER_LABEL_EXTRA_SHIFT_PX;
-            marker.style.setProperty(
-              '--elevation-marker-label-shift',
-              `${labelShift.toFixed(2)}px`
-            );
-          } else {
-            marker.style.removeProperty('--elevation-marker-label-shift');
-          }
         } else {
-          const offsetValue = Number(marker.dataset.bottomOffset);
-          if (Number.isFinite(offsetValue)) {
-            marker.style.bottom = `${Math.max(0, offsetValue)}px`;
-          }
-          marker.style.removeProperty('--elevation-marker-label-shift');
+          marker.style.bottom = `${offsetPx}px`;
         }
       } else if (isPoiMarker || isBivouacMarker) {
-        const offsetValue = Number(marker.dataset.bottomOffset);
-        if (Number.isFinite(offsetValue)) {
-          marker.style.bottom = `${Math.max(0, offsetValue)}px`;
-        }
-        marker.style.removeProperty('--elevation-marker-label-shift');
+        marker.style.bottom = `${offsetPx}px`;
+      }
+
+      const clusterShift = clusterShiftMap.get(marker);
+      if (Number.isFinite(clusterShift) && clusterShift > 0 && hasLabel) {
+        marker.style.setProperty('--elevation-marker-label-shift', `${clusterShift.toFixed(2)}px`);
       } else {
         marker.style.removeProperty('--elevation-marker-label-shift');
       }

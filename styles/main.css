@@ -999,10 +999,6 @@ html, body { margin:0; height:100%; }
 }
 
 .elevation-marker__label {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 3px rgba(17, 34, 48, 0.16);
   font-size: 10px;
   font-weight: 600;
   color: currentColor;
