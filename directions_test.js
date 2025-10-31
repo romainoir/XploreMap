@@ -2362,8 +2362,9 @@ export class DirectionsManager {
           const mode = button.dataset.profileMode;
           this.setProfileMode(mode);
           this.closeProfileMenu();
+        });
       });
-    });
+    }
   }
 
   supportsPanelGestures() {
