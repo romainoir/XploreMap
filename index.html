@@ -68,136 +68,142 @@
         </button>
       </div>
       <div class="directions-actions">
-        <button
-          id="swapDirectionsButton"
-          class="btn btn--icon btn--icon-only"
-          type="button"
-          aria-label="Swap A and B"
-          title="Swap A and B"
-        >
-          <img src="./data/swap.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span class="sr-only">Swap A and B</span>
-        </button>
-        <button
-          id="undoDirectionsButton"
-          class="btn btn--icon btn--icon-only"
-          type="button"
-          aria-label="Undo"
-          title="Undo"
-          disabled
-        >
-          <img src="./data/undo.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span class="sr-only">Undo</span>
-        </button>
-        <button
-          id="redoDirectionsButton"
-          class="btn btn--icon btn--icon-only"
-          type="button"
-          aria-label="Redo"
-          title="Redo"
-          disabled
-        >
-          <img src="./data/redo.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span class="sr-only">Redo</span>
-        </button>
-        <button
-          id="clearDirectionsButton"
-          class="btn btn--icon btn--icon-only"
-          type="button"
-          aria-label="Clear"
-          title="Clear"
-        >
-          <img src="./data/clear.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span class="sr-only">Clear</span>
-        </button>
-        <button id="gpxImportButton" class="btn btn--icon btn--icon-only" type="button">
-          <img data-icon-id="gpx-import" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span class="sr-only">Import GPX</span>
-        </button>
-        <input id="gpxFileInput" class="sr-only" type="file" accept=".gpx,application/gpx+xml">
-        <button id="gpxExportButton" class="btn btn--icon btn--icon-only" type="button">
-          <img data-icon-id="gpx-export" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <span class="sr-only">Export GPX</span>
-        </button>
-        <div class="profile-mode-controls">
-          <div class="profile-mode-menu" aria-live="polite">
-            <button
-              id="profileModeToggle"
-              class="profile-mode-button"
-              type="button"
-              aria-haspopup="true"
-              aria-expanded="false"
-              aria-controls="profileModeMenuList"
-            >
-              <span class="profile-mode-button__icon" aria-hidden="true">
-                <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
-              </span>
-              <span class="profile-mode-button__label">None</span>
-              <span class="sr-only">Toggle overlay mode</span>
-            </button>
-            <div
-              id="profileModeMenuList"
-              class="profile-mode-menu__list"
-              role="menu"
-              tabindex="-1"
-              aria-hidden="true"
-            >
-              <button
-                type="button"
-                class="profile-mode-menu__item active"
-                data-profile-mode="none"
-                role="menuitemradio"
-                aria-checked="true"
-              >
-                <span class="profile-mode-menu__text">None</span>
-              </button>
-              <button
-                type="button"
-                class="profile-mode-menu__item"
-                data-profile-mode="slope"
-                role="menuitemradio"
-                aria-checked="false"
-              >
-                <span class="profile-mode-menu__text">Slope</span>
-              </button>
-              <button
-                type="button"
-                class="profile-mode-menu__item"
-                data-profile-mode="surface"
-                role="menuitemradio"
-                aria-checked="false"
-              >
-                <span class="profile-mode-menu__text">Surface</span>
-              </button>
-              <button
-                type="button"
-                class="profile-mode-menu__item"
-                data-profile-mode="category"
-                role="menuitemradio"
-                aria-checked="false"
-              >
-                <span class="profile-mode-menu__text">Difficulty</span>
-              </button>
-              <button
-                type="button"
-                class="profile-mode-menu__item"
-                data-profile-mode="poi"
-                role="menuitemradio"
-                aria-checked="false"
-              >
-                <span class="profile-mode-menu__text">POI</span>
-              </button>
-            </div>
-          </div>
-          <div
-            id="profileLegend"
-            class="profile-legend"
-            role="group"
-            aria-label="Route overlay legend"
-            aria-hidden="true"
-            data-ready="false"
-          ></div>
+        <div class="directions-actions__primary">
+          <button
+            id="swapDirectionsButton"
+            class="btn btn--icon btn--icon-only"
+            type="button"
+            aria-label="Swap A and B"
+            title="Swap A and B"
+          >
+            <img src="./data/swap.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span class="sr-only">Swap A and B</span>
+          </button>
+          <button
+            id="undoDirectionsButton"
+            class="btn btn--icon btn--icon-only"
+            type="button"
+            aria-label="Undo"
+            title="Undo"
+            disabled
+          >
+            <img src="./data/undo.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span class="sr-only">Undo</span>
+          </button>
+          <button
+            id="redoDirectionsButton"
+            class="btn btn--icon btn--icon-only"
+            type="button"
+            aria-label="Redo"
+            title="Redo"
+            disabled
+          >
+            <img src="./data/redo.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span class="sr-only">Redo</span>
+          </button>
+          <button
+            id="clearDirectionsButton"
+            class="btn btn--icon btn--icon-only"
+            type="button"
+            aria-label="Clear"
+            title="Clear"
+          >
+            <img src="./data/clear.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span class="sr-only">Clear</span>
+          </button>
+          <button id="gpxImportButton" class="btn btn--icon btn--icon-only" type="button">
+            <img data-icon-id="gpx-import" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span class="sr-only">Import GPX</span>
+          </button>
+          <input id="gpxFileInput" class="sr-only" type="file" accept=".gpx,application/gpx+xml">
+          <button id="gpxExportButton" class="btn btn--icon btn--icon-only" type="button">
+            <img data-icon-id="gpx-export" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span class="sr-only">Export GPX</span>
+          </button>
         </div>
+        <div class="directions-actions__meta">
+          <div id="routeStats" class="route-stats" aria-live="polite"></div>
+          <div class="profile-mode-controls">
+            <div class="profile-mode-menu" aria-live="polite">
+              <button
+                id="profileModeToggle"
+                class="profile-mode-button"
+                type="button"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-controls="profileModeMenuList"
+              >
+                <span class="profile-mode-button__icon" aria-hidden="true">
+                  <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
+                </span>
+                <span class="profile-mode-button__label">None</span>
+                <span class="sr-only">Toggle overlay mode</span>
+              </button>
+              <div
+                id="profileModeMenuList"
+                class="profile-mode-menu__list"
+                role="menu"
+                tabindex="-1"
+                aria-hidden="true"
+              >
+                <button
+                  type="button"
+                  class="profile-mode-menu__item active"
+                  data-profile-mode="none"
+                  role="menuitemradio"
+                  aria-checked="true"
+                >
+                  <span class="profile-mode-menu__text">None</span>
+                </button>
+                <button
+                  type="button"
+                  class="profile-mode-menu__item"
+                  data-profile-mode="slope"
+                  role="menuitemradio"
+                  aria-checked="false"
+                >
+                  <span class="profile-mode-menu__text">Slope</span>
+                </button>
+                <button
+                  type="button"
+                  class="profile-mode-menu__item"
+                  data-profile-mode="surface"
+                  role="menuitemradio"
+                  aria-checked="false"
+                >
+                  <span class="profile-mode-menu__text">Surface</span>
+                </button>
+                <button
+                  type="button"
+                  class="profile-mode-menu__item"
+                  data-profile-mode="category"
+                  role="menuitemradio"
+                  aria-checked="false"
+                >
+                  <span class="profile-mode-menu__text">Difficulty</span>
+                </button>
+                <button
+                  type="button"
+                  class="profile-mode-menu__item"
+                  data-profile-mode="poi"
+                  role="menuitemradio"
+                  aria-checked="false"
+                >
+                  <span class="profile-mode-menu__text">POI</span>
+                </button>
+              </div>
+            </div>
+            <div
+              id="profileLegend"
+              class="profile-legend"
+              role="group"
+              aria-label="Route overlay legend"
+              aria-hidden="true"
+              data-ready="false"
+            ></div>
+          </div>
+        </div>
+      </div>
         <button
           id="routingModeToggle"
           class="btn btn--icon btn--icon-only routing-mode-toggle"
@@ -245,7 +251,6 @@
       </div>
     </div>
     <div class="directions-body">
-      <div id="routeStats" class="route-stats" aria-live="polite"></div>
       <div class="chart-card" role="group" aria-label="Route elevation overview">
         <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
       </div>
