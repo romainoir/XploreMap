@@ -1236,15 +1236,13 @@ html, body { margin:0; height:100%; }
   border: 0;
 }
 
-.hs-panel {
-  position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); z-index: 2;
-  background: rgba(255,255,255,.92); border-radius: 10px; padding: 8px 10px;
-  font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  box-shadow: 0 6px 18px rgba(0,0,0,.12);
+.terrain-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
 }
-.hs-title { font-weight: 600; margin-bottom: 6px; }
-.terrain-controls { display:flex; flex-direction: column; align-items: stretch; gap:8px; }
-.toggle-3d { width: 100%; }
 .hillshade-method-button { width: 100%; text-align: center; }
 .hillshade-method-button__label { font-size: 12px; font-weight: 600; }
 .btn {
@@ -1331,8 +1329,22 @@ html, body { margin:0; height:100%; }
   height: 22px;
 }
 
-.terrain-controls .toggle-3d.btn--icon-only {
+.terrain-controls .btn {
   width: 100%;
+}
+
+.imagery-panel__terrain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(17, 34, 48, 0.12);
+}
+
+.imagery-panel__terrain-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(17, 34, 48, 0.75);
 }
 
 .imagery-panel {

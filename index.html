@@ -256,26 +256,6 @@
   </div>
 </div>
 
-<!-- Hillshade method switcher -->
-<div class="hs-panel">
-  <div class="hs-title">Terrain</div>
-  <div class="terrain-controls">
-    <button id="toggle3D" class="btn btn--icon-only toggle-3d" type="button" aria-pressed="true" aria-label="Switch to 2D" title="Switch to 2D">
-      <img data-icon-id="view-toggle" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-      <span class="sr-only">Toggle 2D/3D view</span>
-    </button>
-    <button
-      id="cycleHillshadeMethod"
-      class="btn hillshade-method-button"
-      type="button"
-      title="Cycle hillshade rendering"
-      aria-label="Cycle hillshade rendering"
-    >
-      <span class="hillshade-method-button__label" aria-live="polite">Hillshade: Igor</span>
-    </button>
-  </div>
-</div>
-
 <!-- Imagery toggle -->
 <div class="imagery-panel" id="imageryPanel">
   <button
@@ -294,6 +274,24 @@
   </button>
   <div class="imagery-panel__drawer" id="imageryPanelDrawer" hidden aria-hidden="true">
     <div class="imagery-toggle" id="imageryToggle" role="group" aria-label="Imagery layers"></div>
+    <div class="imagery-panel__terrain" role="group" aria-label="Terrain controls">
+      <div class="imagery-panel__terrain-title">Terrain</div>
+      <div class="terrain-controls">
+        <button
+          id="cycleHillshadeMethod"
+          class="btn hillshade-method-button"
+          type="button"
+          title="Cycle hillshade rendering"
+          aria-label="Cycle hillshade rendering"
+        >
+          <span class="hillshade-method-button__label" aria-live="polite">Hillshade: Igor</span>
+        </button>
+        <button id="toggle3D" class="btn btn--icon-only toggle-3d" type="button" aria-pressed="true" aria-label="Switch to 2D" title="Switch to 2D">
+          <img data-icon-id="view-toggle" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <span class="sr-only">Toggle 2D/3D view</span>
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
