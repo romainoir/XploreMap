@@ -28,6 +28,154 @@ import { extractOverpassNetwork } from './overpass-network.js';
 import { extractOpenFreeMapNetwork } from './openfreemap-network.js';
 import { createViewModeController } from './view-mode-controller.js';
 
+const TERRARIUM_ENCODING = 'terrarium';
+const MAPBOX_ENCODING = 'mapbox';
+
+function ensureTerrariumEncodingSupport() {
+  if (typeof maplibregl === 'undefined' || !maplibregl) {
+    return;
+  }
+
+  const spec = maplibregl.styleSpec;
+  const encodingSpecs = [
+    spec?.['source_raster-dem']?.encoding,
+    spec?.source_raster_dem?.encoding
+  ].filter(Boolean);
+
+  encodingSpecs.forEach((encodingSpec) => {
+    const { values } = encodingSpec ?? {};
+    if (Array.isArray(values)) {
+      if (!values.includes(TERRARIUM_ENCODING)) {
+        values.push(TERRARIUM_ENCODING);
+      }
+      return;
+    }
+    if (values && typeof values === 'object' && !values[TERRARIUM_ENCODING]) {
+      values[TERRARIUM_ENCODING] = { doc: 'Terrarium encoded elevation tiles' };
+    }
+  });
+}
+
+function convertTerrariumPixelData(image) {
+  if (!image || typeof image !== 'object') {
+    return image;
+  }
+
+  const { data } = image;
+  if (!(data instanceof Uint8ClampedArray)) {
+    return image;
+  }
+
+  const pixelCount = data.length;
+  for (let i = 0; i < pixelCount; i += 4) {
+    const red = data[i];
+    const green = data[i + 1];
+    const blue = data[i + 2];
+    const alpha = data[i + 3];
+
+    const elevation = (red * 256) + green + (blue / 256) - 32768;
+    let encoded = Math.round((elevation + 10000) * 10);
+    if (!Number.isFinite(encoded)) {
+      encoded = 0;
+    }
+    encoded = Math.max(0, Math.min(16777215, encoded));
+
+    const mapboxRed = Math.floor(encoded / 65536);
+    const mapboxGreen = Math.floor((encoded % 65536) / 256);
+    const mapboxBlue = encoded % 256;
+
+    data[i] = mapboxRed;
+    data[i + 1] = mapboxGreen;
+    data[i + 2] = mapboxBlue;
+    data[i + 3] = alpha;
+  }
+
+  return image;
+}
+
+function normalizeImageData(image) {
+  if (!image || typeof image !== 'object') {
+    return null;
+  }
+
+  if (typeof ImageData !== 'undefined' && image instanceof ImageData) {
+    return image;
+  }
+
+  if (image.data instanceof Uint8ClampedArray) {
+    return image;
+  }
+
+  if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap && typeof OffscreenCanvas !== 'undefined') {
+    try {
+      const canvas = new OffscreenCanvas(image.width, image.height);
+      const context = canvas.getContext('2d');
+      if (!context) {
+        return null;
+      }
+      context.drawImage(image, 0, 0);
+      return context.getImageData(0, 0, image.width, image.height);
+    } catch (error) {
+      console.warn('Failed to normalise DEM image data for Terrarium conversion', error);
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function patchDemDataLoader() {
+  if (typeof maplibregl === 'undefined' || !maplibregl?.DEMData) {
+    return;
+  }
+
+  const { DEMData } = maplibregl;
+  if (!DEMData?.prototype || typeof DEMData.prototype.loadFromImage !== 'function') {
+    return;
+  }
+
+  if (DEMData.prototype.__terrariumPatched) {
+    return;
+  }
+
+  const processedImages = new WeakSet();
+  const originalLoadFromImage = DEMData.prototype.loadFromImage;
+
+  DEMData.prototype.loadFromImage = function loadFromImage(image, encoding) {
+    const effectiveEncoding = typeof encoding === 'string'
+      ? encoding
+      : this?.encoding ?? this?.options?.encoding ?? this?.tile?.encoding;
+
+    if (effectiveEncoding === TERRARIUM_ENCODING && image && typeof image === 'object') {
+      const normalised = normalizeImageData(image);
+      if (!normalised) {
+        return originalLoadFromImage.apply(this, arguments);
+      }
+
+      if (!processedImages.has(normalised)) {
+        convertTerrariumPixelData(normalised);
+        processedImages.add(normalised);
+      }
+
+      const args = Array.from(arguments);
+      args[0] = normalised;
+      if (args.length > 1) {
+        args[1] = MAPBOX_ENCODING;
+      } else {
+        args.push(MAPBOX_ENCODING);
+      }
+      return originalLoadFromImage.apply(this, args);
+    }
+
+    return originalLoadFromImage.apply(this, arguments);
+  };
+
+  DEMData.prototype.__terrariumPatched = true;
+}
+
+ensureTerrariumEncodingSupport();
+patchDemDataLoader();
+
 const UI_ICON_SOURCES = Object.freeze({
   'view-toggle': './data/2d_3d.png',
   'gpx-import': './data/upload.png',
