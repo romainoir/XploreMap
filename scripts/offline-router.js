@@ -847,6 +847,55 @@ function sanitizeCoordinateSequence(coords) {
   return sequence.length >= 2 ? sequence : null;
 }
 
+function cloneRouteFeature(feature) {
+  if (!feature) {
+    return null;
+  }
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(feature);
+    } catch (error) {
+      // Fall back to JSON cloning
+    }
+  }
+  return JSON.parse(JSON.stringify(feature));
+}
+
+function buildRouteCacheKey(waypoints, mode, preservedSegments = []) {
+  const coords = sanitizeCoordinateSequence(waypoints) || [];
+  const normalizedCoords = coords.map((coord) => coord.map((value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Number(numeric.toFixed(6)) : 0;
+  }));
+
+  const normalizedPreserved = Array.isArray(preservedSegments)
+    ? preservedSegments
+      .map((segment) => {
+        if (!segment) return null;
+        const startIndex = Number(segment.startIndex);
+        const endIndex = Number(segment.endIndex);
+        if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex)) {
+          return null;
+        }
+        const sequence = sanitizeCoordinateSequence(segment.coordinates);
+        if (!sequence) {
+          return null;
+        }
+        return {
+          startIndex,
+          endIndex,
+          coordinates: sequence.map((coord) => coord.map((value) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? Number(numeric.toFixed(6)) : 0;
+          }))
+        };
+      })
+      .filter(Boolean)
+    : [];
+
+  return JSON.stringify({ mode, coords: normalizedCoords, preserved: normalizedPreserved });
+}
+
 function accumulateSequenceMetrics(coords) {
   if (!Array.isArray(coords) || coords.length < 2) {
     return { distanceKm: 0, ascent: 0, descent: 0 };
@@ -907,6 +956,8 @@ export class OfflineRouter {
     this.pathFinder = null;
     this.pathFinderSource = null;
     this.readyPromise = null;
+    this.routeCache = new Map();
+    this.inflightRoutes = new Map();
   }
 
   disposePathFinder() {
@@ -919,6 +970,8 @@ export class OfflineRouter {
     }
     this.pathFinder = null;
     this.pathFinderSource = null;
+    this.routeCache?.clear();
+    this.inflightRoutes?.clear();
   }
 
   setDebugLoggingEnabled(enabled) {
@@ -977,6 +1030,8 @@ export class OfflineRouter {
 
     const isSameObject = this.networkGeoJSON === geojson;
     this.networkGeoJSON = geojson;
+    this.routeCache?.clear();
+    this.inflightRoutes?.clear();
     this.readyPromise = this.initializePathFinder(this.networkGeoJSON);
     return this.readyPromise.then(() => !isSameObject);
   }
@@ -1033,6 +1088,9 @@ export class OfflineRouter {
       nodeConnectionToleranceMeters: clampedMeters
     };
 
+    this.routeCache?.clear();
+    this.inflightRoutes?.clear();
+
     if (this.networkGeoJSON) {
       this.readyPromise = this.initializePathFinder(this.networkGeoJSON);
     }
@@ -1055,7 +1113,8 @@ export class OfflineRouter {
   }
 
   async getRoute(waypoints, { mode, preservedSegments } = {}) {
-    if (!Array.isArray(waypoints) || waypoints.length < 2) {
+    const waypointSequence = sanitizeCoordinateSequence(waypoints);
+    if (!Array.isArray(waypointSequence) || waypointSequence.length < 2) {
       return null;
     }
     const travelMode = typeof mode === 'string' && this.supportsMode(mode)
@@ -1063,6 +1122,7 @@ export class OfflineRouter {
       : Array.from(this.supportedModes)[0];
 
     const preservedMap = new Map();
+    const preservedKeySegments = [];
     if (Array.isArray(preservedSegments)) {
       preservedSegments.forEach((segment) => {
         if (!segment) {
@@ -1078,8 +1138,13 @@ export class OfflineRouter {
           ? segment.metadata.map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null)).filter(Boolean)
           : [];
         preservedMap.set(startIndex, { endIndex, coordinates: coords, metadata });
+        preservedKeySegments.push({ startIndex, endIndex, coordinates: coords });
       });
     }
+
+    const cacheKey = buildRouteCacheKey(waypointSequence, travelMode, preservedKeySegments);
+
+    const computeRoute = async () => {
 
     if (travelMode === 'manual') {
       const coordinates = [];
@@ -1089,9 +1154,9 @@ export class OfflineRouter {
       let totalAscent = 0;
       let totalDescent = 0;
 
-      for (let index = 0; index < waypoints.length - 1; index += 1) {
-        const start = waypoints[index];
-        const end = waypoints[index + 1];
+      for (let index = 0; index < waypointSequence.length - 1; index += 1) {
+        const start = waypointSequence[index];
+        const end = waypointSequence[index + 1];
         const preserved = preservedMap.get(index);
         if (preserved && preserved.endIndex === index + 1) {
           const preservedCoords = preserved.coordinates.map((coord) => coord.slice());
@@ -1214,9 +1279,9 @@ export class OfflineRouter {
     let totalAscent = 0;
     let totalDescent = 0;
 
-    for (let index = 0; index < waypoints.length - 1; index += 1) {
-      const start = waypoints[index];
-      const end = waypoints[index + 1];
+    for (let index = 0; index < waypointSequence.length - 1; index += 1) {
+      const start = waypointSequence[index];
+      const end = waypointSequence[index + 1];
       const preserved = preservedMap.get(index);
       const debugContext = {
         segmentIndex: index,
@@ -1349,6 +1414,31 @@ export class OfflineRouter {
         coordinates
       }
     };
+  };
+
+    if (!cacheKey) {
+      return computeRoute();
+    }
+
+    if (this.routeCache.has(cacheKey)) {
+      return cloneRouteFeature(this.routeCache.get(cacheKey));
+    }
+
+    if (this.inflightRoutes.has(cacheKey)) {
+      return this.inflightRoutes.get(cacheKey);
+    }
+
+    const pendingRoute = computeRoute()
+      .then((route) => {
+        if (route && cacheKey) {
+          this.routeCache.set(cacheKey, cloneRouteFeature(route));
+        }
+        return cloneRouteFeature(route);
+      });
+
+    this.inflightRoutes.set(cacheKey, pendingRoute);
+    pendingRoute.finally(() => this.inflightRoutes.delete(cacheKey));
+    return pendingRoute;
   }
 
   getNetworkDebugGeoJSON(options = {}) {

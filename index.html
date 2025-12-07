@@ -281,19 +281,32 @@
           id="cycleHillshadeMethod"
           class="btn hillshade-method-button"
           type="button"
-          title="Cycle hillshade rendering"
-          aria-label="Cycle hillshade rendering"
+          title="Toggle hillshade"
+          aria-label="Toggle hillshade"
+          aria-pressed="false"
         >
-          <span class="hillshade-method-button__label" aria-live="polite">Hillshade: Igor</span>
+          <span class="hillshade-method-button__icon" aria-hidden="true">
+            <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
+          </span>
+          <span class="hillshade-method-button__content">
+            <span class="hillshade-method-button__title">Hillshade</span>
+            <span class="hillshade-method-button__label" aria-live="polite">Method: Igor</span>
+          </span>
         </button>
         <button id="toggle3D" class="btn btn--icon-only toggle-3d" type="button" aria-pressed="true" aria-label="Switch to 2D" title="Switch to 2D">
           <img data-icon-id="view-toggle" alt="" aria-hidden="true" loading="lazy" decoding="async" />
           <span class="sr-only">Toggle 2D/3D view</span>
         </button>
-        <label class="terrain-hd-toggle" for="terrainHdToggle">
-          <input id="terrainHdToggle" type="checkbox" checked>
-          <span class="terrain-hd-toggle__label">High detail terrain</span>
-        </label>
+        <button
+          id="terrainHdToggle"
+          class="btn terrain-hd-button"
+          type="button"
+          aria-pressed="true"
+          title="Toggle high detail terrain"
+          aria-label="Toggle high detail terrain"
+        >
+          High detail terrain
+        </button>
       </div>
     </div>
   </div>

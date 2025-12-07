@@ -216,7 +216,15 @@ export function createViewModeController(map, options = {}) {
   function setHdEnabled(nextValue) {
     hdEnabled = Boolean(nextValue);
     if (hdToggle) {
-      hdToggle.checked = hdEnabled;
+      if ('checked' in hdToggle) {
+        hdToggle.checked = hdEnabled;
+      }
+      if (typeof hdToggle.classList?.toggle === 'function') {
+        hdToggle.classList.toggle('active', hdEnabled);
+      }
+      if (typeof hdToggle.setAttribute === 'function') {
+        hdToggle.setAttribute('aria-pressed', String(hdEnabled));
+      }
     }
     applyHdMode();
   }
@@ -324,10 +332,19 @@ export function createViewModeController(map, options = {}) {
   }
 
   if (hdToggle) {
-    hdToggle.checked = hdEnabled;
-    hdToggle.addEventListener('change', () => {
-      setHdEnabled(hdToggle.checked);
-    });
+    const isCheckboxToggle = hdToggle.tagName === 'INPUT' && hdToggle.type === 'checkbox';
+    if (isCheckboxToggle) {
+      hdToggle.checked = hdEnabled;
+      hdToggle.addEventListener('change', () => {
+        setHdEnabled(hdToggle.checked);
+      });
+    } else {
+      hdToggle.classList.toggle('active', hdEnabled);
+      hdToggle.setAttribute('aria-pressed', String(hdEnabled));
+      hdToggle.addEventListener('click', () => {
+        setHdEnabled(!hdEnabled);
+      });
+    }
   }
 
   function onTerrainSourcesUpdated() {

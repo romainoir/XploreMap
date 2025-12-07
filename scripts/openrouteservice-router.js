@@ -199,6 +199,55 @@ const metersFromKm = (distanceKm) => {
   return distanceKm * 1000;
 };
 
+function cloneRouteFeature(feature) {
+  if (!feature) {
+    return null;
+  }
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(feature);
+    } catch (error) {
+      // Fall back to JSON cloning
+    }
+  }
+  return JSON.parse(JSON.stringify(feature));
+}
+
+function buildRouteCacheKey(coords, mode, preservedSegments = []) {
+  const normalizedCoords = sanitizeCoordinateSequence(coords) || [];
+  const roundedCoords = normalizedCoords.map((coord) => coord.map((value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Number(numeric.toFixed(6)) : 0;
+  }));
+
+  const normalizedPreserved = Array.isArray(preservedSegments)
+    ? preservedSegments
+      .map((segment) => {
+        if (!segment) return null;
+        const startIndex = Number(segment.startIndex);
+        const endIndex = Number(segment.endIndex);
+        if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex)) {
+          return null;
+        }
+        const sequence = sanitizeCoordinateSequence(segment.coordinates);
+        if (!sequence) {
+          return null;
+        }
+        return {
+          startIndex,
+          endIndex,
+          coordinates: sequence.map((coord) => coord.map((value) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? Number(numeric.toFixed(6)) : 0;
+          }))
+        };
+      })
+      .filter(Boolean)
+    : [];
+
+  return JSON.stringify({ mode, coords: roundedCoords, preserved: normalizedPreserved });
+}
+
 export class OrsRouter {
   constructor(options = {}) {
     const {
@@ -236,6 +285,9 @@ export class OrsRouter {
     this.fallbackRouter = fallbackRouter && typeof fallbackRouter.getRoute === 'function'
       ? fallbackRouter
       : null;
+
+    this.routeCache = new Map();
+    this.inflightRoutes = new Map();
   }
 
   ensureReady() {
@@ -431,10 +483,6 @@ export class OrsRouter {
 
     const travelMode = this.supportsMode(mode) ? mode : this.defaultMode;
 
-    if (travelMode === 'manual') {
-      return this.buildManualRoute(coords);
-    }
-
     const preservedMap = new Map();
     const sanitizedPreserved = [];
     if (Array.isArray(preservedSegments)) {
@@ -465,6 +513,13 @@ export class OrsRouter {
         });
       });
     }
+
+    const cacheKey = buildRouteCacheKey(coords, travelMode, sanitizedPreserved);
+
+    const computeRoute = async () => {
+      if (travelMode === 'manual') {
+        return this.buildManualRoute(coords);
+      }
 
     try {
       if (!preservedMap.size) {
@@ -664,6 +719,31 @@ export class OrsRouter {
         throw combined;
       }
     }
+  };
+
+    if (!cacheKey) {
+      return computeRoute();
+    }
+
+    if (this.routeCache.has(cacheKey)) {
+      return cloneRouteFeature(this.routeCache.get(cacheKey));
+    }
+
+    if (this.inflightRoutes.has(cacheKey)) {
+      return this.inflightRoutes.get(cacheKey);
+    }
+
+    const pendingRoute = computeRoute()
+      .then((route) => {
+        if (route && cacheKey) {
+          this.routeCache.set(cacheKey, cloneRouteFeature(route));
+        }
+        return cloneRouteFeature(route);
+      });
+
+    this.inflightRoutes.set(cacheKey, pendingRoute);
+    pendingRoute.finally(() => this.inflightRoutes.delete(cacheKey));
+    return pendingRoute;
   }
 
 }
