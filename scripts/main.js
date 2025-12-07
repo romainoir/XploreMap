@@ -732,7 +732,8 @@ async function init() {
     ...(onlineRouter ? { online: onlineRouter } : {})
   };
 
-  let activeRouterKey = 'offline';
+  const hasOnlineRouter = Boolean(onlineRouter);
+  let activeRouterKey = hasOnlineRouter ? 'online' : 'offline';
 
   let offlineNetworkCoverage = null;
   let offlineNetworkRefreshPromise = null;
