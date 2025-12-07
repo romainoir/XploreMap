@@ -1,5 +1,4 @@
 import { GeoJsonPathFinder, haversineDistanceKm } from './geojson-pathfinder.js';
-import { createRouteSnapperPathFinder, ROUTE_SNAPPER_DEFAULTS } from './route-snapper-loader.js';
 
 export const DEFAULT_NODE_CONNECTION_TOLERANCE_METERS = 2;
 export const MAX_NODE_CONNECTION_TOLERANCE_METERS = 100;
@@ -923,9 +922,7 @@ export class OfflineRouter {
       averageSpeeds,
       maxSnapDistanceMeters,
       pathFinderOptions,
-      debugLogging,
-      preferRouteSnapper,
-      routeSnapperOptions
+      debugLogging
     } = options;
 
     this.networkUrl = networkUrl || './data/offline-network.geojson';
@@ -942,12 +939,6 @@ export class OfflineRouter {
       nodeConnectionToleranceMeters: DEFAULT_NODE_CONNECTION_TOLERANCE_METERS,
       nodeBucketSizeDegrees: 0.002,
       ...(pathFinderOptions || {})
-    };
-
-    this.preferRouteSnapper = preferRouteSnapper !== false;
-    this.routeSnapperOptions = {
-      ...ROUTE_SNAPPER_DEFAULTS,
-      ...(routeSnapperOptions || {})
     };
 
     this.debugLoggingEnabled = !!debugLogging;
@@ -980,10 +971,6 @@ export class OfflineRouter {
 
   supportsMode(mode) {
     return this.supportedModes.has(mode);
-  }
-
-  isUsingRouteSnapper() {
-    return this.pathFinderSource === 'route-snapper';
   }
 
   getPathFinderSource() {
@@ -1039,28 +1026,8 @@ export class OfflineRouter {
   async initializePathFinder(geojson) {
     this.disposePathFinder();
 
-    if (this.preferRouteSnapper) {
-      try {
-        const pathFinder = await createRouteSnapperPathFinder(geojson, {
-          ...this.routeSnapperOptions,
-          fallbackPathFinderOptions: this.pathFinderOptions
-        });
-        if (pathFinder) {
-          this.pathFinder = pathFinder;
-          this.pathFinderSource = 'route-snapper';
-          console.info(`${OFFLINE_ROUTER_DEBUG_PREFIX} Using RouteSnapper pathfinder`);
-          return;
-        }
-      } catch (error) {
-        console.warn(`${OFFLINE_ROUTER_DEBUG_PREFIX} RouteSnapper initialization failed`, error);
-      }
-    }
-
     this.pathFinder = new GeoJsonPathFinder(geojson, this.pathFinderOptions);
     this.pathFinderSource = 'geojson';
-    if (this.preferRouteSnapper) {
-      console.info(`${OFFLINE_ROUTER_DEBUG_PREFIX} Falling back to GeoJsonPathFinder`);
-    }
   }
 
   getNodeConnectionToleranceMeters() {
