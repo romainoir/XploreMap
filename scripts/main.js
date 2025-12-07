@@ -43,6 +43,7 @@ const ROUTING_ICON_ONLINE = UI_ICON_SOURCES['routing-online'];
 const IGN_ATTRIBUTION = '<a href="https://www.ign.fr/">© IGN</a>';
 const EOX_ATTRIBUTION = '<a href="https://www.eox.at/">© EOX</a>';
 const WMTS_PREVIEW_COORDS = Object.freeze({ z: 14, x: 8508, y: 5911 });
+const DEM_SOURCE_MAX_ZOOM = 14;
 
 function createIgnTileTemplate(layerName, format = 'image/png') {
   const encodedFormat = encodeURIComponent(format);
@@ -646,7 +647,7 @@ async function init() {
   if (typeof offlineRouter.setNodeConnectionToleranceMeters === 'function') {
     offlineRouter.setNodeConnectionToleranceMeters(DEFAULT_NODE_CONNECTION_TOLERANCE_METERS);
   }
-  const maplibreDirectionsOptions = {};
+  const maplibreDirectionsOptions = { fallbackRouter: offlineRouter };
   const globalDirectionsServiceUrl = typeof window !== 'undefined'
     && typeof window.MAPLIBRE_DIRECTIONS_SERVICE_URL === 'string'
       ? window.MAPLIBRE_DIRECTIONS_SERVICE_URL
@@ -657,9 +658,6 @@ async function init() {
     : (globalDirectionsServiceUrl && globalDirectionsServiceUrl.trim().length
       ? globalDirectionsServiceUrl.trim()
       : null);
-  if (resolvedServiceUrl) {
-    maplibreDirectionsOptions.serviceUrl = resolvedServiceUrl;
-  }
 
   const globalDirectionsApiKey = typeof window !== 'undefined'
     && typeof window.MAPLIBRE_DIRECTIONS_API_KEY === 'string'
@@ -671,9 +669,6 @@ async function init() {
     : (globalDirectionsApiKey && globalDirectionsApiKey.trim().length
       ? globalDirectionsApiKey.trim()
       : null);
-  if (resolvedApiKey) {
-    maplibreDirectionsOptions.apiKey = resolvedApiKey;
-  }
 
   const globalDirectionsApiKeyParam = typeof window !== 'undefined'
     && typeof window.MAPLIBRE_DIRECTIONS_API_KEY_PARAM === 'string'
@@ -685,17 +680,30 @@ async function init() {
     : (globalDirectionsApiKeyParam && globalDirectionsApiKeyParam.trim().length
       ? globalDirectionsApiKeyParam.trim()
       : null);
+
+  const onlineRoutingConfigured = Boolean(
+    (resolvedServiceUrl && resolvedServiceUrl.trim().length)
+    || (resolvedApiKey && resolvedApiKey.trim().length)
+    || (resolvedApiKeyParam && resolvedApiKeyParam.trim().length)
+  );
+
+  if (resolvedServiceUrl) {
+    maplibreDirectionsOptions.serviceUrl = resolvedServiceUrl;
+  }
+  if (resolvedApiKey) {
+    maplibreDirectionsOptions.apiKey = resolvedApiKey;
+  }
   if (resolvedApiKeyParam) {
     maplibreDirectionsOptions.apiKeyParam = resolvedApiKeyParam;
   }
 
-  maplibreDirectionsOptions.fallbackRouter = offlineRouter;
-
-  const maplibreRouter = new MaplibreDirectionsRouter(maplibreDirectionsOptions);
+  const maplibreRouter = onlineRoutingConfigured
+    ? new MaplibreDirectionsRouter(maplibreDirectionsOptions)
+    : null;
 
   const routers = {
     offline: offlineRouter,
-    online: maplibreRouter
+    ...(maplibreRouter ? { online: maplibreRouter } : {})
   };
 
   let activeRouterKey = 'offline';
@@ -882,10 +890,13 @@ async function init() {
     if (!routingModeToggle) return;
     const offlineActive = activeRouterKey === 'offline';
     const isLoadingOffline = offlineNetworkLoadingCount > 0;
+    const onlineAvailable = Boolean(routers.online);
     routingModeToggle.classList.toggle('active', offlineActive);
     routingModeToggle.classList.toggle('is-offline', offlineActive);
     routingModeToggle.classList.toggle('is-online', !offlineActive);
     routingModeToggle.classList.toggle('is-loading', isLoadingOffline);
+    routingModeToggle.classList.toggle('is-disabled', !onlineAvailable);
+    routingModeToggle.disabled = !onlineAvailable;
     routingModeToggle.setAttribute('aria-pressed', offlineActive ? 'true' : 'false');
     routingModeToggle.dataset.mode = offlineActive ? 'offline' : 'online';
     const labelText = offlineActive ? 'Offline routing' : 'Online routing';
@@ -898,7 +909,11 @@ async function init() {
     }
     let titleText;
     let ariaLabel;
-    if (isLoadingOffline) {
+    if (!onlineAvailable) {
+      routingModeToggle.setAttribute('aria-busy', 'false');
+      titleText = 'Online routing unavailable';
+      ariaLabel = 'Online routing is unavailable because no online service is configured.';
+    } else if (isLoadingOffline) {
       routingModeToggle.setAttribute('aria-busy', 'true');
       titleText = 'Loading offline routing network…';
       ariaLabel = 'Loading offline routing network…';
@@ -1791,7 +1806,7 @@ async function init() {
   const demSource = new mlcontour.DemSource({
     url: MAPTERHORN_TILE_URL,
     encoding: 'terrarium',
-    maxzoom: 18,
+    maxzoom: DEM_SOURCE_MAX_ZOOM,
     worker: true,
     tileSize: 512
   });
@@ -2481,7 +2496,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
-      maxzoom: 18,
+      maxzoom: DEM_SOURCE_MAX_ZOOM,
       attribution: MAPTERHORN_ATTRIBUTION
     });
     map.addSource('hillshadeSource', {
@@ -2489,7 +2504,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
-      maxzoom: 18,
+      maxzoom: DEM_SOURCE_MAX_ZOOM,
       attribution: MAPTERHORN_ATTRIBUTION
     });
     map.addSource('reliefDem', {
@@ -2497,7 +2512,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
-      maxzoom: 18,
+      maxzoom: DEM_SOURCE_MAX_ZOOM,
       attribution: MAPTERHORN_ATTRIBUTION
     });
 
@@ -2506,7 +2521,7 @@ async function init() {
       tiles: [MAPTERHORN_TILE_URL],
       encoding: 'terrarium',
       tileSize: 512,
-      maxzoom: 18,
+      maxzoom: DEM_SOURCE_MAX_ZOOM,
       attribution: MAPTERHORN_ATTRIBUTION
     });
 
