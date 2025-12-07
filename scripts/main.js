@@ -1442,6 +1442,11 @@ async function init() {
     }
   };
 
+  const switchRoutingMode = (targetKey, { reroute = true } = {}) => setActiveRouter(targetKey, { reroute })
+    .catch((error) => {
+      console.error('Failed to switch routing mode', error);
+    });
+
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
   let currentGpxData = EMPTY_COLLECTION;
@@ -1667,9 +1672,17 @@ async function init() {
   if (routingModeToggle) {
     routingModeToggle.addEventListener('click', () => {
       const targetKey = activeRouterKey === 'offline' ? 'online' : 'offline';
-      setActiveRouter(targetKey, { reroute: true }).catch((error) => {
-        console.error('Failed to switch routing mode', error);
-      });
+      switchRoutingMode(targetKey);
+    });
+  }
+
+  if (routingModeIcon) {
+    routingModeIcon.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (activeRouterKey === 'online') {
+        return;
+      }
+      switchRoutingMode('online');
     });
   }
 
