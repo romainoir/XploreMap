@@ -711,6 +711,15 @@ async function init() {
       ? globalOrsApiKey.trim()
       : null);
 
+  const sensitiveParams = ['directionsKey', 'directionsKeyParam', 'orsKey'];
+  const sanitizedParams = sensitiveParams.filter((param) => searchParams.has(param));
+  if (sanitizedParams.length && typeof window !== 'undefined' && window.history?.replaceState) {
+    sanitizedParams.forEach((param) => searchParams.delete(param));
+    const newSearch = searchParams.toString();
+    const newUrl = `${window.location.pathname}${newSearch ? `?${newSearch}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, document.title, newUrl);
+  }
+
   const orsRoutingConfigured = Boolean(
     (resolvedOrsServiceUrl && resolvedOrsServiceUrl.trim().length)
     || (resolvedOrsApiKey && resolvedOrsApiKey.trim().length)
