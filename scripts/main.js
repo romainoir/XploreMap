@@ -23,7 +23,7 @@ import {
 import { DirectionsManager } from '../directions_test.js';
 import './pmtiles.js';
 import { OfflineRouter, DEFAULT_NODE_CONNECTION_TOLERANCE_METERS } from './offline-router.js';
-import { OrsRouter } from './openrouteservice-router.js';
+import { MaplibreDirectionsRouter } from './maplibre-directions-router.js';
 import { extractOverpassNetwork } from './overpass-network.js';
 import { extractOpenFreeMapNetwork } from './openfreemap-network.js';
 import { createViewModeController } from './view-mode-controller.js';
@@ -646,38 +646,56 @@ async function init() {
   if (typeof offlineRouter.setNodeConnectionToleranceMeters === 'function') {
     offlineRouter.setNodeConnectionToleranceMeters(DEFAULT_NODE_CONNECTION_TOLERANCE_METERS);
   }
-  const orsOptions = {};
-  const globalOrsServiceUrl = typeof window !== 'undefined'
-    && typeof window.OPENROUTESERVICE_SERVICE_URL === 'string'
-      ? window.OPENROUTESERVICE_SERVICE_URL
+  const maplibreDirectionsOptions = {};
+  const globalDirectionsServiceUrl = typeof window !== 'undefined'
+    && typeof window.MAPLIBRE_DIRECTIONS_SERVICE_URL === 'string'
+      ? window.MAPLIBRE_DIRECTIONS_SERVICE_URL
       : null;
-  const orsServiceUrlParam = searchParams.get('orsUrl');
-  const resolvedServiceUrl = (orsServiceUrlParam && orsServiceUrlParam.trim().length)
-    ? orsServiceUrlParam.trim()
-    : (globalOrsServiceUrl && globalOrsServiceUrl.trim().length ? globalOrsServiceUrl.trim() : null);
+  const directionsServiceUrlParam = searchParams.get('directionsUrl');
+  const resolvedServiceUrl = (directionsServiceUrlParam && directionsServiceUrlParam.trim().length)
+    ? directionsServiceUrlParam.trim()
+    : (globalDirectionsServiceUrl && globalDirectionsServiceUrl.trim().length
+      ? globalDirectionsServiceUrl.trim()
+      : null);
   if (resolvedServiceUrl) {
-    orsOptions.serviceUrl = resolvedServiceUrl;
+    maplibreDirectionsOptions.serviceUrl = resolvedServiceUrl;
   }
 
-  const globalOrsApiKey = typeof window !== 'undefined'
-    && typeof window.OPENROUTESERVICE_API_KEY === 'string'
-      ? window.OPENROUTESERVICE_API_KEY
+  const globalDirectionsApiKey = typeof window !== 'undefined'
+    && typeof window.MAPLIBRE_DIRECTIONS_API_KEY === 'string'
+      ? window.MAPLIBRE_DIRECTIONS_API_KEY
       : null;
-  const orsApiKeyParam = searchParams.get('orsKey');
-  const resolvedApiKey = (orsApiKeyParam && orsApiKeyParam.trim().length)
-    ? orsApiKeyParam.trim()
-    : (globalOrsApiKey && globalOrsApiKey.trim().length ? globalOrsApiKey.trim() : null);
+  const directionsApiKeyParam = searchParams.get('directionsKey');
+  const resolvedApiKey = (directionsApiKeyParam && directionsApiKeyParam.trim().length)
+    ? directionsApiKeyParam.trim()
+    : (globalDirectionsApiKey && globalDirectionsApiKey.trim().length
+      ? globalDirectionsApiKey.trim()
+      : null);
   if (resolvedApiKey) {
-    orsOptions.apiKey = resolvedApiKey;
+    maplibreDirectionsOptions.apiKey = resolvedApiKey;
   }
 
-  orsOptions.fallbackRouter = offlineRouter;
+  const globalDirectionsApiKeyParam = typeof window !== 'undefined'
+    && typeof window.MAPLIBRE_DIRECTIONS_API_KEY_PARAM === 'string'
+      ? window.MAPLIBRE_DIRECTIONS_API_KEY_PARAM
+      : null;
+  const directionsApiKeyNameParam = searchParams.get('directionsKeyParam');
+  const resolvedApiKeyParam = (directionsApiKeyNameParam && directionsApiKeyNameParam.trim().length)
+    ? directionsApiKeyNameParam.trim()
+    : (globalDirectionsApiKeyParam && globalDirectionsApiKeyParam.trim().length
+      ? globalDirectionsApiKeyParam.trim()
+      : null);
+  if (resolvedApiKeyParam) {
+    maplibreDirectionsOptions.apiKeyParam = resolvedApiKeyParam;
+  }
 
-  const orsRouter = new OrsRouter(orsOptions);
+  maplibreDirectionsOptions.fallbackRouter = offlineRouter;
+
+  const maplibreRouter = new MaplibreDirectionsRouter(maplibreDirectionsOptions);
 
   const routers = {
     offline: offlineRouter,
-    online: orsRouter
+    online: maplibreRouter
   };
 
   let activeRouterKey = 'offline';
