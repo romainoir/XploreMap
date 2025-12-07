@@ -24,6 +24,7 @@ import { DirectionsManager } from '../directions_test.js';
 import './pmtiles.js';
 import { OfflineRouter, DEFAULT_NODE_CONNECTION_TOLERANCE_METERS } from './offline-router.js';
 import { MaplibreDirectionsRouter } from './maplibre-directions-router.js';
+import { OrsRouter } from './openrouteservice-router.js';
 import { extractOverpassNetwork } from './overpass-network.js';
 import { extractOpenFreeMapNetwork } from './openfreemap-network.js';
 import { createViewModeController } from './view-mode-controller.js';
@@ -667,7 +668,7 @@ async function init() {
       ? globalDirectionsApiKeyParam.trim()
       : null);
 
-  const onlineRoutingConfigured = Boolean(
+  const maplibreRoutingConfigured = Boolean(
     (resolvedServiceUrl && resolvedServiceUrl.trim().length)
     || (resolvedApiKey && resolvedApiKey.trim().length)
     || (resolvedApiKeyParam && resolvedApiKeyParam.trim().length)
@@ -683,13 +684,52 @@ async function init() {
     maplibreDirectionsOptions.apiKeyParam = resolvedApiKeyParam;
   }
 
-  const maplibreRouter = onlineRoutingConfigured
+  const maplibreRouter = maplibreRoutingConfigured
     ? new MaplibreDirectionsRouter(maplibreDirectionsOptions)
     : null;
 
+  const orsRouterOptions = { fallbackRouter: offlineRouter };
+  const globalOrsServiceUrl = typeof window !== 'undefined'
+    && typeof window.OPENROUTESERVICE_SERVICE_URL === 'string'
+      ? window.OPENROUTESERVICE_SERVICE_URL
+      : null;
+  const orsServiceUrlParam = searchParams.get('orsUrl');
+  const resolvedOrsServiceUrl = (orsServiceUrlParam && orsServiceUrlParam.trim().length)
+    ? orsServiceUrlParam.trim()
+    : (globalOrsServiceUrl && globalOrsServiceUrl.trim().length
+      ? globalOrsServiceUrl.trim()
+      : null);
+
+  const globalOrsApiKey = typeof window !== 'undefined'
+    && typeof window.OPENROUTESERVICE_API_KEY === 'string'
+      ? window.OPENROUTESERVICE_API_KEY
+      : null;
+  const orsApiKeyParam = searchParams.get('orsKey');
+  const resolvedOrsApiKey = (orsApiKeyParam && orsApiKeyParam.trim().length)
+    ? orsApiKeyParam.trim()
+    : (globalOrsApiKey && globalOrsApiKey.trim().length
+      ? globalOrsApiKey.trim()
+      : null);
+
+  const orsRoutingConfigured = Boolean(
+    (resolvedOrsServiceUrl && resolvedOrsServiceUrl.trim().length)
+    || (resolvedOrsApiKey && resolvedOrsApiKey.trim().length)
+  );
+
+  if (resolvedOrsServiceUrl) {
+    orsRouterOptions.serviceUrl = resolvedOrsServiceUrl;
+  }
+  if (resolvedOrsApiKey) {
+    orsRouterOptions.apiKey = resolvedOrsApiKey;
+  }
+
+  const orsRouter = orsRoutingConfigured ? new OrsRouter(orsRouterOptions) : null;
+
+  const onlineRouter = maplibreRouter || orsRouter;
+
   const routers = {
     offline: offlineRouter,
-    ...(maplibreRouter ? { online: maplibreRouter } : {})
+    ...(onlineRouter ? { online: onlineRouter } : {})
   };
 
   let activeRouterKey = 'offline';
