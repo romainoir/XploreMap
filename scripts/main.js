@@ -1696,10 +1696,10 @@ async function init() {
 
   if (routingModeIcon) {
     routingModeIcon.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (activeRouterKey === 'online') {
+      if (activeRouterKey !== 'offline') {
         return;
       }
+      event.stopPropagation();
       switchRoutingMode('online');
     });
   }
