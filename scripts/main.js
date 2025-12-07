@@ -146,6 +146,7 @@ const IMAGERY_OPTIONS = Object.freeze([
     sourceId: 'hillshadeSource',
     layerId: 'hillshade',
     previewImage: './data/style.png',
+    hiddenControl: true,
     defaultVisible: false,
     defaultOpacity: 1
   },
@@ -284,8 +285,47 @@ function scaleExpression(expression, factor) {
 }
 
 const IMAGERY_OPTIONS_BY_ID = new Map(IMAGERY_OPTIONS.map((option) => [option.id, option]));
+const HILLSHADE_OPTION_ID = 'hillshade';
 
 let baseStyleContentLayerIds = [];
+const baseStyleLayerMetadata = new Map();
+let baseStyleOverlayLayerIds = [];
+let baseStyleUnderlayLayerIds = [];
+
+function rebuildBaseStyleLayerBuckets() {
+  const overlay = [];
+  const underlay = [];
+
+  baseStyleContentLayerIds.forEach((layerId) => {
+    if (typeof layerId !== 'string') {
+      return;
+    }
+    const meta = baseStyleLayerMetadata.get(layerId) || {};
+    const type = meta.type ?? '';
+    const sourceLayer = (meta.sourceLayer || '').toString().toLowerCase();
+    const idLower = layerId.toLowerCase();
+    const isRoadLike = sourceLayer.includes('road')
+      || sourceLayer.includes('highway')
+      || sourceLayer.includes('transport')
+      || sourceLayer.includes('cycle')
+      || sourceLayer.includes('rail')
+      || idLower.includes('road')
+      || idLower.includes('path')
+      || idLower.includes('track')
+      || idLower.includes('rail');
+    const isBuilding = sourceLayer.includes('building') || idLower.includes('building');
+    const isOverlayType = type === 'symbol' || type === 'fill-extrusion' || isRoadLike || isBuilding;
+
+    if (isOverlayType) {
+      overlay.push(layerId);
+    } else {
+      underlay.push(layerId);
+    }
+  });
+
+  baseStyleOverlayLayerIds = overlay;
+  baseStyleUnderlayLayerIds = underlay;
+}
 
 function getAvailableHillshadeMethods() {
   const styleSpec = typeof maplibregl !== 'undefined' ? maplibregl?.styleSpec : null;
@@ -502,6 +542,15 @@ async function init() {
 
   const landcoverSourcePrefixes = ['landcover'];
   if (Array.isArray(versaStyle.layers)) {
+    baseStyleLayerMetadata.clear();
+    versaStyle.layers.forEach((layer) => {
+      if (!layer || typeof layer.id !== 'string') return;
+      baseStyleLayerMetadata.set(layer.id, {
+        type: layer.type,
+        sourceLayer: layer['source-layer']
+      });
+    });
+
     baseStyleContentLayerIds = versaStyle.layers
       .filter((layer) => {
         if (!layer || typeof layer.id !== 'string') {
@@ -519,8 +568,12 @@ async function init() {
         return true;
       })
       .map((layer) => layer.id);
+    rebuildBaseStyleLayerBuckets();
   } else {
     baseStyleContentLayerIds = [];
+    baseStyleLayerMetadata.clear();
+    baseStyleOverlayLayerIds = [];
+    baseStyleUnderlayLayerIds = [];
   }
 
   const map = new maplibregl.Map({
@@ -1797,12 +1850,21 @@ async function init() {
 
     const orderedEntries = [];
 
+    const overlaySequence = baseStyleOverlayLayerIds
+      .filter((layerId) => typeof layerId === 'string' && map.getLayer(layerId));
+    if (overlaySequence.length) {
+      orderedEntries.push({ layerSequence: overlaySequence });
+    }
+
+    let baseUnderlayAdded = false;
+
     imageryOrder.forEach((id) => {
       if (id === BASE_STYLE_OPTION_ID) {
-        const layerSequence = baseStyleContentLayerIds
+        const layerSequence = baseStyleUnderlayLayerIds
           .filter((layerId) => typeof layerId === 'string' && map.getLayer(layerId));
         if (layerSequence.length) {
           orderedEntries.push({ layerSequence });
+          baseUnderlayAdded = true;
         }
         return;
       }
@@ -1824,6 +1886,14 @@ async function init() {
         orderedEntries.push({ layerSequence });
       }
     });
+
+    if (!baseUnderlayAdded && baseStyleUnderlayLayerIds.length) {
+      const layerSequence = baseStyleUnderlayLayerIds
+        .filter((layerId) => typeof layerId === 'string' && map.getLayer(layerId));
+      if (layerSequence.length) {
+        orderedEntries.push({ layerSequence });
+      }
+    }
 
     let beforeId = topLabelId ?? undefined;
     for (let i = 0; i < orderedEntries.length; i += 1) {
@@ -1957,6 +2027,8 @@ async function init() {
       map.setPaintProperty(option.layerId, 'raster-opacity', opacity);
       map.setLayoutProperty(option.layerId, 'visibility', visible ? 'visible' : 'none');
     });
+
+    updateHillshadeControl(currentHillshadeMethod);
   }
 
   if (imageryPanelToggle && imageryPanelDrawer) {
@@ -1989,6 +2061,9 @@ async function init() {
       imageryToggle.setAttribute('aria-hidden', 'false');
       imageryPanel?.removeAttribute('hidden');
       IMAGERY_OPTIONS.forEach((option) => {
+        if (option.hiddenControl) {
+          return;
+        }
         const state = imageryState.get(option.id) ?? { enabled: false, opacity: 0 };
         const container = document.createElement('div');
         container.className = 'imagery-option';
@@ -2208,11 +2283,37 @@ async function init() {
     return HILLSHADE_METHOD_STYLES[method] ?? DEFAULT_HILLSHADE_STYLE;
   }
 
+  function getHillshadeState() {
+    const option = IMAGERY_OPTIONS_BY_ID.get(HILLSHADE_OPTION_ID);
+    const state = imageryState.get(HILLSHADE_OPTION_ID);
+    if (!state) {
+      return null;
+    }
+    const opacity = clampOpacity(state.opacity ?? option?.defaultOpacity ?? 1);
+    const enabled = Boolean(state.enabled && opacity > 0);
+    return { option, state, opacity, enabled };
+  }
+
   function getHillshadeImageryState() {
-    const state = imageryState.get('hillshade');
-    const opacity = clampOpacity(state?.opacity ?? 0);
-    const enabled = Boolean(state?.enabled && opacity > 0);
-    return { opacity, enabled };
+    const resolved = getHillshadeState();
+    if (!resolved) {
+      return { opacity: 0, enabled: false };
+    }
+    return { opacity: resolved.opacity, enabled: resolved.enabled };
+  }
+
+  function setHillshadeEnabled(enabled) {
+    const resolved = getHillshadeState();
+    if (!resolved) return;
+    resolved.state.enabled = enabled;
+    if (enabled && resolved.state.opacity <= 0) {
+      const fallback = typeof resolved.option?.defaultOpacity === 'number'
+        ? resolved.option.defaultOpacity
+        : 1;
+      resolved.state.opacity = clampOpacity(fallback) || 1;
+    }
+    applyImageryState();
+    updateImageryControlStates();
   }
 
   function applyHillshadeAppearance() {
@@ -2256,9 +2357,18 @@ async function init() {
   function updateHillshadeControl(method) {
     if (!hillshadeMethodButton || !hillshadeMethodLabel) return;
     const readable = formatHillshadeMethodName(method);
-    hillshadeMethodLabel.textContent = `Hillshade: ${readable}`;
-    hillshadeMethodButton.setAttribute('aria-label', `Cycle hillshade rendering (current: ${readable})`);
-    hillshadeMethodButton.setAttribute('title', `Cycle hillshade rendering (current: ${readable})`);
+    const hillshadeState = getHillshadeState();
+    const isActive = Boolean(hillshadeState?.enabled);
+    const hasAlternateMethods = hillshadeMethods.length > 1;
+    const hint = hasAlternateMethods
+      ? `Click to toggle hillshade. Shift-click to change method (current: ${readable})`
+      : `Click to toggle hillshade (current: ${readable})`;
+
+    hillshadeMethodLabel.textContent = `Method: ${readable}`;
+    hillshadeMethodButton.classList.toggle('active', isActive);
+    hillshadeMethodButton.setAttribute('aria-pressed', String(isActive));
+    hillshadeMethodButton.setAttribute('aria-label', hint);
+    hillshadeMethodButton.setAttribute('title', hint);
   }
 
   function applyHillshadeMethod(method) {
@@ -2268,14 +2378,33 @@ async function init() {
     applyHillshadeAppearance();
   }
 
+  function cycleHillshadeMethod() {
+    if (hillshadeMethods.length <= 1) {
+      return currentHillshadeMethod;
+    }
+    hillshadeMethodIndex = (hillshadeMethodIndex + 1) % hillshadeMethods.length;
+    const nextMethod = hillshadeMethods[hillshadeMethodIndex];
+    applyHillshadeMethod(nextMethod);
+    return nextMethod;
+  }
+
   if (hillshadeMethodButton) {
-    hillshadeMethodButton.disabled = hillshadeMethods.length <= 1;
+    hillshadeMethodButton.disabled = false;
     updateHillshadeControl(currentHillshadeMethod);
-    hillshadeMethodButton.addEventListener('click', () => {
-      if (hillshadeMethods.length <= 1) return;
-      hillshadeMethodIndex = (hillshadeMethodIndex + 1) % hillshadeMethods.length;
-      const nextMethod = hillshadeMethods[hillshadeMethodIndex];
-      applyHillshadeMethod(nextMethod);
+    hillshadeMethodButton.addEventListener('click', (event) => {
+      const wantsMethodCycle = (event?.shiftKey || event?.altKey || event?.metaKey || event?.ctrlKey)
+        && hillshadeMethods.length > 1;
+      if (wantsMethodCycle) {
+        if (!getHillshadeState()?.enabled) {
+          setHillshadeEnabled(true);
+        }
+        cycleHillshadeMethod();
+        return;
+      }
+
+      const hillshadeState = getHillshadeState();
+      const nextEnabled = !(hillshadeState?.enabled);
+      setHillshadeEnabled(nextEnabled);
     });
   }
 
