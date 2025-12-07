@@ -689,29 +689,8 @@ async function init() {
     : null;
 
   const orsRouterOptions = { fallbackRouter: offlineRouter };
-  const globalOrsServiceUrl = typeof window !== 'undefined'
-    && typeof window.OPENROUTESERVICE_SERVICE_URL === 'string'
-      ? window.OPENROUTESERVICE_SERVICE_URL
-      : null;
-  const orsServiceUrlParam = searchParams.get('orsUrl');
-  const resolvedOrsServiceUrl = (orsServiceUrlParam && orsServiceUrlParam.trim().length)
-    ? orsServiceUrlParam.trim()
-    : (globalOrsServiceUrl && globalOrsServiceUrl.trim().length
-      ? globalOrsServiceUrl.trim()
-      : null);
 
-  const globalOrsApiKey = typeof window !== 'undefined'
-    && typeof window.OPENROUTESERVICE_API_KEY === 'string'
-      ? window.OPENROUTESERVICE_API_KEY
-      : null;
-  const orsApiKeyParam = searchParams.get('orsKey');
-  const resolvedOrsApiKey = (orsApiKeyParam && orsApiKeyParam.trim().length)
-    ? orsApiKeyParam.trim()
-    : (globalOrsApiKey && globalOrsApiKey.trim().length
-      ? globalOrsApiKey.trim()
-      : null);
-
-  const sensitiveParams = ['directionsKey', 'directionsKeyParam', 'orsKey'];
+  const sensitiveParams = ['directionsKey', 'directionsKeyParam'];
   const sanitizedParams = sensitiveParams.filter((param) => searchParams.has(param));
   if (sanitizedParams.length && typeof window !== 'undefined' && window.history?.replaceState) {
     sanitizedParams.forEach((param) => searchParams.delete(param));
@@ -720,19 +699,7 @@ async function init() {
     window.history.replaceState({}, document.title, newUrl);
   }
 
-  const orsRoutingConfigured = Boolean(
-    (resolvedOrsServiceUrl && resolvedOrsServiceUrl.trim().length)
-    || (resolvedOrsApiKey && resolvedOrsApiKey.trim().length)
-  );
-
-  if (resolvedOrsServiceUrl) {
-    orsRouterOptions.serviceUrl = resolvedOrsServiceUrl;
-  }
-  if (resolvedOrsApiKey) {
-    orsRouterOptions.apiKey = resolvedOrsApiKey;
-  }
-
-  const orsRouter = orsRoutingConfigured ? new OrsRouter(orsRouterOptions) : null;
+  const orsRouter = new OrsRouter(orsRouterOptions);
 
   const onlineRouter = maplibreRouter || orsRouter;
 

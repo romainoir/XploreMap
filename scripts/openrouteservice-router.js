@@ -1,6 +1,7 @@
 import { haversineDistanceKm } from './geojson-pathfinder.js';
 
 const DEFAULT_SERVICE_URL = 'https://api.openrouteservice.org';
+const DEFAULT_API_KEY = '5b3ce3597851110001cf62483828a115553d4a98817dd43f61935829';
 const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
 const COORDINATE_DUPLICATE_TOLERANCE_METERS = 0.05;
 
@@ -264,7 +265,9 @@ export class OrsRouter {
       : DEFAULT_SERVICE_URL;
 
     this.serviceUrl = normalizedUrl;
-    this.apiKey = typeof apiKey === 'string' && apiKey.trim().length ? apiKey.trim() : null;
+    this.apiKey = typeof apiKey === 'string' && apiKey.trim().length
+      ? apiKey.trim()
+      : DEFAULT_API_KEY;
 
     const modes = Array.isArray(supportedModes) ? supportedModes : Object.keys(MODE_PROFILES);
     this.supportedModes = new Set(
