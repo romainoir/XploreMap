@@ -1409,6 +1409,9 @@ async function init() {
 
   const setActiveRouter = async (targetKey, { reroute = false } = {}) => {
     if (!routers[targetKey]) {
+      console.warn(`Router "${targetKey}" is unavailable; keeping ${activeRouterKey} active.`);
+      updateRoutingModeToggle();
+      updateDebugNetworkAvailability();
       return;
     }
 

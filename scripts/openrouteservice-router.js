@@ -5,6 +5,38 @@ const DEFAULT_API_KEY = '5b3ce3597851110001cf62483828a115553d4a98817dd43f6193582
 const COORDINATE_EQUALITY_TOLERANCE_METERS = 1.5;
 const COORDINATE_DUPLICATE_TOLERANCE_METERS = 0.05;
 
+const ORS_SURFACE_VALUES = Object.freeze({
+  0: 'other',
+  1: 'paved',
+  2: 'unpaved',
+  3: 'asphalt',
+  4: 'concrete',
+  5: 'cobblestone',
+  6: 'metal',
+  7: 'wood',
+  8: 'compacted',
+  9: 'dirt',
+  10: 'earth',
+  11: 'gravel',
+  12: 'fine_gravel',
+  13: 'pebblestone',
+  14: 'sand',
+  15: 'clay',
+  16: 'grass'
+});
+
+const ORS_WAYTYPE_VALUES = Object.freeze({
+  0: 'other',
+  1: 'state_road',
+  2: 'road',
+  3: 'street',
+  4: 'path',
+  5: 'track',
+  6: 'cycleway',
+  7: 'footway',
+  8: 'steps'
+});
+
 const DEFAULT_MODE_SPEEDS_KMH = Object.freeze({
   'foot-hiking': 4.5,
   manual: 4.5
@@ -123,6 +155,20 @@ const accumulateSequenceMetrics = (coords) => {
   return { distanceKm, ascent, descent };
 };
 
+const buildCumulativeDistancesKm = (coords) => {
+  if (!Array.isArray(coords) || coords.length < 2) {
+    return [];
+  }
+  const cumulative = [0];
+  for (let index = 0; index < coords.length - 1; index += 1) {
+    const metrics = computeSegmentMetrics(coords[index], coords[index + 1]);
+    const distanceKm = Number.isFinite(metrics?.distanceKm) ? metrics.distanceKm : 0;
+    const next = cumulative[cumulative.length - 1] + distanceKm;
+    cumulative.push(next);
+  }
+  return cumulative;
+};
+
 const appendCoordinateSequence = (target, sequence) => {
   if (!Array.isArray(target) || !Array.isArray(sequence)) {
     return;
@@ -145,6 +191,92 @@ const appendCoordinateSequence = (target, sequence) => {
       target.push(normalized);
     }
   });
+};
+
+const normalizeExtraValue = (mapping, value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && Object.prototype.hasOwnProperty.call(mapping, numeric)) {
+    return mapping[numeric];
+  }
+  if (typeof value === 'string' && value) {
+    return value;
+  }
+  return null;
+};
+
+const buildCoordinateMetadataFromExtras = (coords, extras, summary) => {
+  if (!Array.isArray(coords) || coords.length < 2 || !extras || typeof extras !== 'object') {
+    return [];
+  }
+
+  const coordinateMetadata = [];
+  const cumulativeDistances = buildCumulativeDistancesKm(coords);
+  const totalDistanceMeters = Number.isFinite(summary?.distance) ? summary.distance : null;
+  const totalDurationSeconds = Number.isFinite(summary?.duration) ? summary.duration : null;
+
+  const addExtraEntries = (values, mapper) => {
+    if (!Array.isArray(values)) {
+      return;
+    }
+    values.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 3) {
+        return;
+      }
+      const [startIndexRaw, endIndexRaw, value] = entry;
+      const startIndex = Number(startIndexRaw);
+      const endIndex = Number(endIndexRaw);
+      if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex)) {
+        return;
+      }
+
+      const startDistanceKm = Number.isFinite(cumulativeDistances[startIndex])
+        ? cumulativeDistances[startIndex]
+        : null;
+      const endDistanceKm = Number.isFinite(cumulativeDistances[Math.min(endIndex, cumulativeDistances.length - 1)])
+        ? cumulativeDistances[Math.min(endIndex, cumulativeDistances.length - 1)]
+        : startDistanceKm;
+
+      if (!Number.isFinite(startDistanceKm) || !Number.isFinite(endDistanceKm)) {
+        return;
+      }
+
+      const distanceKm = Math.max(0, endDistanceKm - startDistanceKm);
+      const distanceMeters = distanceKm * 1000;
+      const duration = Number.isFinite(totalDurationSeconds) && Number.isFinite(totalDistanceMeters) && totalDistanceMeters > 0
+        ? (distanceMeters / totalDistanceMeters) * totalDurationSeconds
+        : null;
+
+      const normalizedValue = mapper(value);
+      const metadataEntry = {
+        source: 'openrouteservice',
+        start: Array.isArray(coords[startIndex]) ? coords[startIndex].slice(0, 3) : null,
+        end: Array.isArray(coords[endIndex]) ? coords[endIndex].slice(0, 3) : null,
+        startDistanceKm,
+        endDistanceKm,
+        distanceKm,
+        ...(Number.isFinite(duration) ? { duration } : {}),
+        ...normalizedValue
+      };
+      coordinateMetadata.push(metadataEntry);
+    });
+  };
+
+  if (extras.surface && Array.isArray(extras.surface.values)) {
+    addExtraEntries(extras.surface.values, (value) => ({
+      surface: normalizeExtraValue(ORS_SURFACE_VALUES, value)
+    }));
+  }
+
+  if (extras.waytype && Array.isArray(extras.waytype.values)) {
+    addExtraEntries(extras.waytype.values, (value) => ({
+      wayType: normalizeExtraValue(ORS_WAYTYPE_VALUES, value)
+    }));
+  }
+
+  return coordinateMetadata;
 };
 
 const sanitizeSegmentMetrics = (segment) => {
@@ -347,11 +479,20 @@ export class OrsRouter {
     if (this.apiKey && !headers.Authorization) {
       headers.Authorization = this.apiKey;
     }
+    const extraInfo = new Set(['surface', 'waytype']);
+    if (Array.isArray(this.requestParameters?.extra_info)) {
+      this.requestParameters.extra_info.forEach((value) => {
+        if (typeof value === 'string' && value.trim().length) {
+          extraInfo.add(value.trim());
+        }
+      });
+    }
     const payload = {
       instructions: false,
       elevation: true,
       ...this.requestParameters,
-      coordinates: coordinatePayload
+      coordinates: coordinatePayload,
+      extra_info: Array.from(extraInfo)
     };
     const options = this.mergeFetchOptions({
       method: 'POST',
@@ -380,7 +521,8 @@ export class OrsRouter {
           type: 'Feature',
           properties: {
             summary: route.summary,
-            segments: route.segments
+            segments: route.segments,
+            extras: route.extras
           },
           geometry: route.geometry
         };
@@ -554,6 +696,12 @@ export class OrsRouter {
           ? routeFeature.properties.segments
           : [];
 
+        const coordinateMetadata = buildCoordinateMetadataFromExtras(
+          geometryCoordinates,
+          routeFeature.properties?.extras,
+          { distance: totalDistance, duration: totalDuration }
+        );
+
         const segments = segmentData.map((segment, index) => {
           const metrics = sanitizeSegmentMetrics(segment);
           const distance = Number.isFinite(metrics?.distance)
@@ -584,7 +732,8 @@ export class OrsRouter {
               ascent: totalAscent,
               descent: totalDescent
             },
-            segments
+            segments,
+            ...(coordinateMetadata.length ? { coordinate_metadata: coordinateMetadata } : {})
           },
           geometry: {
             type: 'LineString',
@@ -595,10 +744,12 @@ export class OrsRouter {
 
       const geometryCoords = [];
       const segments = [];
+      const coordinateMetadata = [];
       let totalDistance = 0;
       let totalDuration = 0;
       let totalAscent = 0;
       let totalDescent = 0;
+      let coordinateOffsetKm = 0;
 
       const appendMetrics = (distance, duration, ascent, descent, startIndex) => {
         const segmentDistance = Number.isFinite(distance) ? distance : 0;
@@ -648,6 +799,7 @@ export class OrsRouter {
           const ascent = Number.isFinite(metrics.ascent) ? metrics.ascent : accumulated.ascent;
           const descent = Number.isFinite(metrics.descent) ? metrics.descent : accumulated.descent;
           appendMetrics(distance, duration, ascent, descent, index);
+          coordinateOffsetKm += Number.isFinite(distance) ? distance / 1000 : accumulated.distanceKm;
           continue;
         }
 
@@ -665,6 +817,32 @@ export class OrsRouter {
         const ascent = Number.isFinite(summary?.ascent) ? summary.ascent : geometrySummary.ascent;
         const descent = Number.isFinite(summary?.descent) ? summary.descent : geometrySummary.descent;
         appendMetrics(distance, duration, ascent, descent, index);
+
+        const metadataEntries = buildCoordinateMetadataFromExtras(
+          segmentCoords,
+          segmentFeature.properties?.extras,
+          { distance, duration }
+        );
+
+        metadataEntries.forEach((entry) => {
+          const startKm = Number.isFinite(entry.startDistanceKm)
+            ? entry.startDistanceKm + coordinateOffsetKm
+            : null;
+          const endKm = Number.isFinite(entry.endDistanceKm)
+            ? entry.endDistanceKm + coordinateOffsetKm
+            : null;
+          const distanceKm = Number.isFinite(startKm) && Number.isFinite(endKm)
+            ? Math.max(0, endKm - startKm)
+            : entry.distanceKm;
+          coordinateMetadata.push({
+            ...entry,
+            startDistanceKm: startKm,
+            endDistanceKm: endKm,
+            distanceKm
+          });
+        });
+
+        coordinateOffsetKm += Number.isFinite(distance) ? distance / 1000 : geometrySummary.distance / 1000;
       }
 
       const summary = {
@@ -679,7 +857,8 @@ export class OrsRouter {
         properties: {
           profile: travelMode,
           summary,
-          segments
+          segments,
+          ...(coordinateMetadata.length ? { coordinate_metadata: coordinateMetadata } : {})
         },
         geometry: {
           type: 'LineString',
