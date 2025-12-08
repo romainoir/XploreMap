@@ -1756,7 +1756,10 @@ export class DirectionsManager {
       redoButton,
       clearButton,
       routeStats,
+      elevationCard,
+      elevationChartBody,
       elevationChart,
+      elevationCollapseToggle,
       directionsInfoButton,
       directionsHint,
       profileModeToggle,
@@ -1784,6 +1787,13 @@ export class DirectionsManager {
     this.clearButton = clearButton ?? null;
     this.routeStats = routeStats ?? null;
     this.elevationChart = elevationChart ?? null;
+    this.elevationCard = elevationCard ?? (this.elevationChart?.closest?.('.chart-card') ?? null);
+    this.elevationChartBody = elevationChartBody ?? this.elevationChart?.parentElement ?? null;
+    this.elevationCollapseToggle = elevationCollapseToggle ?? null;
+    this.elevationCollapseLabel = this.elevationCollapseToggle
+      ? this.elevationCollapseToggle.querySelector('.chart-card__collapse-label')
+      : null;
+    this.isElevationCollapsed = false;
     this.elevationHoverIndicator = null;
     this.elevationHoverLine = null;
     this.infoButton = directionsInfoButton ?? null;
@@ -2313,6 +2323,12 @@ export class DirectionsManager {
       this.infoButton.addEventListener('mouseleave', hideHint);
       this.infoButton.addEventListener('focus', showHint);
       this.infoButton.addEventListener('blur', hideHint);
+    }
+
+    if (this.elevationCollapseToggle) {
+      this.elevationCollapseToggle.addEventListener('click', () => {
+        this.setElevationCollapsed(!this.isElevationCollapsed);
+      });
     }
 
     this.swapButton?.addEventListener('click', () => {
@@ -5641,13 +5657,45 @@ export class DirectionsManager {
     if (this.routeStats) {
       this.routeStats.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
     }
-    if (this.elevationChart) {
-      this.elevationChart.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
-    }
+    this.updateElevationVisibilityState();
     if (!isVisible) {
       this.setHintVisible(false);
       this.hideRouteHover();
     }
+  }
+
+  updateElevationVisibilityState() {
+    const panelVisible = this.isPanelVisible();
+    const hideContent = !panelVisible || this.isElevationCollapsed;
+    if (this.elevationCard) {
+      this.elevationCard.classList.toggle('chart-card--collapsed', this.isElevationCollapsed);
+    }
+    if (this.elevationChartBody) {
+      this.elevationChartBody.hidden = this.isElevationCollapsed;
+      this.elevationChartBody.setAttribute('aria-hidden', hideContent ? 'true' : 'false');
+    }
+    if (this.elevationChart) {
+      this.elevationChart.setAttribute('aria-hidden', hideContent ? 'true' : 'false');
+    }
+    if (this.elevationCollapseToggle) {
+      this.elevationCollapseToggle.setAttribute('aria-expanded', this.isElevationCollapsed ? 'false' : 'true');
+      const collapseLabel = this.isElevationCollapsed ? 'Show elevation' : 'Hide elevation';
+      this.elevationCollapseToggle.setAttribute('aria-label', collapseLabel);
+      if (this.elevationCollapseLabel) {
+        this.elevationCollapseLabel.textContent = collapseLabel;
+      }
+    }
+    if (hideContent) {
+      this.detachElevationChartEvents();
+    } else {
+      this.attachElevationChartEvents();
+      this.updateElevationMarkerPositions();
+    }
+  }
+
+  setElevationCollapsed(collapsed) {
+    this.isElevationCollapsed = Boolean(collapsed);
+    this.updateElevationVisibilityState();
   }
 
   ensurePanelVisible() {
@@ -8624,6 +8672,7 @@ export class DirectionsManager {
       this.elevationHoverLine = null;
       this.highlightedElevationBar = null;
       this.updateProfileLegend(false);
+      this.updateElevationVisibilityState();
       return;
     }
 
@@ -8640,6 +8689,7 @@ export class DirectionsManager {
       this.highlightedElevationBar = null;
       this.lastElevationHoverDistance = null;
       this.updateProfileLegend(false);
+      this.updateElevationVisibilityState();
       return;
     }
 
@@ -9077,6 +9127,7 @@ export class DirectionsManager {
       requestAnimationFrame(() => this.updateElevationMarkerPositions());
     }
     this.updateElevationHoverReadout(null);
+    this.updateElevationVisibilityState();
   }
 
   updateElevationMarkerPositions() {

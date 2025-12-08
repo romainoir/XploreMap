@@ -612,7 +612,10 @@ async function init() {
   const redoButton = document.getElementById('redoDirectionsButton');
   const clearButton = document.getElementById('clearDirectionsButton');
   const routeStats = document.getElementById('routeStats');
+  const elevationCard = document.getElementById('elevationCard');
+  const elevationChartBody = document.getElementById('elevationChartBody');
   const elevationChart = document.getElementById('elevationChart');
+  const elevationCollapseToggle = document.getElementById('toggleElevationButton');
   const directionsInfoButton = document.getElementById('directionsInfoButton');
   const directionsHint = document.getElementById('directionsHint');
   const routingModeToggle = document.getElementById('routingModeToggle');
@@ -1553,7 +1556,10 @@ async function init() {
         redoButton,
         clearButton,
         routeStats,
+        elevationCard,
+        elevationChartBody,
         elevationChart,
+        elevationCollapseToggle,
         directionsInfoButton,
         directionsHint,
         profileModeToggle,
