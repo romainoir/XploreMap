@@ -118,9 +118,9 @@ const POI_CLUSTER_MIN_SPACING_KM = 0.05;
 const POI_CLUSTER_MAX_SPACING_KM = 1.5;
 const POI_CLUSTER_DISTANCE_SCALE = 120;
 
-const HIKING_BASE_SPEED_KMPH = 4;
-const ASCENT_METERS_PER_HOUR = 400;
-const DESCENT_METERS_PER_HOUR = 600;
+const HIKING_BASE_SPEED_KMPH = 5;
+const ASCENT_METERS_PER_HOUR = 500;
+const DESCENT_METERS_PER_HOUR = 800;
 
 const ELEVATION_PROFILE_POI_CLUSTER_MIN_WINDOW_KM = 0.4;
 const ELEVATION_PROFILE_POI_CLUSTER_MAX_WINDOW_KM = 2;
@@ -973,13 +973,14 @@ const bearingBetween = (start, end) => {
 };
 
 const SEGMENT_COLOR_PALETTE = [
-  '#3ab7c6',
-  '#9c27b0',
-  '#4caf50',
-  '#f1635f',
-  '#8e44ad',
-  '#16a085',
-  '#ff6f61'
+  '#5a8f7b',  // Sage green
+  '#b87f5a',  // Terracotta
+  '#6b8fa3',  // Slate blue
+  '#8b7355',  // Warm brown
+  '#7a9e7e',  // Forest green
+  '#a8857a',  // Dusty rose
+  '#6a8d92',  // Teal gray
+  '#9b8567'   // Ochre
 ];
 
 const ASCENT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 18a1 1 0 0 1-.7-1.7l6.3-6.3a1 1 0 0 1 1.4 0l3.3 3.3 4.9-6.7H17a1 1 0 0 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-2 0V7.41l-5.6 7.6a1 1 0 0 1-1.5.12l-3.3-3.3-5.6 5.6a1 1 0 0 1-.7.27Z"/></svg>';
@@ -1861,6 +1862,8 @@ export class DirectionsManager {
     this.modeColors = { ...MODE_COLORS };
 
     this.latestMetrics = null;
+    this.selectedDayIndex = null;
+    this.fullRouteDomain = null;
 
     this.isDragging = false;
     this.draggedWaypointIndex = null;
@@ -1910,8 +1913,11 @@ export class DirectionsManager {
     this.handleElevationPointerLeave = () => this.onElevationPointerLeave();
     this.handleRouteContextMenu = (event) => this.onRouteContextMenu(event);
     this.handleSegmentMarkerMouseDown = (event) => this.onSegmentMarkerMouseDown(event);
+    this.handleBivouacClick = (event) => this.onBivouacClick(event);
 
     this.routeHoverTooltip = null;
+    this.bivouacPopup = null;
+    this.bivouacDragStartTime = null;
 
     this.routeCutDistances = [];
     this.cutSegments = [];
@@ -2555,6 +2561,7 @@ export class DirectionsManager {
     this.map.on('mousedown', 'waypoints-hit-area', this.handleWaypointMouseDown);
     this.map.on('mousedown', SEGMENT_MARKER_LAYER_ID, this.handleSegmentMarkerMouseDown);
     this.map.on('touchstart', SEGMENT_MARKER_LAYER_ID, this.handleSegmentMarkerMouseDown);
+    this.map.on('click', SEGMENT_MARKER_LAYER_ID, this.handleBivouacClick);
     this.map.on('mousemove', this.handleMapMouseMove);
     this.map.on('mouseup', this.handleMapMouseUp);
     this.map.on('mouseleave', this.handleMapMouseLeave);
@@ -2759,6 +2766,11 @@ export class DirectionsManager {
     if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
       && this.routeGeojson.geometry.coordinates.length >= 2) {
       this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
+
+      // Re-apply day zoom if a day was selected
+      if (this.selectedDayIndex !== null && this.selectedDayIndex !== undefined) {
+        this.zoomElevationChartToDay(this.selectedDayIndex);
+      }
     }
   }
 
@@ -2846,8 +2858,8 @@ export class DirectionsManager {
       : null;
     const metadataEntries = Array.isArray(rawMetadata)
       ? rawMetadata
-          .map((entry) => (entry && typeof entry === 'object' ? entry : null))
-          .filter(Boolean)
+        .map((entry) => (entry && typeof entry === 'object' ? entry : null))
+        .filter(Boolean)
       : [];
     const distanceKm = Number(segment.distanceKm ?? metadata?.distanceKm);
     const startDistanceKm = Number(metadata?.startDistanceKm ?? metadata?.cumulativeStartKm ?? segment.startDistanceKm);
@@ -3637,7 +3649,7 @@ export class DirectionsManager {
     }
     this.offlinePoiCollection = normalized;
     if (Array.isArray(this.routeProfile?.coordinates) && this.routeProfile.coordinates.length >= 2) {
-      this.refreshRoutePointsOfInterest().catch(() => {});
+      this.refreshRoutePointsOfInterest().catch(() => { });
     } else {
       this.setRoutePointsOfInterest([]);
       this.pendingPoiRequest = null;
@@ -3730,8 +3742,8 @@ export class DirectionsManager {
 
     const rawCuts = Array.isArray(this.routeCutDistances)
       ? this.routeCutDistances
-          .map((entry) => Number(entry?.distanceKm ?? entry))
-          .filter((value) => Number.isFinite(value))
+        .map((entry) => Number(entry?.distanceKm ?? entry))
+        .filter((value) => Number.isFinite(value))
       : [];
 
     const interiorCuts = rawCuts
@@ -4863,6 +4875,9 @@ export class DirectionsManager {
   }
 
   updateCutDisplays() {
+    // Reset day selection when bivouacs change to avoid inconsistent state
+    this.selectedDayIndex = null;
+
     const coordinates = this.routeGeojson?.geometry?.coordinates ?? [];
     this.updateRouteCutSegments();
     this.updateRouteLineSource();
@@ -5481,16 +5496,16 @@ export class DirectionsManager {
 
     const mirrored = Array.isArray(this.routeCutDistances)
       ? this.routeCutDistances
-          .map((entry) => this.normalizeRouteCutEntry(entry))
-          .filter((entry) => entry && Number.isFinite(entry.distanceKm))
-          .map((entry) => ({
-            distanceKm: totalDistance - entry.distanceKm,
-            lng: Number.isFinite(entry.lng) ? entry.lng : null,
-            lat: Number.isFinite(entry.lat) ? entry.lat : null
-          }))
-          .filter((entry) => entry.distanceKm > ROUTE_CUT_EPSILON_KM
-            && totalDistance - entry.distanceKm > ROUTE_CUT_EPSILON_KM)
-          .sort((a, b) => a.distanceKm - b.distanceKm)
+        .map((entry) => this.normalizeRouteCutEntry(entry))
+        .filter((entry) => entry && Number.isFinite(entry.distanceKm))
+        .map((entry) => ({
+          distanceKm: totalDistance - entry.distanceKm,
+          lng: Number.isFinite(entry.lng) ? entry.lng : null,
+          lat: Number.isFinite(entry.lat) ? entry.lat : null
+        }))
+        .filter((entry) => entry.distanceKm > ROUTE_CUT_EPSILON_KM
+          && totalDistance - entry.distanceKm > ROUTE_CUT_EPSILON_KM)
+        .sort((a, b) => a.distanceKm - b.distanceKm)
       : [];
 
     this.setRouteCutDistances(mirrored);
@@ -5744,6 +5759,110 @@ export class DirectionsManager {
     event.originalEvent?.preventDefault?.();
   }
 
+  onBivouacClick(event) {
+    // Only show popup if not dragging
+    if (this.isDragging) return;
+
+    const feature = event.features?.[0];
+    const type = feature?.properties?.type;
+    if (type !== 'bivouac') return;
+
+    const order = Number(feature.properties?.order);
+    const cutIndex = Number.isFinite(order) ? order - 1 : null;
+    if (!Number.isInteger(cutIndex) || cutIndex < 0) return;
+
+    // Get bivouac location
+    const coordinates = feature.geometry?.coordinates?.slice?.();
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+
+    // If popup already open at same location, toggle it off
+    if (this.bivouacPopup && this.bivouacPopup.isOpen?.()) {
+      this.bivouacPopup.remove();
+      return;
+    }
+
+    // Get associated cut segment info
+    const segment = this.cutSegments?.[cutIndex];
+
+    // Calculate bivouac details
+    const distanceKm = segment?.endKm ?? segment?.endDistanceKm ?? 0;
+    const elevation = this.getElevationAtDistance(distanceKm);
+    const slope = this.computeGradeAtDistance(distanceKm);
+
+    // Get day segment metrics
+    const dayNumber = cutIndex + 1;
+    const dayMetrics = segment ? this.computeCumulativeMetrics(
+      segment.endKm ?? segment.endDistanceKm ?? 0,
+      segment.startKm ?? segment.startDistanceKm ?? 0
+    ) : null;
+    const dayDistanceKm = dayMetrics?.distanceKm ?? 0;
+    const dayAscent = Math.round(dayMetrics?.ascent ?? 0);
+    const dayDescent = Math.round(dayMetrics?.descent ?? 0);
+    const dayTime = this.estimateTravelTimeHours(dayDistanceKm, dayAscent, dayDescent);
+
+    // Get bivouac marker name
+    const markers = this.computeSegmentMarkers();
+    const bivouacMarker = markers.find(m => m.type === 'bivouac' && m.order === order);
+    const bivouacName = bivouacMarker?.name ?? bivouacMarker?.title ?? `Bivouac ${cutIndex + 1}`;
+
+    // Build popup content
+    const slopeLabel = Number.isFinite(slope) ? `${slope > 0 ? '+' : ''}${slope.toFixed(1)}%` : '—';
+    const elevationLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : '—';
+
+    const popupHtml = `
+      <div class="bivouac-popup">
+        <div class="bivouac-popup__header">
+          <span class="bivouac-popup__title">${escapeHtml(bivouacName)}</span>
+        </div>
+        <div class="bivouac-popup__stats">
+          <div class="bivouac-popup__stat">
+            <span class="bivouac-popup__stat-label">Day ${dayNumber} Summary</span>
+            <span class="bivouac-popup__stat-value">${this.formatDistance(dayDistanceKm)} km · +${dayAscent}m · ${this.formatDurationHours(dayTime)}</span>
+          </div>
+          <div class="bivouac-popup__stat">
+            <span class="bivouac-popup__stat-label">Elevation</span>
+            <span class="bivouac-popup__stat-value">${elevationLabel}</span>
+          </div>
+          <div class="bivouac-popup__stat">
+            <span class="bivouac-popup__stat-label">Slope</span>
+            <span class="bivouac-popup__stat-value">${slopeLabel}</span>
+          </div>
+          <div class="bivouac-popup__stat">
+            <span class="bivouac-popup__stat-label">Distance from start</span>
+            <span class="bivouac-popup__stat-value">${this.formatDistance(distanceKm)} km</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Create popup with close button for click-to-dismiss
+    if (this.bivouacPopup) {
+      this.bivouacPopup.remove();
+    }
+
+    this.bivouacPopup = new maplibregl.Popup({
+      closeButton: true,
+      closeOnClick: true,
+      className: 'bivouac-popup-container',
+      offset: [0, -16],
+      maxWidth: '280px'
+    });
+
+    this.bivouacPopup
+      .setLngLat(coordinates)
+      .setHTML(popupHtml)
+      .addTo(this.map);
+
+    // Stop event propagation to prevent map click from adding waypoint
+    if (event.originalEvent) {
+      event.originalEvent.stopPropagation();
+      event.originalEvent.preventDefault();
+    }
+    // Mark this click as handled so map click handler knows to ignore it
+    this._bivouacClickHandled = true;
+    setTimeout(() => { this._bivouacClickHandled = false; }, 50);
+  }
+
   onMapMouseMove(event) {
     if (!this.isPanelVisible()) return;
 
@@ -5800,12 +5919,19 @@ export class DirectionsManager {
     if (movedBivouac) {
       const releaseLngLat = event?.lngLat ?? null;
       this.finishBivouacDrag(releaseLngLat);
+      this.draggedBivouacIndex = null;
     }
-    this.draggedBivouacIndex = null;
   }
 
   async onMapClick(event) {
     if (!this.isPanelVisible() || this.isDragging) return;
+
+    // Skip if bivouac was clicked (handled separately)
+    if (this._bivouacClickHandled) return;
+
+    // Check if click was on a segment marker (bivouac)
+    const hitSegmentMarkers = this.map.queryRenderedFeatures(event.point, { layers: [SEGMENT_MARKER_LAYER_ID] });
+    if (hitSegmentMarkers.length) return;
 
     const hitWaypoints = this.map.queryRenderedFeatures(event.point, { layers: ['waypoints-hit-area'] });
     if (hitWaypoints.length) return;
@@ -7017,6 +7143,8 @@ export class DirectionsManager {
     this.routeCoordinateMetadata = [];
     this.elevationSamples = [];
     this.elevationDomain = null;
+    this.fullRouteDomain = null;
+    this.selectedDayIndex = null;
     this.elevationYAxis = null;
     this.setRoutePointsOfInterest([]);
     this.pendingPoiRequest = null;
@@ -7347,7 +7475,7 @@ export class DirectionsManager {
     this.applyRoute(routeFeature);
     this.updateWaypoints();
     this.updateModeAvailability();
-    this.prepareNetwork({ reason: 'imported-route' }).catch(() => {});
+    this.prepareNetwork({ reason: 'imported-route' }).catch(() => { });
     return true;
   }
 
@@ -7497,8 +7625,8 @@ export class DirectionsManager {
 
       const metadataEntries = Array.isArray(segmentMetadataSource[waypointIndex])
         ? segmentMetadataSource[waypointIndex]
-            .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
-            .filter((entry) => entry && !isConnectorMetadataSource(entry.source))
+          .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
+          .filter((entry) => entry && !isConnectorMetadataSource(entry.source))
         : [];
 
       segments.set(waypointIndex, {
@@ -7597,19 +7725,19 @@ export class DirectionsManager {
       }
       const coordinates = Array.isArray(segment.coordinates)
         ? segment.coordinates
-            .map((coord) => {
-              if (!Array.isArray(coord) || coord.length < 2) {
-                return null;
-              }
-              const lng = Number(coord[0]);
-              const lat = Number(coord[1]);
-              if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-                return null;
-              }
-              const elevation = coord.length > 2 && Number.isFinite(coord[2]) ? coord[2] : 0;
-              return [lng, lat, elevation];
-            })
-            .filter(Boolean)
+          .map((coord) => {
+            if (!Array.isArray(coord) || coord.length < 2) {
+              return null;
+            }
+            const lng = Number(coord[0]);
+            const lat = Number(coord[1]);
+            if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+              return null;
+            }
+            const elevation = coord.length > 2 && Number.isFinite(coord[2]) ? coord[2] : 0;
+            return [lng, lat, elevation];
+          })
+          .filter(Boolean)
         : null;
       if (!coordinates || coordinates.length < 2) {
         continue;
@@ -7626,8 +7754,8 @@ export class DirectionsManager {
       const descent = Number.isFinite(segment.descent) ? Number(segment.descent) : null;
       const metadata = Array.isArray(segment.metadata)
         ? segment.metadata
-            .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
-            .filter((entry) => entry && !isConnectorMetadataSource(entry.source))
+          .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
+          .filter((entry) => entry && !isConnectorMetadataSource(entry.source))
         : [];
 
       preserved.push({
@@ -8240,6 +8368,7 @@ export class DirectionsManager {
       this.routeStats.classList.remove('has-stats', 'is-hover');
       this.routeStats.removeAttribute('data-mode');
       this.isRouteStatsHoverActive = false;
+      this.selectedDayIndex = null;
       return;
     }
 
@@ -8249,6 +8378,23 @@ export class DirectionsManager {
     const timeLabel = this.formatDurationHours(
       this.estimateTravelTimeHours(metrics.distanceKm, ascent, descent)
     );
+
+    // Check if we have multiple day segments (bivouac splits)
+    const hasMultipleDays = Array.isArray(this.cutSegments) && this.cutSegments.length > 1;
+
+    if (hasMultipleDays) {
+      this.renderMultiDayTimeline(metrics);
+    } else {
+      this.renderSimpleStats(metrics, distanceLabel, ascent, descent, timeLabel);
+    }
+
+    this.routeStats.classList.add('has-stats');
+    this.routeStats.classList.remove('is-hover');
+    this.routeStats.setAttribute('data-mode', 'summary');
+    this.isRouteStatsHoverActive = false;
+  }
+
+  renderSimpleStats(metrics, distanceLabel, ascent, descent, timeLabel) {
     const routeLabel = this.getRouteSummaryLabel();
     const traceValue = routeLabel ? routeLabel : '—';
 
@@ -8256,8 +8402,8 @@ export class DirectionsManager {
       { key: 'trace', label: 'Route', value: traceValue },
       { key: 'time', label: 'Est. time', value: timeLabel },
       { key: 'distance', label: 'Total distance', value: `${distanceLabel} km` },
-      { key: 'ascent', label: 'Total ascent', value: `${ascent} m` },
-      { key: 'descent', label: 'Total descent', value: `${descent} m` }
+      { key: 'ascent', label: 'Total ascent', value: `+${ascent} m` },
+      { key: 'descent', label: 'Total descent', value: `-${descent} m` }
     ];
 
     const listItems = stats
@@ -8279,28 +8425,441 @@ export class DirectionsManager {
       })
       .join('');
 
-    const srParts = [];
-    if (routeLabel) {
-      srParts.push(`Route: ${routeLabel}`);
-    }
-    srParts.push(
-      `Distance: ${distanceLabel} km`,
-      `Ascent: ${ascent} m`,
-      `Descent: ${descent} m`,
-      `Estimated time: ${timeLabel}`
-    );
-    const srText = `${srParts.join('. ')}.`;
-
     this.routeStats.innerHTML = `
-      <span class="sr-only">${escapeHtml(srText)}</span>
       <ul class="route-stats-list">
         ${listItems}
       </ul>
     `;
-    this.routeStats.classList.add('has-stats');
-    this.routeStats.classList.remove('is-hover');
-    this.routeStats.setAttribute('data-mode', 'summary');
-    this.isRouteStatsHoverActive = false;
+  }
+
+  renderMultiDayTimeline(metrics) {
+    const segments = this.cutSegments;
+    const totalDays = segments.length;
+
+    // Calculate metrics for each day segment
+    const dayMetrics = segments.map((segment, index) => {
+      const startKm = Number(segment?.startKm ?? segment?.startDistanceKm ?? 0);
+      const endKm = Number(segment?.endKm ?? segment?.endDistanceKm ?? startKm);
+      const distanceKm = Math.max(0, endKm - startKm);
+
+      // Calculate ascent for this segment
+      const segmentMetrics = this.computeCumulativeMetrics(endKm, startKm);
+      const segmentAscent = Math.max(0, Math.round(segmentMetrics?.ascent ?? 0));
+      const segmentDescent = Math.max(0, Math.round(segmentMetrics?.descent ?? 0));
+      const segmentTime = this.estimateTravelTimeHours(distanceKm, segmentAscent, segmentDescent);
+
+      // Get bivouac name if exists
+      const markers = this.computeSegmentMarkers(segments);
+      const endMarker = markers[index + 1];
+      const bivouacName = endMarker?.name ?? endMarker?.title ?? null;
+
+      return {
+        index,
+        dayNumber: index + 1,
+        distanceKm,
+        ascent: segmentAscent,
+        descent: segmentDescent,
+        timeHours: segmentTime,
+        bivouacName,
+        color: segment?.color ?? null,
+        startKm,
+        endKm
+      };
+    });
+
+    // Total summary
+    const totalDistance = this.formatDistance(metrics.distanceKm);
+    const totalAscent = Math.max(0, Math.round(metrics.ascent));
+    const totalTime = this.formatDurationHours(
+      this.estimateTravelTimeHours(metrics.distanceKm, totalAscent, metrics.descent)
+    );
+
+    // Arrow SVG
+    const arrowSvg = `<svg viewBox="0 0 24 24"><path d="M10 6L16 12L10 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+    // Build day tabs - arrow/chevron style
+    const hasSelection = this.selectedDayIndex !== null && this.selectedDayIndex !== undefined;
+    const dayTabsHtml = dayMetrics.map((day, i) => {
+      const distLabel = this.formatDistance(day.distanceKm);
+      const isSelected = this.selectedDayIndex === i;
+      const isLast = i === dayMetrics.length - 1;
+      const bgColor = day.color || this.modeColors[this.currentMode];
+
+      return `
+        <div class="day-tab-wrapper${isSelected ? ' is-selected' : ''}${isLast ? ' is-last' : ''}" data-day-index="${i}">
+          <button 
+            type="button"
+            class="day-tab${isSelected ? ' is-selected' : ''}" 
+            data-day-index="${i}"
+            style="--day-color: ${bgColor}"
+          >
+            <div class="day-tab__content">
+              <span class="day-tab__title">Day ${day.dayNumber}</span>
+              <span class="day-tab__stats">
+                ${distLabel} km <span class="day-tab__divider">|</span> +${day.ascent} m
+              </span>
+            </div>
+          </button>
+          <svg class="day-tab__arrow" viewBox="0 0 20 60" preserveAspectRatio="none">
+            <path d="M0 0 L15 30 L0 60 L0 0" fill="var(--day-color)" style="--day-color: ${bgColor}"/>
+          </svg>
+        </div>
+      `;
+    }).join('');
+
+    // Add container class to indicate selection state
+    const timelineClass = `day-timeline${hasSelection ? ' has-selection' : ''}`;
+
+    // Selected day details
+    const selectedDay = this.selectedDayIndex !== null && this.selectedDayIndex !== undefined
+      ? dayMetrics[this.selectedDayIndex]
+      : null;
+
+    const dayDetailsHtml = selectedDay ? `
+      <div class="day-details is-visible">
+        <div class="day-details__header">
+          <span class="day-details__title">Day ${selectedDay.dayNumber}</span>
+          ${selectedDay.bivouacName ? `<span class="day-details__bivouac">→ ${escapeHtml(selectedDay.bivouacName)}</span>` : ''}
+        </div>
+        <div class="day-details__metrics">
+          <span class="day-details__metric">
+            ${SUMMARY_ICONS.time ?? ''}
+            <span class="day-details__metric-value">${this.formatDurationHours(selectedDay.timeHours)}</span>
+          </span>
+          <span class="day-details__metric">
+            ${SUMMARY_ICONS.distance ?? ''}
+            <span class="day-details__metric-value">${this.formatDistance(selectedDay.distanceKm)} km</span>
+          </span>
+          <span class="day-details__metric">
+            ${SUMMARY_ICONS.ascent ?? ''}
+            <span class="day-details__metric-value">+${selectedDay.ascent} m</span>
+          </span>
+          <span class="day-details__metric">
+            ${SUMMARY_ICONS.descent ?? ''}
+            <span class="day-details__metric-value">-${selectedDay.descent} m</span>
+          </span>
+        </div>
+      </div>
+    ` : '<div class="day-details"></div>';
+
+    this.routeStats.innerHTML = `
+      <div class="route-stats__header">
+        <span class="route-stats__title">Trek Planner</span>
+        <div class="route-stats__summary">
+          <span class="route-stats__summary-item">
+            <span class="route-stats__summary-value">${totalTime}</span>
+          </span>
+          <span class="route-stats__summary-item">
+            <span class="route-stats__summary-value">${totalDistance} km</span>
+          </span>
+          <span class="route-stats__summary-item">
+            <span class="route-stats__summary-value">+${totalAscent} m</span>
+          </span>
+        </div>
+      </div>
+      <div class="${timelineClass}">${dayTabsHtml}</div>
+      ${dayDetailsHtml}
+    `;
+
+    // Attach click handlers to day tabs
+    this.attachDayTabHandlers();
+  }
+
+  attachDayTabHandlers() {
+    if (!this.routeStats) return;
+
+    const dayTabs = this.routeStats.querySelectorAll('.day-tab');
+    dayTabs.forEach((tab) => {
+      tab.addEventListener('click', (event) => {
+        const index = Number(tab.dataset.dayIndex);
+        if (!Number.isFinite(index)) return;
+
+        // Toggle selection
+        if (this.selectedDayIndex === index) {
+          this.selectedDayIndex = null;
+        } else {
+          this.selectedDayIndex = index;
+        }
+
+        // Re-render stats UI
+        this.renderRouteStatsSummary(this.latestMetrics);
+
+        // Zoom elevation chart to selected day or restore full view
+        this.zoomElevationChartToDay(this.selectedDayIndex);
+      });
+    });
+  }
+
+  zoomElevationChartToDay(dayIndex) {
+    if (!this.routeGeojson?.geometry?.coordinates) return;
+
+    // Store full route domain if not already stored
+    if (!this.fullRouteDomain && this.elevationDomain) {
+      this.fullRouteDomain = { ...this.elevationDomain };
+    }
+
+    if (dayIndex === null || dayIndex === undefined) {
+      // Restore full route view
+      if (this.fullRouteDomain) {
+        this.elevationDomain = { ...this.fullRouteDomain };
+      }
+      this.updateElevationChartView();
+      return;
+    }
+
+    // Get the selected segment's range
+    const segment = this.cutSegments?.[dayIndex];
+    if (!segment) {
+      // Restore full view if segment not found
+      if (this.fullRouteDomain) {
+        this.elevationDomain = { ...this.fullRouteDomain };
+      }
+      this.updateElevationChartView();
+      return;
+    }
+
+    const startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+    const endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
+
+    // Add small padding (5% on each side)
+    const segmentSpan = endKm - startKm;
+    const padding = segmentSpan * 0.05;
+    const paddedStart = Math.max(0, startKm - padding);
+    const paddedEnd = endKm + padding;
+
+    this.elevationDomain = {
+      min: paddedStart,
+      max: paddedEnd,
+      span: paddedEnd - paddedStart
+    };
+
+    this.updateElevationChartView();
+  }
+
+  updateElevationChartView() {
+    // Re-render the elevation chart with the current domain
+    if (!this.routeGeojson?.geometry?.coordinates) return;
+
+    // Instead of full re-render, just update the SVG paths and markers
+    const coordinates = this.routeGeojson.geometry.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+
+    // Rebuild the area paths for the new domain
+    if (this.elevationChartContainer && this.elevationSamples?.length && this.elevationYAxis) {
+      const paths = this.buildElevationAreaPaths(this.elevationSamples, this.elevationYAxis, this.elevationDomain);
+
+      // Update SVG paths
+      const fillPath = this.elevationChartContainer.querySelector('.elevation-area-fill');
+      const strokePath = this.elevationChartContainer.querySelector('.elevation-area-stroke');
+      if (fillPath && paths.fill) {
+        fillPath.setAttribute('d', paths.fill);
+      }
+      if (strokePath && paths.stroke) {
+        strokePath.setAttribute('d', paths.stroke);
+      }
+
+      // Regenerate and update the gradient for the new domain
+      this.updateElevationGradient();
+
+      // Update X-axis labels
+      this.updateElevationXAxis();
+
+      // Update Y-axis labels with altitude min/max
+      this.updateElevationYAxisLabels();
+
+      // Update marker positions and visibility
+      this.updateElevationMarkerPositions();
+      // Delay visibility update to ensure DOM is fully updated
+      requestAnimationFrame(() => {
+        this.updateElevationMarkerVisibility();
+      });
+    }
+  }
+
+  updateElevationMarkerVisibility() {
+    if (!this.elevationChartContainer) return;
+
+    const markers = this.elevationChartContainer.querySelectorAll('.elevation-marker.bivouac');
+    if (!markers.length) return;
+
+    const domainMin = this.elevationDomain?.min ?? 0;
+    const domainMax = this.elevationDomain?.max ?? domainMin;
+    const tolerance = Math.max(0.1, (domainMax - domainMin) * 0.05); // 5% tolerance, min 0.1km
+
+    markers.forEach((marker) => {
+      const distanceKm = Number(marker.dataset.distanceKm);
+
+      if (!Number.isFinite(distanceKm)) {
+        marker.style.display = 'none';
+        return;
+      }
+
+      // When zoomed to a day, only show the bivouac at the END of that day
+      if (this.selectedDayIndex !== null && this.selectedDayIndex !== undefined) {
+        const segment = this.cutSegments?.[this.selectedDayIndex];
+        if (segment) {
+          const endKm = Number(segment.endKm ?? segment.endDistanceKm ?? 0);
+          const isEndBivouac = Math.abs(distanceKm - endKm) <= tolerance;
+
+          // Only show the bivouac that marks the END of the selected day
+          marker.style.display = isEndBivouac ? '' : 'none';
+        } else {
+          marker.style.display = 'none';
+        }
+      } else {
+        // Full route view - show all markers
+        marker.style.display = '';
+      }
+    });
+  }
+
+  updateElevationYAxisLabels() {
+    const yAxisLabels = document.getElementById('elevationYAxisLabels');
+    if (!yAxisLabels) return;
+
+    const yMaxLabel = yAxisLabels.querySelector('.chart-card__y-max');
+    const yMinLabel = yAxisLabels.querySelector('.chart-card__y-min');
+    if (!yMaxLabel || !yMinLabel) return;
+
+    const yAxis = this.elevationYAxis;
+    if (!yAxis || !Number.isFinite(yAxis.min) || !Number.isFinite(yAxis.max)) {
+      yMaxLabel.textContent = '';
+      yMinLabel.textContent = '';
+      return;
+    }
+
+    // Format as integers
+    yMaxLabel.textContent = Math.round(yAxis.max).toLocaleString();
+    yMinLabel.textContent = Math.round(yAxis.min).toLocaleString();
+  }
+
+  updateElevationGradient() {
+    if (!this.elevationChartContainer) return;
+
+    const gradientEl = this.elevationChartContainer.querySelector('linearGradient#elevation-area-gradient');
+    if (!gradientEl) return;
+
+    const domainMin = this.elevationDomain?.min ?? 0;
+    const domainMax = this.elevationDomain?.max ?? domainMin;
+    const domainSpan = domainMax - domainMin;
+    if (domainSpan <= 0) return;
+
+    const fallbackColor = this.modeColors[this.currentMode];
+    const gradientStops = [];
+
+    // Build gradient stops for current domain
+    const addGradientStop = (distanceKm, color) => {
+      if (!Number.isFinite(distanceKm) || typeof color !== 'string') return;
+      const trimmed = color.trim();
+      if (!trimmed) return;
+
+      // Calculate ratio relative to current domain
+      const clampedDistance = Math.min(domainMax, Math.max(domainMin, distanceKm));
+      const ratio = (clampedDistance - domainMin) / domainSpan;
+      gradientStops.push({ offset: Math.max(0, Math.min(1, ratio)), color: trimmed });
+    };
+
+    // Get segments to build gradient from
+    const gradientSegments = (() => {
+      if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
+        return this.profileSegments;
+      }
+      if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
+        return this.cutSegments;
+      }
+      return [];
+    })();
+
+    gradientSegments.forEach((segment) => {
+      if (!segment) return;
+      const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
+      if (!segmentColor) return;
+
+      let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+      let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
+
+      addGradientStop(startKm, segmentColor);
+      addGradientStop(endKm, segmentColor);
+    });
+
+    // Add sharp transitions at cut segment boundaries
+    if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
+      this.cutSegments.forEach((segment, index) => {
+        if (index === 0 || !segment) return;
+        const prevSegment = this.cutSegments[index - 1];
+        if (!prevSegment) return;
+
+        const boundaryKm = Number(segment.startKm ?? segment.startDistanceKm);
+        if (!Number.isFinite(boundaryKm)) return;
+
+        const prevColor = prevSegment.color?.trim?.() || fallbackColor;
+        const currColor = segment.color?.trim?.() || fallbackColor;
+
+        const ratio = (boundaryKm - domainMin) / domainSpan;
+        if (ratio > 0 && ratio < 1) {
+          gradientStops.push({ offset: ratio - 0.0001, color: prevColor });
+          gradientStops.push({ offset: ratio, color: currColor });
+        }
+      });
+    }
+
+    // Sort and deduplicate stops
+    gradientStops.sort((a, b) => a.offset - b.offset);
+
+    // Remove duplicates but keep sharp transitions
+    const uniqueStops = [];
+    for (let i = 0; i < gradientStops.length; i++) {
+      const stop = gradientStops[i];
+      const prev = uniqueStops[uniqueStops.length - 1];
+      if (!prev || Math.abs(prev.offset - stop.offset) > 1e-6 || prev.color !== stop.color) {
+        uniqueStops.push(stop);
+      }
+    }
+
+    // Clear existing stops
+    gradientEl.innerHTML = '';
+
+    // Add new stops
+    if (uniqueStops.length === 0) {
+      const stopEl = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+      stopEl.setAttribute('offset', '0%');
+      stopEl.setAttribute('stop-color', fallbackColor);
+      gradientEl.appendChild(stopEl);
+    } else {
+      uniqueStops.forEach((stop) => {
+        const stopEl = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+        stopEl.setAttribute('offset', `${(stop.offset * 100).toFixed(4)}%`);
+        stopEl.setAttribute('stop-color', stop.color);
+        gradientEl.appendChild(stopEl);
+      });
+    }
+  }
+
+  updateElevationXAxis() {
+    if (!this.elevationChart) return;
+
+    const xAxisContainer = this.elevationChart.querySelector('.elevation-x-axis');
+    if (!xAxisContainer) return;
+
+    const domainMin = this.elevationDomain?.min ?? 0;
+    const domainMax = this.elevationDomain?.max ?? domainMin;
+    const xAxis = this.computeAxisTicks(domainMin, domainMax, 5);
+
+    // Clear and rebuild X-axis labels
+    xAxisContainer.innerHTML = '';
+    const span = xAxis.max - xAxis.min || 1;
+    const tickCount = xAxis.ticks.length;
+
+    xAxis.ticks.forEach((tick, index) => {
+      const ratio = (tick - xAxis.min) / span;
+      const percent = Math.max(0, Math.min(100, ratio * 100));
+      const label = document.createElement('span');
+      // Show "km" on the last tick
+      const isLast = index === tickCount - 1;
+      label.textContent = isLast ? `${this.formatDistance(tick)} km` : this.formatDistance(tick);
+      label.style.left = `${percent}%`;
+      xAxisContainer.appendChild(label);
+    });
   }
 
   updateRouteStatsHover(distanceKm) {
@@ -8666,6 +9225,7 @@ export class DirectionsManager {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
       this.elevationDomain = null;
+      this.fullRouteDomain = null;
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
       this.elevationHoverIndicator = null;
@@ -8682,6 +9242,7 @@ export class DirectionsManager {
       this.elevationChart.innerHTML = '';
       this.elevationSamples = [];
       this.elevationDomain = null;
+      this.fullRouteDomain = null;
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
       this.elevationHoverIndicator = null;
@@ -8736,6 +9297,7 @@ export class DirectionsManager {
     const safeXSpan = rawXSpan === 0 ? 1 : rawXSpan;
     const xBoundaryTolerance = Math.max(1e-6, Math.abs(rawXSpan) * 1e-4);
     this.elevationDomain = { min: xMin, max: xMax, span: rawXSpan };
+    this.fullRouteDomain = { min: xMin, max: xMax, span: rawXSpan };
 
     const fallbackColor = this.modeColors[this.currentMode];
     const gradientEnabled = isProfileGradientMode(this.profileMode);
@@ -8792,6 +9354,42 @@ export class DirectionsManager {
         addGradientStop(startKm, segmentColor);
         addGradientStop(endKm, segmentColor);
       });
+    }
+
+    // Add sharp transitions at cutSegment boundaries (for bivouac day splits)
+    // This ensures day segments have crisp color changes, not gradients
+    if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
+      const cutSegs = this.cutSegments;
+      for (let i = 0; i < cutSegs.length; i += 1) {
+        const segment = cutSegs[i];
+        if (!segment) continue;
+
+        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
+        let startKm = Number(segment.startKm);
+        if (!Number.isFinite(startKm)) startKm = Number(segment.startDistanceKm);
+        if (!Number.isFinite(startKm)) startKm = 0;
+
+        let endKm = Number(segment.endKm);
+        if (!Number.isFinite(endKm)) endKm = Number(segment.endDistanceKm);
+        if (!Number.isFinite(endKm)) endKm = startKm;
+
+        // Add stops for this segment
+        addGradientStop(startKm, segmentColor);
+        addGradientStop(endKm, segmentColor);
+
+        // For sharp transitions: at segment boundaries, add the next segment's color
+        // at the exact same position as this segment's end
+        if (i < cutSegs.length - 1) {
+          const nextSegment = cutSegs[i + 1];
+          if (nextSegment) {
+            const nextColor = typeof nextSegment.color === 'string'
+              ? nextSegment.color.trim()
+              : fallbackColor;
+            // Add stop at boundary with next segment's color (creates sharp step)
+            addGradientStop(endKm, nextColor);
+          }
+        }
+      }
     }
 
     const hitTargetsHtml = samples
@@ -8898,12 +9496,16 @@ export class DirectionsManager {
           color: stop.color
         }))
         .sort((a, b) => a.offset - b.offset);
+      // Deduplicate while preserving sharp transitions (same offset, different colors)
       const deduped = [];
       sorted.forEach((stop) => {
         const last = deduped[deduped.length - 1];
+        // Keep stops that are at different offsets OR have different colors
+        // This allows "step" transitions where we have two stops at same offset with different colors
         if (!last || Math.abs(stop.offset - last.offset) > 1e-4 || last.color !== stop.color) {
           deduped.push(stop);
-        } else {
+        } else if (last.color === stop.color) {
+          // Same offset and same color - just update to latest
           deduped[deduped.length - 1] = stop;
         }
       });
@@ -9041,7 +9643,7 @@ export class DirectionsManager {
             }
             const shouldShowLabel = Boolean(
               (poi?.showElevationProfileLabel ?? poi?.showLabel)
-                && safeLabel
+              && safeLabel
             );
             const labelMarkup = shouldShowLabel
               ? `<span class="elevation-marker__label">${safeLabel}</span>`
@@ -9128,6 +9730,7 @@ export class DirectionsManager {
     }
     this.updateElevationHoverReadout(null);
     this.updateElevationVisibilityState();
+    this.updateElevationYAxisLabels();
   }
 
   updateElevationMarkerPositions() {
@@ -9415,8 +10018,8 @@ export class DirectionsManager {
     this.routeGeojson = resolvedRoute;
     const coordinateMetadata = Array.isArray(resolvedRoute?.properties?.coordinate_metadata)
       ? resolvedRoute.properties.coordinate_metadata
-          .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
-          .filter(Boolean)
+        .map((entry) => (entry && typeof entry === 'object' ? { ...entry } : null))
+        .filter(Boolean)
       : [];
     this.routeCoordinateMetadata = coordinateMetadata;
     this.latestMetrics = this.calculateRouteMetrics(resolvedRoute);

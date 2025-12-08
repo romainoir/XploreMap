@@ -488,7 +488,7 @@ function setBaseStyleOpacity(map, alpha) {
       try {
         const cur = map.getPaintProperty(id, prop);
         if (cur !== undefined) map.setPaintProperty(id, prop, value);
-      } catch (_) {}
+      } catch (_) { }
     };
 
     switch (type) {
@@ -507,7 +507,7 @@ function setBaseStyleOpacity(map, alpha) {
 
 async function unregisterLegacyServiceWorker() {
   if (!('serviceWorker' in navigator) ||
-      typeof navigator.serviceWorker.getRegistrations !== 'function') {
+    typeof navigator.serviceWorker.getRegistrations !== 'function') {
     return;
   }
 
@@ -640,8 +640,8 @@ async function init() {
   const maplibreDirectionsOptions = { fallbackRouter: offlineRouter };
   const globalDirectionsServiceUrl = typeof window !== 'undefined'
     && typeof window.MAPLIBRE_DIRECTIONS_SERVICE_URL === 'string'
-      ? window.MAPLIBRE_DIRECTIONS_SERVICE_URL
-      : null;
+    ? window.MAPLIBRE_DIRECTIONS_SERVICE_URL
+    : null;
   const directionsServiceUrlParam = searchParams.get('directionsUrl');
   const resolvedServiceUrl = (directionsServiceUrlParam && directionsServiceUrlParam.trim().length)
     ? directionsServiceUrlParam.trim()
@@ -651,8 +651,8 @@ async function init() {
 
   const globalDirectionsApiKey = typeof window !== 'undefined'
     && typeof window.MAPLIBRE_DIRECTIONS_API_KEY === 'string'
-      ? window.MAPLIBRE_DIRECTIONS_API_KEY
-      : null;
+    ? window.MAPLIBRE_DIRECTIONS_API_KEY
+    : null;
   const directionsApiKeyParam = searchParams.get('directionsKey');
   const resolvedApiKey = (directionsApiKeyParam && directionsApiKeyParam.trim().length)
     ? directionsApiKeyParam.trim()
@@ -662,8 +662,8 @@ async function init() {
 
   const globalDirectionsApiKeyParam = typeof window !== 'undefined'
     && typeof window.MAPLIBRE_DIRECTIONS_API_KEY_PARAM === 'string'
-      ? window.MAPLIBRE_DIRECTIONS_API_KEY_PARAM
-      : null;
+    ? window.MAPLIBRE_DIRECTIONS_API_KEY_PARAM
+    : null;
   const directionsApiKeyNameParam = searchParams.get('directionsKeyParam');
   const resolvedApiKeyParam = (directionsApiKeyNameParam && directionsApiKeyNameParam.trim().length)
     ? directionsApiKeyNameParam.trim()
@@ -904,7 +904,7 @@ async function init() {
     routingModeToggle.classList.toggle('is-disabled', !onlineAvailable);
     routingModeToggle.disabled = !onlineAvailable;
     routingModeToggle.setAttribute('aria-pressed', offlineActive ? 'true' : 'false');
-    routingModeToggle.dataset.mode = offlineActive ? 'offline' : 'online';
+    routingModeToggle.dataset.routingMode = offlineActive ? 'offline' : 'online';
     const labelText = offlineActive ? 'Offline routing' : 'Online routing';
     if (routingModeLabel) routingModeLabel.textContent = labelText;
     if (routingModeIcon) {
@@ -1466,10 +1466,16 @@ async function init() {
     }
   };
 
-  const switchRoutingMode = (targetKey, { reroute = true } = {}) => setActiveRouter(targetKey, { reroute })
-    .catch((error) => {
-      console.error('Failed to switch routing mode', error);
-    });
+  const switchRoutingMode = (targetKey, { reroute = true } = {}) => {
+    console.log(`Switching routing mode to: ${targetKey} (current: ${activeRouterKey})`);
+    return setActiveRouter(targetKey, { reroute })
+      .then(() => {
+        console.log(`Routing mode switched to: ${activeRouterKey}`);
+      })
+      .catch((error) => {
+        console.error('Failed to switch routing mode', error);
+      });
+  };
 
   const EMPTY_COLLECTION = { type: 'FeatureCollection', features: [] };
 
@@ -1505,7 +1511,7 @@ async function init() {
       if (typeof structuredClone === 'function') {
         return structuredClone(feature);
       }
-    } catch (_) {}
+    } catch (_) { }
     try {
       return JSON.parse(JSON.stringify(feature));
     } catch (_) {
@@ -1696,11 +1702,21 @@ async function init() {
     });
   }
 
+  console.log('[RoutingToggle] routingModeToggle element:', routingModeToggle);
+  console.log('[RoutingToggle] activeRouterKey initial:', activeRouterKey);
+  console.log('[RoutingToggle] routers available:', Object.keys(routers));
+
   if (routingModeToggle) {
-    routingModeToggle.addEventListener('click', () => {
+    console.log('[RoutingToggle] Attaching click handler to routingModeToggle');
+    routingModeToggle.addEventListener('click', (event) => {
+      console.log('[RoutingToggle] Button clicked!');
+      console.log('[RoutingToggle] Current activeRouterKey:', activeRouterKey);
       const targetKey = activeRouterKey === 'offline' ? 'online' : 'offline';
+      console.log('[RoutingToggle] Target key:', targetKey);
       switchRoutingMode(targetKey);
     });
+  } else {
+    console.warn('[RoutingToggle] routingModeToggle element NOT FOUND!');
   }
 
   if (routingModeIcon) {
