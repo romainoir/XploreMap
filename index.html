@@ -249,8 +249,31 @@
     </div>
     <div id="routeStats" class="route-stats" aria-live="polite"></div>
     <div class="directions-body">
-      <div class="chart-card" role="group" aria-label="Route elevation overview">
-        <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
+      <div id="elevationCard" class="chart-card" role="group" aria-label="Route elevation overview">
+        <div class="chart-card__header">
+          <div class="chart-card__title">
+            <span aria-hidden="true">Elevation</span>
+            <span class="sr-only">Elevation profile</span>
+          </div>
+          <div class="chart-card__actions">
+            <button
+              id="toggleElevationButton"
+              class="chart-card__collapse"
+              type="button"
+              aria-expanded="true"
+              aria-controls="elevationChartBody"
+              aria-label="Hide elevation"
+            >
+              <span class="chart-card__collapse-label">Hide elevation</span>
+              <svg class="chart-card__collapse-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M8.12 9.29a1 1 0 0 1 1.41 0L12 11.76l2.47-2.47a1 1 0 0 1 1.41 1.41l-3.18 3.18a1 1 0 0 1-1.41 0L8.12 10.7a1 1 0 0 1 0-1.41Z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="elevationChartBody" class="chart-card__body">
+          <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
+        </div>
       </div>
     </div>
   </div>
