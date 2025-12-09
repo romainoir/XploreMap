@@ -1915,6 +1915,7 @@ export class DirectionsManager {
     this.handleWaypointDoubleClick = (event) => this.onWaypointDoubleClick(event);
     this.handleElevationPointerMove = (event) => this.onElevationPointerMove(event);
     this.handleElevationPointerLeave = () => this.onElevationPointerLeave();
+    this.handleElevationContextMenu = (event) => this.onElevationContextMenu(event);
     this.handleRouteContextMenu = (event) => this.onRouteContextMenu(event);
     this.handleSegmentMarkerMouseDown = (event) => this.onSegmentMarkerMouseDown(event);
     this.handleBivouacClick = (event) => this.onBivouacClick(event);
@@ -4944,6 +4945,12 @@ export class DirectionsManager {
     this.notifyRouteSegmentsUpdated();
     // Ensure manual route overlay colors are refreshed with the final cutSegments
     this.updateManualRouteSource();
+
+    // Refresh route stats panel to update day tabs after bivouac changes
+    this._lastSummaryStatsKey = null; // Clear cache to force re-render
+    if (this.routeGeojson) {
+      this.updateStats(this.routeGeojson);
+    }
   }
 
   getCutSegmentForDistance(distanceKm) {
@@ -6998,6 +7005,7 @@ export class DirectionsManager {
     }
     this.elevationChartContainer.removeEventListener('pointermove', this.handleElevationPointerMove);
     this.elevationChartContainer.removeEventListener('pointerleave', this.handleElevationPointerLeave);
+    this.elevationChartContainer.removeEventListener('contextmenu', this.handleElevationContextMenu);
   }
 
   attachElevationChartEvents() {
@@ -7006,6 +7014,7 @@ export class DirectionsManager {
     }
     this.elevationChartContainer.addEventListener('pointermove', this.handleElevationPointerMove);
     this.elevationChartContainer.addEventListener('pointerleave', this.handleElevationPointerLeave);
+    this.elevationChartContainer.addEventListener('contextmenu', this.handleElevationContextMenu);
   }
 
   onElevationPointerMove(event) {
@@ -7061,6 +7070,58 @@ export class DirectionsManager {
     this.resetSegmentHover('chart');
     this.highlightElevationAt(null);
     this.updateElevationHoverReadout(null);
+  }
+
+  onElevationContextMenu(event) {
+    // Right-click on elevation chart to add a bivouac at that distance
+    if (!this.elevationChartContainer) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const rect = this.elevationChartContainer.getBoundingClientRect();
+    const width = Number(rect?.width) || 0;
+    if (!(width > 0)) {
+      return;
+    }
+
+    // Calculate distance from click position
+    let domainMin = Number(this.elevationDomain?.min);
+    let domainMax = Number(this.elevationDomain?.max);
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+      if (Number.isFinite(totalDistance) && totalDistance > 0) {
+        domainMin = 0;
+        domainMax = totalDistance;
+      }
+    }
+
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      return;
+    }
+
+    const span = domainMax - domainMin;
+    if (!(span > 0)) {
+      return;
+    }
+
+    const clientX = event.clientX ?? event.pageX ?? 0;
+    const relativeX = clientX - rect.left;
+    const ratio = relativeX / width;
+    const rawDistance = domainMin + ratio * span;
+
+    const totalDistance = Number(this.routeProfile?.totalDistanceKm);
+    const distanceKm = Number.isFinite(totalDistance) && totalDistance > 0
+      ? Math.max(0, Math.min(totalDistance, rawDistance))
+      : Math.max(0, rawDistance);
+
+    if (!Number.isFinite(distanceKm)) {
+      return;
+    }
+
+    // Add bivouac at this distance
+    this.addRouteCut(distanceKm);
   }
 
   hideRouteHover() {
@@ -9384,8 +9445,14 @@ export class DirectionsManager {
     const grade = this.computeGradeAtDistance(distanceKm);
     const totalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
 
+    // Calculate cumulative metrics from start to current position for duration
+    const cumulativeMetrics = this.computeCumulativeMetrics(distanceKm, 0);
+    const ascent = Math.max(0, Math.round(cumulativeMetrics?.ascent ?? 0));
+    const descent = Math.max(0, Math.round(cumulativeMetrics?.descent ?? 0));
+    const durationHours = this.estimateTravelTimeHours(distanceKm, ascent, descent);
+
     // Show tooltip on the elevation chart
-    this.showElevationChartTooltip(distanceKm, elevation, grade, totalDistance);
+    this.showElevationChartTooltip(distanceKm, elevation, grade, durationHours, totalDistance);
   }
 
   ensureElevationChartTooltip() {
@@ -9410,7 +9477,7 @@ export class DirectionsManager {
     return tooltip;
   }
 
-  showElevationChartTooltip(distanceKm, elevation, grade, totalDistance) {
+  showElevationChartTooltip(distanceKm, elevation, grade, durationHours, totalDistance) {
     if (!this.elevationChartContainer) {
       return;
     }
@@ -9438,12 +9505,14 @@ export class DirectionsManager {
     const distanceLabel = this.formatDistance(distanceKm);
     const elevationLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : '—';
     const gradeLabel = Number.isFinite(grade) ? `${grade > 0 ? '+' : ''}${grade.toFixed(1)}%` : '—';
+    const durationLabel = Number.isFinite(durationHours) ? this.formatDurationHours(durationHours) : '—';
 
     tooltip.innerHTML = `
       <div class="elevation-chart-tooltip__distance">${escapeHtml(distanceLabel)} km</div>
       <div class="elevation-chart-tooltip__details">
         <span class="elevation-chart-tooltip__elevation">Alt. ${escapeHtml(elevationLabel)}</span>
         <span class="elevation-chart-tooltip__grade">${escapeHtml(gradeLabel)}</span>
+        <span class="elevation-chart-tooltip__duration">${escapeHtml(durationLabel)}</span>
       </div>
     `;
 
