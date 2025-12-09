@@ -44,6 +44,61 @@
       <span class="directions-swipe-handle__bar"></span>
     </div>
     <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
+      <!-- Elevation chart (top - expandable) -->
+      <div id="elevationCard" class="elevation-section elevation-section--collapsed chart-card--collapsed" role="group"
+        aria-label="Route elevation overview">
+        <div class="elevation-section__header">
+          <div class="profile-mode-controls">
+            <div class="profile-mode-menu" aria-live="polite">
+              <button id="profileModeToggle" class="profile-mode-button profile-mode-button--compact" type="button"
+                aria-haspopup="true" aria-expanded="false" aria-controls="profileModeMenuList">
+                <span class="profile-mode-button__icon" aria-hidden="true">
+                  <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
+                </span>
+                <span class="profile-mode-button__label">None</span>
+                <span class="sr-only">Toggle overlay mode</span>
+              </button>
+              <div id="profileModeMenuList" class="profile-mode-menu__list" role="menu" tabindex="-1"
+                aria-hidden="true">
+                <button type="button" class="profile-mode-menu__item active" data-profile-mode="none"
+                  role="menuitemradio" aria-checked="true">
+                  <span class="profile-mode-menu__text">None</span>
+                </button>
+                <button type="button" class="profile-mode-menu__item" data-profile-mode="slope" role="menuitemradio"
+                  aria-checked="false">
+                  <span class="profile-mode-menu__text">Slope</span>
+                </button>
+                <button type="button" class="profile-mode-menu__item" data-profile-mode="surface" role="menuitemradio"
+                  aria-checked="false">
+                  <span class="profile-mode-menu__text">Surface</span>
+                </button>
+                <button type="button" class="profile-mode-menu__item" data-profile-mode="category" role="menuitemradio"
+                  aria-checked="false">
+                  <span class="profile-mode-menu__text">Difficulty</span>
+                </button>
+                <button type="button" class="profile-mode-menu__item" data-profile-mode="poi" role="menuitemradio"
+                  aria-checked="false">
+                  <span class="profile-mode-menu__text">POI</span>
+                </button>
+              </div>
+            </div>
+            <div id="profileLegend" class="profile-legend" role="group" aria-label="Route overlay legend"
+              aria-hidden="true" data-ready="false"></div>
+          </div>
+        </div>
+        <div id="elevationChartBody" class="elevation-section__body" hidden aria-hidden="true">
+          <div class="elevation-section__chart-wrapper">
+            <div class="elevation-section__y-axis" id="elevationYAxisLabels">
+              <span class="chart-card__y-max"></span>
+              <span class="chart-card__y-min"></span>
+            </div>
+            <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Route stats / Day details (middle) -->
+      <div id="routeStats" class="route-stats" aria-live="polite"></div>
+      <!-- Toolbar buttons (bottom - always visible) -->
       <div class="directions-header">
         <div class="transport-modes" role="group" aria-label="Travel mode">
           <button id="routeModeToggle" class="btn btn--icon btn--icon-only route-mode-toggle" type="button"
@@ -85,43 +140,15 @@
             <img data-icon-id="gpx-export" alt="" aria-hidden="true" loading="lazy" decoding="async" />
             <span class="sr-only">Export GPX</span>
           </button>
-          <div class="profile-mode-controls">
-            <div class="profile-mode-menu" aria-live="polite">
-              <button id="profileModeToggle" class="profile-mode-button" type="button" aria-haspopup="true"
-                aria-expanded="false" aria-controls="profileModeMenuList">
-                <span class="profile-mode-button__icon" aria-hidden="true">
-                  <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
-                </span>
-                <span class="profile-mode-button__label">None</span>
-                <span class="sr-only">Toggle overlay mode</span>
-              </button>
-              <div id="profileModeMenuList" class="profile-mode-menu__list" role="menu" tabindex="-1"
-                aria-hidden="true">
-                <button type="button" class="profile-mode-menu__item active" data-profile-mode="none"
-                  role="menuitemradio" aria-checked="true">
-                  <span class="profile-mode-menu__text">None</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="slope" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">Slope</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="surface" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">Surface</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="category" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">Difficulty</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="poi" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">POI</span>
-                </button>
-              </div>
-            </div>
-            <div id="profileLegend" class="profile-legend" role="group" aria-label="Route overlay legend"
-              aria-hidden="true" data-ready="false"></div>
-          </div>
+          <button id="toggleElevationButton" class="btn btn--icon btn--icon-only elevation-toggle" type="button"
+            aria-expanded="false" aria-controls="elevationChartBody" aria-label="Toggle elevation chart"
+            title="Toggle elevation chart">
+            <svg class="elevation-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="none" />
+              <path d="M22 6l-5 5-4-4-7 7H2v2h5l6-6 4 4 6-6v5h2V6z" fill="currentColor" />
+            </svg>
+            <span class="sr-only">Toggle elevation chart</span>
+          </button>
           <button id="routingModeToggle" class="btn btn--icon btn--icon-only routing-mode-toggle" type="button"
             data-routing-mode="offline" aria-pressed="true" title="Switch to online routing">
             <img class="routing-mode-toggle__icon" data-icon-id="routing-offline" alt="" aria-hidden="true"
@@ -149,27 +176,6 @@
               to add bivouac splits. Drag markers to adjust the route or double-click via points to remove them.
             </span>
           </button>
-        </div>
-      </div>
-      <div id="routeStats" class="route-stats" aria-live="polite"></div>
-      <div class="directions-body">
-        <div id="elevationCard" class="chart-card" role="group" aria-label="Route elevation overview">
-          <button id="toggleElevationButton" class="chart-card__collapse" type="button" aria-expanded="true"
-            aria-controls="elevationChartBody" aria-label="Hide elevation">
-            <svg class="chart-card__collapse-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                stroke-linejoin="round" />
-            </svg>
-          </button>
-          <div id="elevationChartBody" class="chart-card__body">
-            <div class="chart-card__chart-wrapper">
-              <div class="chart-card__y-axis" id="elevationYAxisLabels">
-                <span class="chart-card__y-max"></span>
-                <span class="chart-card__y-min"></span>
-              </div>
-              <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -999,7 +999,10 @@ const SUMMARY_ICONS = {
   elevation: ELEVATION_ICON,
   slope: SLOPE_ICON,
   time: TIME_ICON,
-  trace: ROUTE_ICON
+  trace: ROUTE_ICON,
+  difficulty: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 18h3v-4H4v4zm5 0h3v-8H9v8zm5 0h3v-6h-3v6zm5 0h3V6h-3v12z"/></svg>',
+  weather: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h.71C7.37 7.69 9.48 6 12 6a5.5 5.5 0 0 1 5.5 5.5v.5H19a3 3 0 0 1 0 6z"/></svg>',
+  waypoint: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>'
 };
 
 // Use the shared bivouac marker PNG so the UI references the canonical asset.
@@ -1795,7 +1798,7 @@ export class DirectionsManager {
     this.elevationCollapseLabel = this.elevationCollapseToggle
       ? this.elevationCollapseToggle.querySelector('.chart-card__collapse-label')
       : null;
-    this.isElevationCollapsed = false;
+    this.isElevationCollapsed = true;
     this.elevationHoverIndicator = null;
     this.elevationHoverLine = null;
     this.infoButton = directionsInfoButton ?? null;
@@ -1937,6 +1940,7 @@ export class DirectionsManager {
     this.setRouter(router ?? null, { deferEnsureReady: deferRouterInitialization });
     this.updateUndoAvailability();
     this.updatePanelVisibilityState();
+    this.updateElevationVisibilityState();
   }
 
   setupRouteLayers() {
@@ -5739,6 +5743,7 @@ export class DirectionsManager {
     const hideContent = !panelVisible || this.isElevationCollapsed;
     if (this.elevationCard) {
       this.elevationCard.classList.toggle('chart-card--collapsed', this.isElevationCollapsed);
+      this.elevationCard.classList.toggle('elevation-section--collapsed', this.isElevationCollapsed);
     }
     if (this.elevationChartBody) {
       this.elevationChartBody.hidden = this.isElevationCollapsed;
@@ -7206,6 +7211,7 @@ export class DirectionsManager {
     this.resetRouteCuts();
     this.detachElevationChartEvents();
     this.elevationChartContainer = null;
+    this.elevationChartTooltip = null;
     this.highlightedElevationBar = null;
     this.lastElevationHoverDistance = null;
     this.draggedBivouacIndex = null;
@@ -8621,6 +8627,80 @@ export class DirectionsManager {
     return `${minutes} min`;
   }
 
+  /**
+   * Format time estimate as a range (e.g., "5-6 hours")
+   */
+  formatEstimatedTimeRange(hours) {
+    if (!Number.isFinite(hours) || hours <= 0) {
+      return '< 1 hour';
+    }
+    // Round to nearest half hour for the lower bound
+    const lowerHours = Math.floor(hours);
+    const upperHours = Math.ceil(hours + 0.5);
+
+    if (lowerHours === upperHours || upperHours - lowerHours < 1) {
+      return `~${lowerHours} hour${lowerHours !== 1 ? 's' : ''}`;
+    }
+    return `${lowerHours}-${upperHours} hours`;
+  }
+
+  /**
+   * Compute difficulty rating for a day segment based on distance, elevation, and way types
+   * Returns: { level: 'Easy'|'Moderate'|'Challenging'|'Difficult'|'Expert', score: 1-5 }
+   */
+  computeDayDifficulty(distanceKm, ascentM, descentM, startKm, endKm) {
+    // Base difficulty from distance and elevation
+    let score = 0;
+
+    // Distance scoring (0-2 points)
+    if (distanceKm <= 8) score += 0;
+    else if (distanceKm <= 15) score += 0.5;
+    else if (distanceKm <= 20) score += 1;
+    else if (distanceKm <= 25) score += 1.5;
+    else score += 2;
+
+    // Elevation gain scoring (0-2 points)
+    const totalElevation = (ascentM || 0) + (descentM || 0);
+    if (totalElevation <= 300) score += 0;
+    else if (totalElevation <= 600) score += 0.5;
+    else if (totalElevation <= 1000) score += 1;
+    else if (totalElevation <= 1500) score += 1.5;
+    else score += 2;
+
+    // Average gradient scoring (0-1 point)
+    const avgGradient = distanceKm > 0 ? (ascentM / (distanceKm * 1000)) * 100 : 0;
+    if (avgGradient <= 5) score += 0;
+    else if (avgGradient <= 10) score += 0.3;
+    else if (avgGradient <= 15) score += 0.6;
+    else score += 1;
+
+    // Clamp to 1-5
+    const finalScore = Math.max(1, Math.min(5, Math.round(score + 1)));
+
+    const levels = ['Easy', 'Moderate', 'Challenging', 'Difficult', 'Expert'];
+    return {
+      level: levels[finalScore - 1] || 'Moderate',
+      score: finalScore
+    };
+  }
+
+  /**
+   * Get key waypoints (POIs) for a specific day segment
+   */
+  getKeyWaypointsForDay(startKm, endKm) {
+    const pois = this.routePointsOfInterest || [];
+    if (!Array.isArray(pois) || !pois.length) {
+      return [];
+    }
+
+    return pois.filter((poi) => {
+      const poiDistance = Number(poi.distanceKm ?? poi.distance);
+      return Number.isFinite(poiDistance) && poiDistance >= startKm && poiDistance <= endKm;
+    }).slice(0, 3).map((poi) => {
+      return poi.name || poi.title || 'Waypoint';
+    });
+  }
+
   getRouteSummaryLabel() {
     const markers = this.computeSegmentMarkers();
     if (Array.isArray(markers) && markers.length >= 2) {
@@ -8671,6 +8751,8 @@ export class DirectionsManager {
     }
 
     if (!metrics) {
+      // Clear the summary cache when clearing stats
+      this._lastSummaryStatsKey = null;
       this.routeStats.innerHTML = '';
       this.routeStats.classList.remove('has-stats', 'is-hover');
       this.routeStats.removeAttribute('data-mode');
@@ -8688,6 +8770,15 @@ export class DirectionsManager {
 
     // Check if we have multiple day segments (bivouac splits)
     const hasMultipleDays = Array.isArray(this.cutSegments) && this.cutSegments.length > 1;
+    const cutSegmentCount = hasMultipleDays ? this.cutSegments.length : 0;
+
+    // Build a unique key from the display values to skip redundant re-renders
+    const summaryStatsKey = `summary|${distanceLabel}|${ascent}|${descent}|${timeLabel}|${cutSegmentCount}|${this.selectedDayIndex ?? 'all'}`;
+    if (this._lastSummaryStatsKey === summaryStatsKey && this.routeStats.getAttribute('data-mode') === 'summary') {
+      // Skip re-render if already showing summary with same values
+      return;
+    }
+    this._lastSummaryStatsKey = summaryStatsKey;
 
     if (hasMultipleDays) {
       this.renderMultiDayTimeline(metrics);
@@ -8703,40 +8794,71 @@ export class DirectionsManager {
 
   renderSimpleStats(metrics, distanceLabel, ascent, descent, timeLabel) {
     const routeLabel = this.getRouteSummaryLabel();
-    const traceValue = routeLabel ? routeLabel : '—';
+    const traceValue = routeLabel ? routeLabel : 'Route';
 
-    const stats = [
-      { key: 'trace', label: 'Route', value: traceValue },
-      { key: 'time', label: 'Est. time', value: timeLabel },
-      { key: 'distance', label: 'Total distance', value: `${distanceLabel} km` },
-      { key: 'ascent', label: 'Total ascent', value: `+${ascent} m` },
-      { key: 'descent', label: 'Total descent', value: `-${descent} m` }
-    ];
+    // Calculate additional data
+    const totalDistanceKm = metrics.distanceKm || 0;
+    const timeHours = this.estimateTravelTimeHours(totalDistanceKm, ascent, descent);
+    const timeRange = this.formatEstimatedTimeRange(timeHours);
+    const difficulty = this.computeDayDifficulty(totalDistanceKm, ascent, descent, 0, totalDistanceKm);
+    const keyWaypoints = this.getKeyWaypointsForDay(0, totalDistanceKm);
+    const waypointsText = keyWaypoints.length > 0 ? keyWaypoints.join(', ') : 'No waypoints';
 
-    const listItems = stats
-      .map(({ key, label, value }) => {
-        const icon = SUMMARY_ICONS[key] ?? '';
-        const iconMarkup = icon ? `${icon}` : '';
-        const safeLabel = escapeHtml(label);
-        const safeValue = escapeHtml(value);
-        return `
-        <li
-          class="summary-item ${key}"
-          aria-label="${safeLabel} ${safeValue}"
-          title="${safeLabel}"
-        >
-          ${iconMarkup}
-          <span aria-hidden="true">${safeValue}</span>
-        </li>
-      `.trim();
-      })
-      .join('');
+    // Build difficulty indicator bars
+    const difficultyBars = Array.from({ length: 5 }, (_, i) =>
+      `<span class="difficulty-bar${i < difficulty.score ? ' filled' : ''}"></span>`
+    ).join('');
+
+    // Icons for summary
+    const timeIcon = SUMMARY_ICONS.time || '';
+    const distanceIcon = SUMMARY_ICONS.distance || '';
+    const ascentIcon = SUMMARY_ICONS.ascent || '';
 
     this.routeStats.innerHTML = `
-      <ul class="route-stats-list">
-        ${listItems}
-      </ul>
-    `;
+    <div class="route-stats__header">
+      <span class="route-stats__title">${escapeHtml(traceValue)}</span>
+      <div class="route-stats__summary">
+        <span class="route-stats__summary-item">
+          ${timeIcon}
+          <span class="route-stats__summary-value">${escapeHtml(timeLabel)}</span>
+        </span>
+        <span class="route-stats__summary-item">
+          ${distanceIcon}
+          <span class="route-stats__summary-value">${escapeHtml(distanceLabel)} km</span>
+        </span>
+        <span class="route-stats__summary-item">
+          ${ascentIcon}
+          <span class="route-stats__summary-value">+${ascent} m</span>
+        </span>
+      </div>
+    </div>
+    <div class="day-details is-visible">
+      <div class="day-details__grid">
+        <div class="day-details__item">
+          <span class="day-details__item-label">Estimated Time:</span>
+          <span class="day-details__item-value">${timeRange}</span>
+        </div>
+        <div class="day-details__item">
+          <span class="day-details__item-label">Difficulty:</span>
+          <span class="day-details__item-value">
+            <span class="difficulty-indicator">${difficultyBars}</span>
+            ${difficulty.level}
+          </span>
+        </div>
+        <div class="day-details__item">
+          <span class="day-details__item-label">Key Waypoints:</span>
+          <span class="day-details__item-value">${escapeHtml(waypointsText)}</span>
+        </div>
+        <div class="day-details__item">
+          <span class="day-details__item-label">Weather:</span>
+          <span class="day-details__item-value">
+            ${SUMMARY_ICONS.weather || ''}
+            Coming soon
+          </span>
+        </div>
+      </div>
+    </div>
+  `;
   }
 
   renderMultiDayTimeline(metrics) {
@@ -8817,49 +8939,80 @@ export class DirectionsManager {
     // Add container class to indicate selection state
     const timelineClass = `day-timeline${hasSelection ? ' has-selection' : ''}`;
 
-    // Selected day details
+    // Selected day details - Enhanced layout matching mockup
     const selectedDay = this.selectedDayIndex !== null && this.selectedDayIndex !== undefined
       ? dayMetrics[this.selectedDayIndex]
       : null;
 
-    const dayDetailsHtml = selectedDay ? `
-      <div class="day-details is-visible">
-        <div class="day-details__header">
-          <span class="day-details__title">Day ${selectedDay.dayNumber}</span>
-          ${selectedDay.bivouacName ? `<span class="day-details__bivouac">→ ${escapeHtml(selectedDay.bivouacName)}</span>` : ''}
+    let dayDetailsHtml = '<div class="day-details"></div>';
+
+    if (selectedDay) {
+      // Compute additional data for selected day
+      const timeRange = this.formatEstimatedTimeRange(selectedDay.timeHours);
+      const difficulty = this.computeDayDifficulty(
+        selectedDay.distanceKm,
+        selectedDay.ascent,
+        selectedDay.descent,
+        selectedDay.startKm,
+        selectedDay.endKm
+      );
+      const keyWaypoints = this.getKeyWaypointsForDay(selectedDay.startKm, selectedDay.endKm);
+      const waypointsText = keyWaypoints.length > 0
+        ? keyWaypoints.join(', ')
+        : 'No waypoints';
+
+      // Build difficulty indicator bars
+      const difficultyBars = Array.from({ length: 5 }, (_, i) =>
+        `<span class="difficulty-bar${i < difficulty.score ? ' filled' : ''}"></span>`
+      ).join('');
+
+      dayDetailsHtml = `
+        <div class="day-details is-visible">
+          <div class="day-details__header">
+            <span class="day-details__title">Day ${selectedDay.dayNumber}</span>
+          </div>
+          <div class="day-details__grid">
+            <div class="day-details__item">
+              <span class="day-details__item-label">Estimated Time:</span>
+              <span class="day-details__item-value">${timeRange}</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Difficulty:</span>
+              <span class="day-details__item-value">
+                <span class="difficulty-indicator">${difficultyBars}</span>
+                ${difficulty.level}
+              </span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Key Waypoints:</span>
+              <span class="day-details__item-value">${escapeHtml(waypointsText)}</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Weather:</span>
+              <span class="day-details__item-value">
+                ${SUMMARY_ICONS.weather ?? ''}
+                <span>Coming soon</span>
+              </span>
+            </div>
+          </div>
         </div>
-        <div class="day-details__metrics">
-          <span class="day-details__metric">
-            ${SUMMARY_ICONS.time ?? ''}
-            <span class="day-details__metric-value">${this.formatDurationHours(selectedDay.timeHours)}</span>
-          </span>
-          <span class="day-details__metric">
-            ${SUMMARY_ICONS.distance ?? ''}
-            <span class="day-details__metric-value">${this.formatDistance(selectedDay.distanceKm)} km</span>
-          </span>
-          <span class="day-details__metric">
-            ${SUMMARY_ICONS.ascent ?? ''}
-            <span class="day-details__metric-value">+${selectedDay.ascent} m</span>
-          </span>
-          <span class="day-details__metric">
-            ${SUMMARY_ICONS.descent ?? ''}
-            <span class="day-details__metric-value">-${selectedDay.descent} m</span>
-          </span>
-        </div>
-      </div>
-    ` : '<div class="day-details"></div>';
+      `;
+    }
 
     this.routeStats.innerHTML = `
       <div class="route-stats__header">
         <span class="route-stats__title">Trek Planner</span>
         <div class="route-stats__summary">
           <span class="route-stats__summary-item">
+            ${SUMMARY_ICONS.time ?? ''}
             <span class="route-stats__summary-value">${totalTime}</span>
           </span>
           <span class="route-stats__summary-item">
+            ${SUMMARY_ICONS.distance ?? ''}
             <span class="route-stats__summary-value">${totalDistance} km</span>
           </span>
           <span class="route-stats__summary-item">
+            ${SUMMARY_ICONS.ascent ?? ''}
             <span class="route-stats__summary-value">+${totalAscent} m</span>
           </span>
         </div>
@@ -9211,112 +9364,100 @@ export class DirectionsManager {
   }
 
   updateRouteStatsHover(distanceKm) {
-    if (!this.routeStats) {
-      return;
-    }
+    // Instead of updating the route stats panel, show a tooltip on the chart
+    // This prevents layout shifts and keeps the day details visible
 
     if (!Number.isFinite(distanceKm)) {
-      const summaryMetrics = this.latestMetrics
-        ?? (this.routeGeojson ? this.calculateRouteMetrics(this.routeGeojson) : null);
-      if (summaryMetrics) {
-        this.latestMetrics = summaryMetrics;
-      }
-      this.renderRouteStatsSummary(summaryMetrics ?? null);
+      // Hide chart tooltip when not hovering
+      this.hideElevationChartTooltip();
       return;
     }
 
     if (!this.routeProfile || !Array.isArray(this.routeProfile.coordinates)
       || this.routeProfile.coordinates.length < 2) {
-      const fallbackMetrics = this.latestMetrics
-        ?? (this.routeGeojson ? this.calculateRouteMetrics(this.routeGeojson) : null);
-      if (fallbackMetrics) {
-        this.latestMetrics = fallbackMetrics;
-      }
-      this.renderRouteStatsSummary(fallbackMetrics ?? null);
+      this.hideElevationChartTooltip();
       return;
     }
 
-    const cutSegment = this.getCutSegmentForDistance(distanceKm);
-    const profileSegment = this.getProfileSegmentForDistance(distanceKm);
+    // Get elevation and grade at this distance
+    const elevation = this.getElevationAtDistance(distanceKm);
+    const grade = this.computeGradeAtDistance(distanceKm);
+    const totalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
 
-    const segmentStartKm = (() => {
-      const rawStart = Number(cutSegment?.startKm);
-      if (!Number.isFinite(rawStart)) {
-        return 0;
-      }
-      return Math.max(0, Math.min(distanceKm, rawStart));
-    })();
+    // Show tooltip on the elevation chart
+    this.showElevationChartTooltip(distanceKm, elevation, grade, totalDistance);
+  }
 
-    const segmentMetrics = this.computeCumulativeMetrics(distanceKm, segmentStartKm);
-    const distanceLabel = this.formatDistance(segmentMetrics.distanceKm);
-    const ascent = Math.max(0, Math.round(segmentMetrics.ascent));
-    const descent = Math.max(0, Math.round(segmentMetrics.descent));
-    const timeLabel = this.formatDurationHours(
-      this.estimateTravelTimeHours(segmentMetrics.distanceKm, ascent, descent)
-    );
-
-    const segmentLabelParts = [];
-    if (typeof cutSegment?.name === 'string' && cutSegment.name.trim()) {
-      segmentLabelParts.push(cutSegment.name.trim());
+  ensureElevationChartTooltip() {
+    if (this.elevationChartTooltip) {
+      return this.elevationChartTooltip;
     }
-    if (profileSegment?.name) {
-      const definition = this.getProfileModeDefinition(this.profileMode);
-      const modeLabel = definition?.label ? `${definition.label}: ` : '';
-      const profileLabel = `${modeLabel}${profileSegment.name}`;
-      if (!segmentLabelParts.includes(profileLabel)) {
-        segmentLabelParts.push(profileLabel);
-      }
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'elevation-chart-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.display = 'none';
+
+    // Append to elevation chart container if available, otherwise to body
+    if (this.elevationChartContainer) {
+      this.elevationChartContainer.appendChild(tooltip);
+    } else if (this.elevationChart) {
+      this.elevationChart.appendChild(tooltip);
     }
-    const segmentLabel = segmentLabelParts.join(' · ');
 
-    const stats = [
-      { key: 'trace', label: 'Segment', value: segmentLabel || '—' },
-      { key: 'time', label: 'Segment time', value: timeLabel },
-      { key: 'distance', label: 'Segment distance', value: `${distanceLabel} km` },
-      { key: 'ascent', label: 'Segment ascent', value: `D+ ${ascent} m` },
-      { key: 'descent', label: 'Segment descent', value: `D- ${descent} m` }
-    ];
+    this.elevationChartTooltip = tooltip;
+    return tooltip;
+  }
 
-    const listItems = stats
-      .map(({ key, label, value }) => {
-        const icon = SUMMARY_ICONS[key] ?? '';
-        const iconMarkup = icon ? `${icon}` : '';
-        const safeLabel = escapeHtml(label);
-        const safeValue = escapeHtml(value);
-        return `
-        <li
-          class="summary-item ${key}"
-          aria-label="${safeLabel} ${safeValue}"
-          title="${safeLabel}"
-        >
-          ${iconMarkup}
-          <span aria-hidden="true">${safeValue}</span>
-        </li>
-      `.trim();
-      })
-      .join('');
-
-    const srParts = [];
-    if (segmentLabel) {
-      srParts.push(`Segment: ${segmentLabel}`);
+  showElevationChartTooltip(distanceKm, elevation, grade, totalDistance) {
+    if (!this.elevationChartContainer) {
+      return;
     }
-    srParts.push(
-      `Distance: ${distanceLabel} km`,
-      `Ascent: ${ascent} m`,
-      `Descent: ${descent} m`,
-      `Estimated time: ${timeLabel}`
-    );
-    const srText = `${srParts.join('. ')}.`;
 
-    this.routeStats.innerHTML = `
-      <span class="sr-only">${escapeHtml(srText)}</span>
-      <ul class="route-stats-list">
-        ${listItems}
-      </ul>
+    const tooltip = this.ensureElevationChartTooltip();
+
+    // Calculate horizontal position based on distance
+    let domainMin = Number(this.elevationDomain?.min);
+    let domainMax = Number(this.elevationDomain?.max);
+    if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+      domainMin = 0;
+      domainMax = totalDistance;
+    }
+
+    const span = domainMax - domainMin;
+    if (!(span > 0)) {
+      return;
+    }
+
+    const ratio = (distanceKm - domainMin) / span;
+    const clampedRatio = Math.max(0, Math.min(1, ratio));
+    const percent = clampedRatio * 100;
+
+    // Format labels
+    const distanceLabel = this.formatDistance(distanceKm);
+    const elevationLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : '—';
+    const gradeLabel = Number.isFinite(grade) ? `${grade > 0 ? '+' : ''}${grade.toFixed(1)}%` : '—';
+
+    tooltip.innerHTML = `
+      <div class="elevation-chart-tooltip__distance">${escapeHtml(distanceLabel)} km</div>
+      <div class="elevation-chart-tooltip__details">
+        <span class="elevation-chart-tooltip__elevation">Alt. ${escapeHtml(elevationLabel)}</span>
+        <span class="elevation-chart-tooltip__grade">${escapeHtml(gradeLabel)}</span>
+      </div>
     `;
-    this.routeStats.classList.add('has-stats', 'is-hover');
-    this.routeStats.setAttribute('data-mode', 'hover');
-    this.isRouteStatsHoverActive = true;
+
+    // Position tooltip - centered on the hover line, above the chart
+    tooltip.style.left = `${percent}%`;
+    tooltip.style.display = 'block';
+    tooltip.setAttribute('aria-hidden', 'false');
+  }
+
+  hideElevationChartTooltip() {
+    if (this.elevationChartTooltip) {
+      this.elevationChartTooltip.style.display = 'none';
+      this.elevationChartTooltip.setAttribute('aria-hidden', 'true');
+    }
   }
 
   updateStats(route) {

@@ -325,15 +325,15 @@ body {
 
 .routing-mode-toggle.btn--icon-only {
   flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  padding: 10px;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
   gap: 0;
 }
 
 .routing-mode-toggle__icon {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
 }
 
@@ -435,8 +435,8 @@ body {
 
 .profile-mode-menu__list {
   position: absolute;
-  bottom: calc(100% + 12px);
-  left: 50%;
+  top: calc(100% + 8px);
+  left: 0;
   display: none;
   flex-direction: column;
   gap: 4px;
@@ -447,7 +447,6 @@ body {
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(12px);
   z-index: 100;
-  transform: translateX(-50%);
   min-width: 100%;
 }
 
@@ -520,8 +519,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border-radius: var(--glass-radius);
   border: 1px solid var(--glass-border);
@@ -533,8 +532,8 @@ body {
 }
 
 .debug-network-control img {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
 }
@@ -562,8 +561,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius);
@@ -571,7 +570,7 @@ body {
   box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
   color: rgba(12, 24, 36, 0.92);
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
   backdrop-filter: blur(var(--glass-blur));
 }
 
@@ -586,8 +585,8 @@ body {
 }
 
 .icon-button svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: currentColor;
 }
 
@@ -616,7 +615,8 @@ body {
 
 .directions-control {
   display: none;
-  max-width: min(920px, calc(100vw - 24px));
+  width: 100%;
+  max-width: min(1600px, calc(100vw - 24px));
   margin-inline: auto;
   background: var(--glass-surface);
   border-radius: max(var(--glass-radius), 18px);
@@ -635,7 +635,7 @@ body {
 .directions-control.visible {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .directions-swipe-handle {
@@ -685,14 +685,24 @@ body {
 
 .transport-modes .btn {
   flex: 0 0 auto;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 8px !important;
+}
+
+.transport-modes .btn img {
+  width: 18px !important;
+  height: 18px !important;
 }
 
 /* Route mode toggle button - copy exact styling from .routing-mode-toggle.btn--icon-only */
 .route-mode-toggle {
   flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  padding: 10px;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
   gap: 0;
   position: relative;
   display: inline-flex;
@@ -706,8 +716,8 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   transition: opacity 0.2s ease;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
 }
 
@@ -728,11 +738,30 @@ body {
   align-items: center;
   justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
-.directions-actions .btn {
+.directions-actions .btn,
+.directions-actions .icon-button,
+.directions-actions>button {
   flex: 0 0 auto;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px;
+  min-height: 36px;
+  max-width: 36px;
+  max-height: 36px;
+  padding: 8px !important;
+}
+
+.directions-actions .btn img,
+.directions-actions .btn svg,
+.directions-actions .icon-button img,
+.directions-actions .icon-button svg,
+.directions-actions>button img,
+.directions-actions>button svg {
+  width: 18px !important;
+  height: 18px !important;
 }
 
 .directions-body {
@@ -741,6 +770,60 @@ body {
   gap: 16px;
 }
 
+/* Elevation section - integrated into main panel */
+.elevation-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-radius: 16px;
+  background: rgba(17, 34, 48, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.08);
+  position: relative;
+  order: -1;
+  /* Ensure it stays at the top */
+}
+
+.elevation-section--collapsed {
+  display: none;
+}
+
+.elevation-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.elevation-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+}
+
+.elevation-section__chart-wrapper {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+.elevation-section__y-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 2px 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(17, 34, 48, 0.5);
+  min-width: 48px;
+  flex-shrink: 0;
+}
+
+/* Legacy chart-card styles kept for compatibility */
 .chart-card {
   display: flex;
   flex-direction: column;
@@ -844,12 +927,59 @@ body {
   transform: rotate(180deg);
 }
 
-.chart-card--collapsed .chart-card__body {
+.chart-card--collapsed {
   display: none;
 }
 
-.chart-card--collapsed {
-  padding: 12px 20px;
+/* Chart card header with profile mode controls */
+.chart-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(17, 34, 48, 0.06);
+}
+
+.chart-card__header .profile-mode-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Elevation toggle button in header actions */
+.elevation-toggle {
+  position: relative;
+}
+
+.elevation-toggle__icon {
+  width: 20px;
+  height: 20px;
+}
+
+.elevation-toggle[aria-expanded="false"] {
+  opacity: 0.6;
+}
+
+.elevation-toggle[aria-expanded="false"]:hover {
+  opacity: 1;
+}
+
+/* Compact profile mode button on chart */
+.profile-mode-button--compact {
+  padding: 6px 10px;
+  font-size: 11px;
+  gap: 5px;
+}
+
+.profile-mode-button--compact .profile-mode-button__icon {
+  width: 16px;
+  height: 16px;
+}
+
+.profile-mode-button--compact .profile-mode-button__icon img {
+  width: 14px;
+  height: 14px;
 }
 
 .chart-card__meta {
@@ -932,6 +1062,14 @@ body {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+}
+
+.route-stats__summary-item svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  opacity: 0.65;
+  flex-shrink: 0;
 }
 
 .route-stats__summary-value {
@@ -1149,6 +1287,93 @@ body {
   color: rgba(17, 34, 48, 0.9);
 }
 
+/* Enhanced day details grid layout */
+.day-details__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px 20px;
+  padding-top: 6px;
+}
+
+.day-details__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.day-details__item-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(17, 34, 48, 0.55);
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.day-details__item-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(17, 34, 48, 0.9);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.day-details__item-value svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+/* Difficulty indicator bars */
+.difficulty-indicator {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  margin-right: 4px;
+}
+
+.difficulty-bar {
+  width: 4px;
+  background: rgba(17, 34, 48, 0.15);
+  border-radius: 1px;
+  transition: background 0.2s ease;
+}
+
+.difficulty-bar:nth-child(1) {
+  height: 4px;
+}
+
+.difficulty-bar:nth-child(2) {
+  height: 6px;
+}
+
+.difficulty-bar:nth-child(3) {
+  height: 8px;
+}
+
+.difficulty-bar:nth-child(4) {
+  height: 10px;
+}
+
+.difficulty-bar:nth-child(5) {
+  height: 12px;
+}
+
+.difficulty-bar.filled {
+  background: #e67e22;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .day-details__grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+  }
+}
+
 /* Bivouac hover popup */
 .bivouac-popup-container {
   z-index: 100;
@@ -1238,8 +1463,8 @@ body {
 
 .profile-legend {
   position: absolute;
-  bottom: calc(100% + 12px);
-  left: 50%;
+  top: calc(100% + 8px);
+  left: 0;
   padding: 12px 16px;
   border-radius: 12px;
   background: rgba(245, 248, 252, 0.94);
@@ -1251,8 +1476,8 @@ body {
   min-width: min(200px, calc(100vw - 48px));
   opacity: 0;
   visibility: hidden;
-  transform: translate(-50%, 8px);
-  transform-origin: top center;
+  transform: translateY(-8px);
+  transform-origin: top left;
   transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
   pointer-events: none;
   z-index: 100;
@@ -1265,7 +1490,7 @@ body {
 .profile-legend[aria-hidden="false"] {
   opacity: 1;
   visibility: visible;
-  transform: translate(-50%, 0);
+  transform: translateY(0);
   pointer-events: auto;
   transition-delay: 0s;
 }
@@ -1482,6 +1707,54 @@ body {
   left: 0;
   transform: translateX(-50%);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.65);
+}
+
+/* Elevation chart tooltip - shown on hover */
+.elevation-chart-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(17, 34, 48, 0.92);
+  color: #f6fbff;
+  font: 11px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  padding: 6px 10px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+
+.elevation-chart-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px;
+  border-style: solid;
+  border-color: rgba(17, 34, 48, 0.92) transparent transparent transparent;
+}
+
+.elevation-chart-tooltip__distance {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.elevation-chart-tooltip__details {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.elevation-chart-tooltip__elevation,
+.elevation-chart-tooltip__grade {
+  font-variant-numeric: tabular-nums;
 }
 
 .elevation-bar {
@@ -1894,8 +2167,8 @@ body {
 }
 
 .btn--icon img {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
 }
@@ -1912,16 +2185,16 @@ body {
 }
 
 .btn--icon-only {
-  padding: 10px;
-  width: 44px;
-  height: 44px;
+  padding: 8px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--glass-radius);
   gap: 0;
 }
 
 .btn--icon-only img {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
 }
 
 .terrain-controls .btn {
