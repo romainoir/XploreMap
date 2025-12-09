@@ -8,7 +8,8 @@ const EMPTY_COLLECTION = {
 
 const MODE_COLORS = {
   'foot-hiking': '#f8b40b',
-  manual: '#2d7bd6'
+  // Manual mode uses the same color as foot-hiking - only the line style differs (dotted)
+  manual: '#f8b40b'
 };
 
 const HOVER_PIXEL_TOLERANCE = 12;
@@ -1951,6 +1952,8 @@ export class DirectionsManager {
     };
 
     removeLayer('route-line');
+    removeLayer('route-line-manual');
+    removeLayer('route-line-manual-bg');
     removeLayer('route-segment-hover');
     removeLayer('distance-markers');
     removeLayer('waypoint-hover-drag');
@@ -1963,6 +1966,7 @@ export class DirectionsManager {
     removeLayer(ROUTE_POI_LAYER_ID);
 
     removeSource('route-line-source');
+    removeSource('route-manual-source');
     removeSource('route-segments-source');
     removeSource('distance-markers-source');
     removeSource('route-hover-point-source');
@@ -2035,6 +2039,46 @@ export class DirectionsManager {
     if (this.routeLineGradientSupported) {
       this.setRouteLineGradient();
     }
+
+    // Add source for manual route segments (dotted overlay)
+    this.map.addSource('route-manual-source', {
+      type: 'geojson',
+      data: EMPTY_COLLECTION
+    });
+
+    // Add white background for manual route segments (for contrast)
+    this.map.addLayer({
+      id: 'route-line-manual-bg',
+      type: 'line',
+      source: 'route-manual-source',
+      layout: {
+        'line-join': 'round',
+        'line-cap': 'round'
+      },
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': 6,
+        'line-opacity': 0.9
+      }
+    });
+
+    // Add manual route line layer with dotted pattern on top
+    this.map.addLayer({
+      id: 'route-line-manual',
+      type: 'line',
+      source: 'route-manual-source',
+      layout: {
+        'line-join': 'round',
+        'line-cap': 'round'
+      },
+      paint: {
+        // Use data-driven color from feature properties to match day/segment colors
+        'line-color': ['coalesce', ['get', 'color'], this.modeColors['manual'] || '#f8b40b'],
+        'line-width': 4,
+        'line-opacity': 1,
+        'line-dasharray': [2, 2]
+      }
+    });
 
     this.map.addLayer({
       id: 'route-segment-hover',
@@ -2316,9 +2360,14 @@ export class DirectionsManager {
 
     this.transportModes.forEach((button) => {
       button.addEventListener('click', () => {
-        const mode = button.dataset.mode;
-        if (!mode || mode === this.currentMode) return;
-        this.setTransportMode(mode);
+        // Toggle between snap and manual modes
+        const currentMode = button.dataset.mode || this.currentMode;
+        const newMode = currentMode === 'manual' ? 'foot-hiking' : 'manual';
+        button.dataset.mode = newMode;
+        button.setAttribute('aria-pressed', newMode === 'foot-hiking' ? 'true' : 'false');
+        button.setAttribute('aria-label', newMode === 'manual' ? 'Manual line' : 'Snap to trails');
+        button.setAttribute('title', newMode === 'manual' ? 'Manual line' : 'Snap to trails');
+        this.setTransportMode(newMode);
       });
     });
 
@@ -3732,6 +3781,8 @@ export class DirectionsManager {
     this.assignSegmentNames();
     this.updateSegmentMarkers();
     this.updateDistanceMarkers(this.routeGeojson);
+    // Update manual route overlay colors to match day segment colors
+    this.updateManualRouteSource();
   }
 
   computeCutBoundaries() {
@@ -4266,6 +4317,8 @@ export class DirectionsManager {
     this.cutSegments = segments;
     this.assignSegmentNames();
     this.updateSegmentMarkers();
+    // Update manual route overlay colors to match day segment colors
+    this.updateManualRouteSource();
   }
 
   buildExportFeatureCollection() {
@@ -4885,6 +4938,8 @@ export class DirectionsManager {
     this.updateDistanceMarkers(this.routeGeojson);
     this.updateWaypoints();
     this.notifyRouteSegmentsUpdated();
+    // Ensure manual route overlay colors are refreshed with the final cutSegments
+    this.updateManualRouteSource();
   }
 
   getCutSegmentForDistance(distanceKm) {
@@ -7509,14 +7564,9 @@ export class DirectionsManager {
       this.notifyRouteSegmentsUpdated();
     }
     this.updateWaypoints();
-    if (this.waypoints.length >= 2) {
-      const preserveExistingRoute = mode === 'manual' && previousMode !== 'manual';
-      if (!preserveExistingRoute) {
-        const lastLegIndex = Math.max(0, this.waypoints.length - 2);
-        this.invalidateCachedLegSegments({ startIndex: lastLegIndex });
-        this.getRoute();
-      }
-    }
+    // Mode switching should NOT recalculate existing route segments
+    // The mode only affects how NEW segments are created when adding waypoints
+    // Existing segments (whether snapped or manual) should be preserved
   }
 
   cacheRouteLegSegments() {
@@ -7563,6 +7613,9 @@ export class DirectionsManager {
       : [];
     const segmentMetadataSource = Array.isArray(this.routeGeojson?.properties?.segment_metadata)
       ? this.routeGeojson.properties.segment_metadata
+      : [];
+    const segmentModes = Array.isArray(this.routeGeojson?.properties?.segment_modes)
+      ? this.routeGeojson.properties.segment_modes
       : [];
 
     for (let waypointIndex = 0; waypointIndex < normalizedWaypoints.length - 1; waypointIndex += 1) {
@@ -7629,6 +7682,11 @@ export class DirectionsManager {
           .filter((entry) => entry && !isConnectorMetadataSource(entry.source))
         : [];
 
+      // Store the routing mode used for this segment
+      // Use segment_modes array if available, otherwise default to foot-hiking (snap mode)
+      // The segment_modes array from the router is the authoritative source
+      const segmentMode = segmentModes[waypointIndex] || 'foot-hiking';
+
       segments.set(waypointIndex, {
         startIndex: waypointIndex,
         endIndex: waypointIndex + 1,
@@ -7637,29 +7695,262 @@ export class DirectionsManager {
         duration,
         ascent,
         descent,
-        metadata: metadataEntries
+        metadata: metadataEntries,
+        routingMode: segmentMode
       });
 
       searchStart = endIndex;
     }
 
     this.cachedLegSegments = segments;
+    this.updateManualRouteSource();
+  }
+
+  updateManualRouteSource() {
+    const source = this.map.getSource('route-manual-source');
+    if (!source) {
+      return;
+    }
+
+    if (!(this.cachedLegSegments instanceof Map) || !this.cachedLegSegments.size) {
+      source.setData(EMPTY_COLLECTION);
+      return;
+    }
+
+    const features = [];
+    const fallbackColor = this.modeColors[this.currentMode] || '#f8b40b';
+
+    // Build cumulative distances for legs from routeGeojson segments
+    const routeSegments = this.routeGeojson?.properties?.segments;
+    const legCumulativeDistances = [0];
+    if (Array.isArray(routeSegments)) {
+      let cumulative = 0;
+      routeSegments.forEach((seg) => {
+        // distance is in meters
+        const distanceKm = (Number(seg?.distance) || 0) / 1000;
+        cumulative += distanceKm;
+        legCumulativeDistances.push(cumulative);
+      });
+    }
+
+    // Helper to compute distance for a coordinate array
+    const computeSegmentDistances = (coords) => {
+      const distances = [0];
+      for (let i = 1; i < coords.length; i++) {
+        const prev = coords[i - 1];
+        const curr = coords[i];
+        const segDist = haversineDistanceMeters(prev, curr) / 1000;
+        distances.push(distances[distances.length - 1] + (Number.isFinite(segDist) ? segDist : 0));
+      }
+      return distances;
+    };
+
+    // Helper to interpolate a point on a segment
+    const interpolatePoint = (p1, p2, t) => {
+      const lng = p1[0] + (p2[0] - p1[0]) * t;
+      const lat = p1[1] + (p2[1] - p1[1]) * t;
+      if (p1.length > 2 && p2.length > 2 && Number.isFinite(p1[2]) && Number.isFinite(p2[2])) {
+        return [lng, lat, p1[2] + (p2[2] - p1[2]) * t];
+      }
+      return [lng, lat];
+    };
+
+    // Helper to extract coordinates from startDist to endDist
+    const extractCoordsInRange = (coords, cumulativeDists, rangeStart, rangeEnd) => {
+      const result = [];
+      const totalDist = cumulativeDists[cumulativeDists.length - 1] || 0;
+
+      // Clamp range to valid values
+      const clampedStart = Math.max(0, rangeStart);
+      const clampedEnd = Math.min(totalDist, rangeEnd);
+
+      if (clampedStart >= clampedEnd || coords.length < 2) {
+        return result;
+      }
+
+      // Find the segment containing the start point and add interpolated start
+      let startAdded = false;
+      for (let i = 0; i < coords.length - 1; i++) {
+        const d1 = cumulativeDists[i];
+        const d2 = cumulativeDists[i + 1];
+
+        if (d1 <= clampedStart && clampedStart <= d2) {
+          const segLen = d2 - d1;
+          if (segLen > 0) {
+            const t = (clampedStart - d1) / segLen;
+            result.push(interpolatePoint(coords[i], coords[i + 1], t));
+          } else {
+            result.push(coords[i].slice());
+          }
+          startAdded = true;
+          break;
+        }
+      }
+
+      // If start wasn't added (edge case), add the first coord
+      if (!startAdded && clampedStart <= 0) {
+        result.push(coords[0].slice());
+      }
+
+      // Add all intermediate vertices that fall strictly within the range
+      for (let i = 1; i < coords.length - 1; i++) {
+        const d = cumulativeDists[i];
+        if (d > clampedStart && d < clampedEnd) {
+          result.push(coords[i].slice());
+        }
+      }
+
+      // Find the segment containing the end point and add interpolated end
+      for (let i = 0; i < coords.length - 1; i++) {
+        const d1 = cumulativeDists[i];
+        const d2 = cumulativeDists[i + 1];
+
+        if (d1 <= clampedEnd && clampedEnd <= d2) {
+          const segLen = d2 - d1;
+          if (segLen > 0) {
+            const t = (clampedEnd - d1) / segLen;
+            const endPoint = interpolatePoint(coords[i], coords[i + 1], t);
+            // Avoid duplicate if end point is same as last added
+            const last = result[result.length - 1];
+            if (!last || Math.abs(last[0] - endPoint[0]) > 1e-8 || Math.abs(last[1] - endPoint[1]) > 1e-8) {
+              result.push(endPoint);
+            }
+          }
+          break;
+        }
+      }
+
+      // If end wasn't added (edge case at total distance), add the last coord
+      if (result.length > 0 && clampedEnd >= totalDist) {
+        const lastCoord = coords[coords.length - 1];
+        const last = result[result.length - 1];
+        if (!last || Math.abs(last[0] - lastCoord[0]) > 1e-8 || Math.abs(last[1] - lastCoord[1]) > 1e-8) {
+          result.push(lastCoord.slice());
+        }
+      }
+
+      return result;
+    };
+
+    for (const segment of this.cachedLegSegments.values()) {
+      if (!segment || segment.routingMode !== 'manual') {
+        continue;
+      }
+      const coordinates = Array.isArray(segment.coordinates)
+        ? segment.coordinates.filter((coord) => Array.isArray(coord) && coord.length >= 2)
+        : [];
+      if (coordinates.length < 2) {
+        continue;
+      }
+
+      // Get the cumulative distance range for this leg
+      const legIndex = segment.startIndex;
+      const legStartKm = legCumulativeDistances[legIndex] || 0;
+      const legEndKm = legCumulativeDistances[legIndex + 1] || legStartKm;
+
+      // Build cumulative distances within this leg's coordinates
+      const localDistances = computeSegmentDistances(coordinates);
+      const legLength = localDistances[localDistances.length - 1] || 0;
+
+      // If no cut segments or leg has no length, use fallback
+      if (!Array.isArray(this.cutSegments) || this.cutSegments.length === 0 || legLength <= 0) {
+        features.push({
+          type: 'Feature',
+          properties: { legIndex, color: fallbackColor },
+          geometry: { type: 'LineString', coordinates }
+        });
+        continue;
+      }
+
+      // Find which cut segments overlap this leg
+      const overlappingCuts = this.cutSegments.filter((cut) => {
+        const cutStart = Number(cut.startKm ?? 0);
+        const cutEnd = Number(cut.endKm ?? cutStart);
+        return cutEnd > legStartKm && cutStart < legEndKm;
+      });
+
+      if (overlappingCuts.length === 0) {
+        // No overlaps, use first cut segment color or fallback
+        const firstCut = this.getCutSegmentForDistance(legStartKm);
+        features.push({
+          type: 'Feature',
+          properties: { legIndex, color: firstCut?.color || fallbackColor },
+          geometry: { type: 'LineString', coordinates }
+        });
+        continue;
+      }
+
+      // Split the leg at each cut boundary
+      // We need to scale because local distances may not exactly match global leg distance
+      const globalLegLength = legEndKm - legStartKm;
+      const scaleFactor = globalLegLength > 0 && legLength > 0 ? legLength / globalLegLength : 1;
+
+      overlappingCuts.forEach((cut) => {
+        const cutStart = Math.max(legStartKm, Number(cut.startKm ?? 0));
+        const cutEnd = Math.min(legEndKm, Number(cut.endKm ?? legEndKm));
+
+        // Convert global distances to local distances within the leg, scaled appropriately
+        const localStart = (cutStart - legStartKm) * scaleFactor;
+        const localEnd = (cutEnd - legStartKm) * scaleFactor;
+
+        // Extract the coordinates for this portion
+        let portionCoords = extractCoordsInRange(coordinates, localDistances, localStart, localEnd);
+
+        // Fallback: if extraction failed but we have a valid range, interpolate directly
+        if (portionCoords.length < 2 && localEnd > localStart && legLength > 0) {
+          const tStart = localStart / legLength;
+          const tEnd = localEnd / legLength;
+          // For a simple 2-point leg, interpolate the points
+          if (coordinates.length === 2) {
+            const startPt = interpolatePoint(coordinates[0], coordinates[1], tStart);
+            const endPt = interpolatePoint(coordinates[0], coordinates[1], tEnd);
+            portionCoords = [startPt, endPt];
+          } else {
+            // For multi-point legs, try to get at least start and end
+            const startPt = interpolatePoint(coordinates[0], coordinates[coordinates.length - 1], tStart);
+            const endPt = interpolatePoint(coordinates[0], coordinates[coordinates.length - 1], tEnd);
+            portionCoords = [startPt, endPt];
+          }
+        }
+
+        if (portionCoords.length >= 2) {
+          features.push({
+            type: 'Feature',
+            properties: { legIndex, color: cut.color || fallbackColor },
+            geometry: { type: 'LineString', coordinates: portionCoords }
+          });
+        }
+      });
+    }
+
+    if (!features.length) {
+      source.setData(EMPTY_COLLECTION);
+      return;
+    }
+
+    source.setData({
+      type: 'FeatureCollection',
+      features
+    });
   }
 
   invalidateCachedLegSegments(options = null) {
     if (!(this.cachedLegSegments instanceof Map)) {
       this.cachedLegSegments = new Map();
+      this.updateManualRouteSource();
       return;
     }
 
     if (!options) {
       this.cachedLegSegments.clear();
+      this.updateManualRouteSource();
       return;
     }
 
     const { startIndex, endIndex } = options;
     if (!Number.isInteger(startIndex) && !Number.isInteger(endIndex)) {
       this.cachedLegSegments.clear();
+      this.updateManualRouteSource();
       return;
     }
 
@@ -7668,6 +7959,7 @@ export class DirectionsManager {
     for (let index = start; index <= finish; index += 1) {
       this.cachedLegSegments.delete(index);
     }
+    this.updateManualRouteSource();
   }
 
   shiftCachedLegSegments(startIndex, delta) {
@@ -7766,7 +8058,8 @@ export class DirectionsManager {
         duration,
         ascent,
         descent,
-        metadata
+        metadata,
+        routingMode: segment.routingMode || null
       });
     }
 
@@ -8098,7 +8391,7 @@ export class DirectionsManager {
 
   formatDistance(distanceKm) {
     if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
-      return '0.0';
+      return '0';
     }
     if (distanceKm >= 100) {
       return Math.round(distanceKm).toString();
@@ -8107,6 +8400,20 @@ export class DirectionsManager {
       return distanceKm.toFixed(1);
     }
     return parseFloat(distanceKm.toFixed(2)).toString();
+  }
+
+  // Format distance for chart axis with 0.5 km discretization
+  formatAxisDistance(distanceKm) {
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+      return '0';
+    }
+    // Round to nearest 0.5
+    const rounded = Math.round(distanceKm * 2) / 2;
+    // Format: show .5 when needed, otherwise whole number
+    if (rounded % 1 === 0.5) {
+      return rounded.toFixed(1);
+    }
+    return Math.round(rounded).toString();
   }
 
   computeAxisTicks(minValue, maxValue, maxTicks = 6) {
@@ -8597,13 +8904,21 @@ export class DirectionsManager {
     if (!this.fullRouteDomain && this.elevationDomain) {
       this.fullRouteDomain = { ...this.elevationDomain };
     }
+    // Store full route Y-axis if not already stored
+    if (!this.fullRouteYAxis && this.elevationYAxis) {
+      this.fullRouteYAxis = { ...this.elevationYAxis };
+    }
 
     if (dayIndex === null || dayIndex === undefined) {
       // Restore full route view
       if (this.fullRouteDomain) {
         this.elevationDomain = { ...this.fullRouteDomain };
       }
+      if (this.fullRouteYAxis) {
+        this.elevationYAxis = { ...this.fullRouteYAxis };
+      }
       this.updateElevationChartView();
+      this.updateElevationYAxisLabels();
       return;
     }
 
@@ -8614,7 +8929,11 @@ export class DirectionsManager {
       if (this.fullRouteDomain) {
         this.elevationDomain = { ...this.fullRouteDomain };
       }
+      if (this.fullRouteYAxis) {
+        this.elevationYAxis = { ...this.fullRouteYAxis };
+      }
       this.updateElevationChartView();
+      this.updateElevationYAxisLabels();
       return;
     }
 
@@ -8633,7 +8952,38 @@ export class DirectionsManager {
       span: paddedEnd - paddedStart
     };
 
+    // Recalculate Y-axis for selected day segment
+    const distances = this.routeProfile?.cumulativeDistances;
+    const elevations = this.routeProfile?.elevations;
+    if (Array.isArray(distances) && Array.isArray(elevations) && distances.length === elevations.length) {
+      let minElevation = Infinity;
+      let maxElevation = -Infinity;
+
+      for (let i = 0; i < distances.length; i++) {
+        const distKm = Number(distances[i]);
+        const elevation = Number(elevations[i]);
+        if (!Number.isFinite(distKm) || !Number.isFinite(elevation)) continue;
+
+        // Only consider points within the segment range
+        if (distKm >= startKm && distKm <= endKm) {
+          if (elevation < minElevation) minElevation = elevation;
+          if (elevation > maxElevation) maxElevation = elevation;
+        }
+      }
+
+      // Apply padding to Y-axis (10%)
+      if (Number.isFinite(minElevation) && Number.isFinite(maxElevation)) {
+        const ySpan = maxElevation - minElevation;
+        const yPadding = Math.max(ySpan * 0.1, 20); // At least 20m padding
+        this.elevationYAxis = {
+          min: Math.floor(minElevation - yPadding),
+          max: Math.ceil(maxElevation + yPadding)
+        };
+      }
+    }
+
     this.updateElevationChartView();
+    this.updateElevationYAxisLabels();
   }
 
   updateElevationChartView() {
@@ -8848,15 +9198,13 @@ export class DirectionsManager {
     // Clear and rebuild X-axis labels
     xAxisContainer.innerHTML = '';
     const span = xAxis.max - xAxis.min || 1;
-    const tickCount = xAxis.ticks.length;
 
-    xAxis.ticks.forEach((tick, index) => {
+    xAxis.ticks.forEach((tick) => {
       const ratio = (tick - xAxis.min) / span;
       const percent = Math.max(0, Math.min(100, ratio * 100));
       const label = document.createElement('span');
-      // Show "km" on the last tick
-      const isLast = index === tickCount - 1;
-      label.textContent = isLast ? `${this.formatDistance(tick)} km` : this.formatDistance(tick);
+      // Show "km" on all ticks, use 0.5 discretization
+      label.textContent = `${this.formatAxisDistance(tick)} km`;
       label.style.left = `${percent}%`;
       xAxisContainer.appendChild(label);
     });

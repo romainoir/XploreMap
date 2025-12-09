@@ -46,15 +46,13 @@
     <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
       <div class="directions-header">
         <div class="transport-modes" role="group" aria-label="Travel mode">
-          <button class="btn btn--icon btn--icon-only active" type="button" data-mode="foot-hiking"
-            aria-label="Snap to trails" title="Snap to trails">
-            <img src="./data/aimant.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-            <span class="sr-only">Snap to trails</span>
-          </button>
-          <button class="btn btn--icon btn--icon-only" type="button" data-mode="manual" aria-label="Manual line"
-            title="Manual line">
-            <img src="./data/line.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-            <span class="sr-only">Manual line</span>
+          <button id="routeModeToggle" class="btn btn--icon btn--icon-only route-mode-toggle" type="button"
+            data-mode="foot-hiking" aria-pressed="true" aria-label="Snap to trails" title="Snap to trails">
+            <img class="route-mode-toggle__icon route-mode-toggle__icon--snap" src="./data/aimant.png" alt=""
+              aria-hidden="true" loading="lazy" decoding="async" />
+            <img class="route-mode-toggle__icon route-mode-toggle__icon--manual" src="./data/line.png" alt=""
+              aria-hidden="true" loading="lazy" decoding="async" />
+            <span class="sr-only">Toggle routing mode</span>
           </button>
         </div>
         <div class="directions-actions">

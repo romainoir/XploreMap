@@ -446,7 +446,7 @@ body {
   box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(12px);
-  z-index: 5;
+  z-index: 100;
   transform: translateX(-50%);
   min-width: 100%;
 }
@@ -619,7 +619,7 @@ body {
   max-width: min(920px, calc(100vw - 24px));
   margin-inline: auto;
   background: var(--glass-surface);
-  border-radius: max(var(--glass-radius), 18px) max(var(--glass-radius), 18px) 0 0;
+  border-radius: max(var(--glass-radius), 18px);
   padding: 22px 24px 26px;
   border: 1px solid var(--glass-border);
   box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
@@ -628,6 +628,8 @@ body {
   transform: scale(var(--ui-scale));
   transform-origin: bottom center;
   box-sizing: border-box;
+  /* Allow popups/menus to extend beyond the panel */
+  overflow: visible;
 }
 
 .directions-control.visible {
@@ -683,6 +685,42 @@ body {
 
 .transport-modes .btn {
   flex: 0 0 auto;
+}
+
+/* Route mode toggle button - copy exact styling from .routing-mode-toggle.btn--icon-only */
+.route-mode-toggle {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  gap: 0;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.route-mode-toggle__icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.2s ease;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.route-mode-toggle__icon--manual {
+  opacity: 0;
+}
+
+.route-mode-toggle[data-mode="manual"] .route-mode-toggle__icon--snap {
+  opacity: 0;
+}
+
+.route-mode-toggle[data-mode="manual"] .route-mode-toggle__icon--manual {
+  opacity: 1;
 }
 
 .directions-actions {
@@ -746,6 +784,10 @@ body {
 .chart-card__y-min {
   white-space: nowrap;
   line-height: 1;
+}
+
+.chart-card__y-min {
+  margin-bottom: 20px;
 }
 
 .chart-card__y-max::after,
@@ -842,6 +884,8 @@ body {
   font-size: 13px;
   display: none;
   width: 100%;
+  margin-inline: auto;
+  box-sizing: border-box;
 }
 
 .route-stats.has-stats {
@@ -850,10 +894,12 @@ body {
   align-items: stretch;
   gap: 10px;
   padding: 12px 16px;
-  border-radius: 14px;
+  border-radius: 16px;
   background: rgba(17, 34, 48, 0.04);
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.08);
   align-self: stretch;
+  /* Allow popups to extend beyond container */
+  overflow: visible;
 }
 
 /* Multi-day timeline styles */
@@ -902,11 +948,7 @@ body {
   padding: 8px 0;
   scrollbar-width: thin;
   scrollbar-color: rgba(17, 34, 48, 0.2) transparent;
-  width: calc(100% + 32px);
-  margin-left: -16px;
-  margin-right: -16px;
-  padding-left: 16px;
-  padding-right: 16px;
+  width: 100%;
 }
 
 .day-timeline::-webkit-scrollbar {
@@ -1213,7 +1255,7 @@ body {
   transform-origin: top center;
   transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
   pointer-events: none;
-  z-index: 6;
+  z-index: 100;
 }
 
 .profile-legend[data-ready="false"] {
@@ -1576,7 +1618,7 @@ body {
   max-width: min(320px, 80vw);
   width: max-content;
   text-align: start;
-  z-index: 10;
+  z-index: 100;
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
@@ -1609,7 +1651,7 @@ body {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
   pointer-events: none;
   display: none;
-  z-index: 6;
+  z-index: 100;
   min-width: 120px;
 }
 
@@ -2185,24 +2227,5 @@ body {
 }
 
 .vignette {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  background: radial-gradient(circle at center, rgba(0, 0, 0, 0) 45%, rgba(0, 0, 0, 0.55) 72%, rgba(0, 0, 0, 0.82) 100%);
-  transition: background 0.4s ease;
-}
-
-.vignette[data-mode="2d"] {
-  background: radial-gradient(circle at center, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, 0.45) 78%, rgba(0, 0, 0, 0.7) 100%);
-}
-
-@media (max-width: 640px) {
-  .vignette {
-    background: radial-gradient(circle at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.48) 80%, rgba(0, 0, 0, 0.78) 100%);
-  }
-
-  .vignette[data-mode="2d"] {
-    background: radial-gradient(circle at center, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.4) 82%, rgba(0, 0, 0, 0.68) 100%);
-  }
+  display: none;
 }
