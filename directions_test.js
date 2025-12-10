@@ -1200,19 +1200,19 @@ function formatTrailVisibilityLabel(value) {
 }
 
 const SLOPE_CLASSIFICATIONS = Object.freeze([
-  { key: 'slope-very-steep-descent', label: 'Very steep descent (<-18%)', color: '#0b3d91', maxGrade: -18, maxInclusive: false },
-  { key: 'slope-steep-descent', label: 'Steep descent (-18% to -12%)', color: '#1f5fa5', minGrade: -18, minInclusive: true, maxGrade: -12, maxInclusive: false },
-  { key: 'slope-moderate-descent', label: 'Moderate descent (-12% to -6%)', color: '#4aa3f0', minGrade: -12, minInclusive: true, maxGrade: -6, maxInclusive: false },
-  { key: 'slope-rolling', label: 'Rolling (-6% to 6%)', color: '#27ae60', minGrade: -6, minInclusive: true, maxGrade: 6, maxInclusive: true },
-  { key: 'slope-moderate-climb', label: 'Moderate climb (6% to 12%)', color: '#f4d03f', minGrade: 6, minInclusive: true, maxGrade: 12, maxInclusive: false },
-  { key: 'slope-hard-climb', label: 'Climb (12% to 18%)', color: '#f39c12', minGrade: 12, minInclusive: true, maxGrade: 18, maxInclusive: false },
-  { key: 'slope-steep-climb', label: 'Steep climb (>18%)', color: '#c0392b', minGrade: 18, minInclusive: true }
+  { key: 'slope-very-steep-descent', label: 'Descente très raide (<-18%)', color: '#0b3d91', maxGrade: -18, maxInclusive: false },
+  { key: 'slope-steep-descent', label: 'Descente raide (-18% à -12%)', color: '#1f5fa5', minGrade: -18, minInclusive: true, maxGrade: -12, maxInclusive: false },
+  { key: 'slope-moderate-descent', label: 'Descente modérée (-12% à -6%)', color: '#4aa3f0', minGrade: -12, minInclusive: true, maxGrade: -6, maxInclusive: false },
+  { key: 'slope-rolling', label: 'Plat (-6% à 6%)', color: '#27ae60', minGrade: -6, minInclusive: true, maxGrade: 6, maxInclusive: true },
+  { key: 'slope-moderate-climb', label: 'Montée modérée (6% à 12%)', color: '#f4d03f', minGrade: 6, minInclusive: true, maxGrade: 12, maxInclusive: false },
+  { key: 'slope-hard-climb', label: 'Montée (12% à 18%)', color: '#f39c12', minGrade: 12, minInclusive: true, maxGrade: 18, maxInclusive: false },
+  { key: 'slope-steep-climb', label: 'Montée raide (>18%)', color: '#c0392b', minGrade: 18, minInclusive: true }
 ]);
 
 const SURFACE_CLASSIFICATIONS = Object.freeze([
   {
     key: 'surface-paved',
-    label: 'Paved road',
+    label: 'Route goudronnée',
     color: '#b8b0a0',
     maxMultiplier: 0.95,
     maxInclusive: true,
@@ -1220,7 +1220,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'surface-compact',
-    label: 'Compact surface',
+    label: 'Surface compacte',
     color: '#2ecc71',
     minMultiplier: 0.95,
     minInclusive: false,
@@ -1230,7 +1230,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'surface-dirt',
-    label: 'Dirt / gravel',
+    label: 'Terre / gravier',
     color: '#cfa97a',
     minMultiplier: 1.05,
     minInclusive: false,
@@ -1240,7 +1240,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'surface-rocky',
-    label: 'Rocky trail',
+    label: 'Sentier rocheux',
     color: '#8f9299',
     minMultiplier: 1.15,
     minInclusive: false,
@@ -1250,7 +1250,7 @@ const SURFACE_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'surface-alpine',
-    label: 'Glacier / alpine',
+    label: 'Glacier / alpin',
     color: '#f0f4f7',
     minMultiplier: 1.3,
     minInclusive: false,
@@ -1275,7 +1275,7 @@ const SURFACE_LABELS = Object.freeze(
 
 const UNKNOWN_CATEGORY_CLASSIFICATION = Object.freeze({
   key: 'category-unknown',
-  label: 'No info',
+  label: 'Non renseigné',
   color: '#d0d4db'
 });
 
@@ -1283,7 +1283,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   UNKNOWN_CATEGORY_CLASSIFICATION,
   {
     key: 'category-t1',
-    label: 'Easy Hike',
+    label: 'Randonnée facile',
     color: '#a8f0c5',
     maxMultiplier: 1,
     maxGrade: 8,
@@ -1291,7 +1291,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'category-t2',
-    label: 'Mountain Trail',
+    label: 'Sentier de montagne',
     color: '#27ae60',
     maxMultiplier: 1.1,
     maxGrade: 12,
@@ -1299,7 +1299,7 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'category-t3',
-    label: 'Alpine Hike',
+    label: 'Randonnée alpine',
     color: '#f7d774',
     maxMultiplier: 1.2,
     maxGrade: 18,
@@ -1307,14 +1307,14 @@ const CATEGORY_CLASSIFICATIONS = Object.freeze([
   },
   {
     key: 'category-t4',
-    label: 'Alpine Route',
+    label: 'Itinéraire alpin',
     color: '#e67e22',
     maxMultiplier: 1.35,
     sacScaleValues: Object.freeze(['alpine_hiking'])
   },
   {
     key: 'category-t5',
-    label: 'Technical Alpine',
+    label: 'Alpin technique',
     color: '#4a0404',
     sacScaleValues: Object.freeze(['demanding_alpine_hiking', 'difficult_alpine_hiking'])
   }
@@ -9563,20 +9563,20 @@ export class DirectionsManager {
   }
 
   /**
-   * Format time estimate as a range (e.g., "5-6 hours")
+   * Format time estimate as a range (e.g., "5-6 heures")
    */
   formatEstimatedTimeRange(hours) {
     if (!Number.isFinite(hours) || hours <= 0) {
-      return '< 1 hour';
+      return '< 1 heure';
     }
     // Round to nearest half hour for the lower bound
     const lowerHours = Math.floor(hours);
     const upperHours = Math.ceil(hours + 0.5);
 
     if (lowerHours === upperHours || upperHours - lowerHours < 1) {
-      return `~${lowerHours} hour${lowerHours !== 1 ? 's' : ''}`;
+      return `~${lowerHours} heure${lowerHours !== 1 ? 's' : ''}`;
     }
-    return `${lowerHours}-${upperHours} hours`;
+    return `${lowerHours}-${upperHours} heures`;
   }
 
   /**
@@ -9612,9 +9612,9 @@ export class DirectionsManager {
     // Clamp to 1-5
     const finalScore = Math.max(1, Math.min(5, Math.round(score + 1)));
 
-    const levels = ['Easy', 'Moderate', 'Challenging', 'Difficult', 'Expert'];
+    const levels = ['Facile', 'Modéré', 'Exigeant', 'Difficile', 'Expert'];
     return {
-      level: levels[finalScore - 1] || 'Moderate',
+      level: levels[finalScore - 1] || 'Modéré',
       score: finalScore
     };
   }
@@ -9728,72 +9728,56 @@ export class DirectionsManager {
   }
 
   renderSimpleStats(metrics, distanceLabel, ascent, descent, timeLabel) {
-    const routeLabel = this.getRouteSummaryLabel();
-    const traceValue = routeLabel ? routeLabel : 'Route';
-
     // Calculate additional data
     const totalDistanceKm = metrics.distanceKm || 0;
     const timeHours = this.estimateTravelTimeHours(totalDistanceKm, ascent, descent);
     const timeRange = this.formatEstimatedTimeRange(timeHours);
     const difficulty = this.computeDayDifficulty(totalDistanceKm, ascent, descent, 0, totalDistanceKm);
     const keyWaypoints = this.getKeyWaypointsForDay(0, totalDistanceKm);
-    const waypointsText = keyWaypoints.length > 0 ? keyWaypoints.join(', ') : 'No waypoints';
+    const waypointsText = keyWaypoints.length > 0 ? keyWaypoints.join(', ') : 'Aucun point d\'intérêt';
 
     // Build difficulty indicator bars
     const difficultyBars = Array.from({ length: 5 }, (_, i) =>
       `<span class="difficulty-bar${i < difficulty.score ? ' filled' : ''}"></span>`
     ).join('');
 
-    // Icons for summary
-    const timeIcon = SUMMARY_ICONS.time || '';
-    const distanceIcon = SUMMARY_ICONS.distance || '';
-    const ascentIcon = SUMMARY_ICONS.ascent || '';
-
+    // Use same format as multi-day for consistency
     this.routeStats.innerHTML = `
-    <div class="route-stats__header">
-      <span class="route-stats__title">${escapeHtml(traceValue)}</span>
-      <div class="route-stats__summary">
-        <span class="route-stats__summary-item">
-          ${timeIcon}
-          <span class="route-stats__summary-value">${escapeHtml(timeLabel)}</span>
+  <div class="day-details is-visible">
+    <div class="day-details__grid">
+      <div class="day-details__item">
+        <span class="day-details__item-label">Distance :</span>
+        <span class="day-details__item-value">${escapeHtml(distanceLabel)} km</span>
+      </div>
+      <div class="day-details__item">
+        <span class="day-details__item-label">Dénivelé :</span>
+        <span class="day-details__item-value">+${ascent} m / -${descent} m</span>
+      </div>
+      <div class="day-details__item">
+        <span class="day-details__item-label">Durée estimée :</span>
+        <span class="day-details__item-value">${timeRange}</span>
+      </div>
+      <div class="day-details__item">
+        <span class="day-details__item-label">Difficulté :</span>
+        <span class="day-details__item-value">
+          <span class="difficulty-indicator">${difficultyBars}</span>
+          ${difficulty.level}
         </span>
-        <span class="route-stats__summary-item">
-          ${distanceIcon}
-          <span class="route-stats__summary-value">${escapeHtml(distanceLabel)} km</span>
-        </span>
-        <span class="route-stats__summary-item">
-          ${ascentIcon}
-          <span class="route-stats__summary-value">+${ascent} m</span>
+      </div>
+      <div class="day-details__item">
+        <span class="day-details__item-label">Points d'intérêt :</span>
+        <span class="day-details__item-value">${escapeHtml(waypointsText)}</span>
+      </div>
+      <div class="day-details__item">
+        <span class="day-details__item-label">Météo :</span>
+        <span class="day-details__item-value">
+          ${SUMMARY_ICONS.weather || ''}
+          Bientôt disponible
         </span>
       </div>
     </div>
-    <div class="day-details is-visible">
-      <div class="day-details__grid">
-        <div class="day-details__item">
-          <span class="day-details__item-label">Estimated Time:</span>
-          <span class="day-details__item-value">${timeRange}</span>
-        </div>
-        <div class="day-details__item">
-          <span class="day-details__item-label">Difficulty:</span>
-          <span class="day-details__item-value">
-            <span class="difficulty-indicator">${difficultyBars}</span>
-            ${difficulty.level}
-          </span>
-        </div>
-        <div class="day-details__item">
-          <span class="day-details__item-label">Key Waypoints:</span>
-          <span class="day-details__item-value">${escapeHtml(waypointsText)}</span>
-        </div>
-        <div class="day-details__item">
-          <span class="day-details__item-label">Weather:</span>
-          <span class="day-details__item-value">
-            ${SUMMARY_ICONS.weather || ''}
-            Coming soon
-          </span>
-        </div>
-      </div>
-    </div>
-  `;
+  </div>
+`;
   }
 
   renderMultiDayTimeline(metrics) {
@@ -9844,7 +9828,6 @@ export class DirectionsManager {
     // Build day tabs - arrow/chevron style
     const hasSelection = this.selectedDayIndex !== null && this.selectedDayIndex !== undefined;
     const dayTabsHtml = dayMetrics.map((day, i) => {
-      const distLabel = this.formatDistance(day.distanceKm);
       const isSelected = this.selectedDayIndex === i;
       const isLast = i === dayMetrics.length - 1;
       const bgColor = day.color || this.modeColors[this.currentMode];
@@ -9858,10 +9841,7 @@ export class DirectionsManager {
             style="--day-color: ${bgColor}"
           >
             <div class="day-tab__content">
-              <span class="day-tab__title">Day ${day.dayNumber}</span>
-              <span class="day-tab__stats">
-                ${distLabel} km <span class="day-tab__divider">|</span> +${day.ascent} m
-              </span>
+              <span class="day-tab__title">Jour ${day.dayNumber}</span>
             </div>
           </button>
           <svg class="day-tab__arrow" viewBox="0 0 20 60" preserveAspectRatio="none">
@@ -9874,15 +9854,17 @@ export class DirectionsManager {
     // Add container class to indicate selection state
     const timelineClass = `day-timeline${hasSelection ? ' has-selection' : ''}`;
 
-    // Selected day details - Enhanced layout matching mockup
+    // Selected day details - or full route if no day selected
     const selectedDay = this.selectedDayIndex !== null && this.selectedDayIndex !== undefined
       ? dayMetrics[this.selectedDayIndex]
       : null;
 
+    // Build details HTML - either for selected day or for entire route
     let dayDetailsHtml = '<div class="day-details"></div>';
 
     if (selectedDay) {
       // Compute additional data for selected day
+      const dayDistLabel = this.formatDistance(selectedDay.distanceKm);
       const timeRange = this.formatEstimatedTimeRange(selectedDay.timeHours);
       const difficulty = this.computeDayDifficulty(
         selectedDay.distanceKm,
@@ -9894,7 +9876,7 @@ export class DirectionsManager {
       const keyWaypoints = this.getKeyWaypointsForDay(selectedDay.startKm, selectedDay.endKm);
       const waypointsText = keyWaypoints.length > 0
         ? keyWaypoints.join(', ')
-        : 'No waypoints';
+        : 'Aucun point d\'intérêt';
 
       // Build difficulty indicator bars
       const difficultyBars = Array.from({ length: 5 }, (_, i) =>
@@ -9905,25 +9887,96 @@ export class DirectionsManager {
         <div class="day-details is-visible">
           <div class="day-details__grid">
             <div class="day-details__item">
-              <span class="day-details__item-label">Estimated Time:</span>
+              <span class="day-details__item-label">Distance :</span>
+              <span class="day-details__item-value">${dayDistLabel} km</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Dénivelé :</span>
+              <span class="day-details__item-value">+${selectedDay.ascent} m / -${selectedDay.descent} m</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Durée estimée :</span>
               <span class="day-details__item-value">${timeRange}</span>
             </div>
             <div class="day-details__item">
-              <span class="day-details__item-label">Difficulty:</span>
+              <span class="day-details__item-label">Difficulté :</span>
               <span class="day-details__item-value">
                 <span class="difficulty-indicator">${difficultyBars}</span>
                 ${difficulty.level}
               </span>
             </div>
             <div class="day-details__item">
-              <span class="day-details__item-label">Key Waypoints:</span>
+              <span class="day-details__item-label">Points d'intérêt :</span>
               <span class="day-details__item-value">${escapeHtml(waypointsText)}</span>
             </div>
             <div class="day-details__item">
-              <span class="day-details__item-label">Weather:</span>
+              <span class="day-details__item-label">Météo :</span>
               <span class="day-details__item-value">
                 ${SUMMARY_ICONS.weather ?? ''}
-                <span>Coming soon</span>
+                <span>Bientôt disponible</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      // No day selected - show full route details (unified with single-day style)
+      const totalDescent = Math.max(0, Math.round(metrics.descent ?? 0));
+      const timeRange = this.formatEstimatedTimeRange(
+        this.estimateTravelTimeHours(metrics.distanceKm, totalAscent, totalDescent)
+      );
+
+      // Calculate overall difficulty based on total metrics
+      const difficulty = this.computeDayDifficulty(
+        metrics.distanceKm,
+        totalAscent,
+        totalDescent,
+        0,
+        metrics.distanceKm
+      );
+
+      // Get all key waypoints for entire route
+      const keyWaypoints = this.getKeyWaypointsForDay(0, metrics.distanceKm);
+      const waypointsText = keyWaypoints.length > 0
+        ? keyWaypoints.join(', ')
+        : 'Aucun point d\'intérêt';
+
+      // Build difficulty indicator bars
+      const difficultyBars = Array.from({ length: 5 }, (_, i) =>
+        `<span class="difficulty-bar${i < difficulty.score ? ' filled' : ''}"></span>`
+      ).join('');
+
+      dayDetailsHtml = `
+        <div class="day-details is-visible">
+          <div class="day-details__grid">
+            <div class="day-details__item">
+              <span class="day-details__item-label">Distance :</span>
+              <span class="day-details__item-value">${totalDistance} km</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Dénivelé :</span>
+              <span class="day-details__item-value">+${totalAscent} m / -${totalDescent} m</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Durée estimée :</span>
+              <span class="day-details__item-value">${timeRange}</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Difficulté :</span>
+              <span class="day-details__item-value">
+                <span class="difficulty-indicator">${difficultyBars}</span>
+                ${difficulty.level}
+              </span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Points d'intérêt :</span>
+              <span class="day-details__item-value">${escapeHtml(waypointsText)}</span>
+            </div>
+            <div class="day-details__item">
+              <span class="day-details__item-label">Météo :</span>
+              <span class="day-details__item-value">
+                ${SUMMARY_ICONS.weather ?? ''}
+                <span>Bientôt disponible</span>
               </span>
             </div>
           </div>
@@ -9932,23 +9985,6 @@ export class DirectionsManager {
     }
 
     this.routeStats.innerHTML = `
-      <div class="route-stats__header">
-        <span class="route-stats__title">Trek Planner</span>
-        <div class="route-stats__summary">
-          <span class="route-stats__summary-item">
-            ${SUMMARY_ICONS.time ?? ''}
-            <span class="route-stats__summary-value">${totalTime}</span>
-          </span>
-          <span class="route-stats__summary-item">
-            ${SUMMARY_ICONS.distance ?? ''}
-            <span class="route-stats__summary-value">${totalDistance} km</span>
-          </span>
-          <span class="route-stats__summary-item">
-            ${SUMMARY_ICONS.ascent ?? ''}
-            <span class="route-stats__summary-value">+${totalAscent} m</span>
-          </span>
-        </div>
-      </div>
       <div class="${timelineClass}">${dayTabsHtml}</div>
       ${dayDetailsHtml}
     `;
@@ -10281,8 +10317,30 @@ export class DirectionsManager {
     const fallbackColor = this.modeColors[this.currentMode];
     const gradientStops = [];
 
-    // Add gradient stops for cut segments with SHARP transitions at boundaries
-    if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
+    // Determine which segments to use for the gradient
+    // Profile segments take priority when profile mode is active (not 'none')
+    const useProfileSegments = this.profileMode !== 'none'
+      && Array.isArray(this.profileSegments)
+      && this.profileSegments.length > 0;
+
+    if (useProfileSegments) {
+      // Use profile segments for gradient coloring (slope, difficulty, etc.)
+      this.profileSegments.forEach((segment) => {
+        if (!segment) return;
+        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
+        if (!segmentColor) return;
+
+        let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+        let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
+
+        const startRatio = Math.max(0, Math.min(1, (startKm - domainMin) / domainSpan));
+        const endRatio = Math.max(0, Math.min(1, (endKm - domainMin) / domainSpan));
+
+        gradientStops.push({ offset: startRatio, color: segmentColor });
+        gradientStops.push({ offset: endRatio, color: segmentColor });
+      });
+    } else if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
+      // Add gradient stops for cut segments (day colors) with SHARP transitions at boundaries
       const cutSegs = this.cutSegments;
       for (let i = 0; i < cutSegs.length; i += 1) {
         const segment = cutSegs[i];
@@ -10315,11 +10373,8 @@ export class DirectionsManager {
         }
       }
     } else {
-      // Single segment or profile segments - no sharp transitions needed
+      // Single segment - use its color or fallback
       const gradientSegments = (() => {
-        if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
-          return this.profileSegments;
-        }
         if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
           return this.cutSegments;
         }
