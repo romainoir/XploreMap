@@ -811,6 +811,7 @@ body {
 }
 
 .elevation-section__y-axis {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -851,6 +852,7 @@ body {
 }
 
 .chart-card__y-axis {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -864,24 +866,42 @@ body {
 }
 
 .chart-card__y-max,
-.chart-card__y-min {
+.chart-card__y-min,
+.chart-card__y-mid {
+  position: absolute;
+  right: 0;
   white-space: nowrap;
   line-height: 1;
 }
 
+.chart-card__y-max {
+  /* Position from top, centered vertically */
+  transform: translateY(-50%);
+}
+
 .chart-card__y-min {
-  margin-bottom: 20px;
+  /* Ensure min label doesn't go below the chart area (above X-axis) */
+  bottom: 18px !important;
+  transform: none;
+}
+
+.chart-card__y-mid {
+  /* Center vertically on the grid line - move up by half height */
+  transform: translateY(-50%);
+  opacity: 0.7;
 }
 
 .chart-card__y-max::after,
-.chart-card__y-min::after {
+.chart-card__y-min::after,
+.chart-card__y-mid::after {
   content: ' m';
   font-weight: 500;
   opacity: 0.7;
 }
 
 .chart-card__y-max:empty::after,
-.chart-card__y-min:empty::after {
+.chart-card__y-min:empty::after,
+.chart-card__y-mid:empty::after {
   content: none;
 }
 
@@ -1394,29 +1414,61 @@ body {
 }
 
 .bivouac-popup {
-  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   min-width: 200px;
 }
 
 .bivouac-popup__header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  padding: 12px 14px;
+  background: var(--day-color, #8fa583);
+  border-radius: 0;
+  margin: 0;
 }
 
 .bivouac-popup__title {
   font-size: 14px;
   font-weight: 700;
-  color: rgba(17, 34, 48, 0.9);
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.bivouac-popup__delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.bivouac-popup__delete svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.bivouac-popup__delete:hover {
+  background: rgba(220, 53, 69, 0.9);
+  color: #fff;
 }
 
 .bivouac-popup__stats {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 12px 14px;
 }
 
 .bivouac-popup__stat {
@@ -1440,25 +1492,59 @@ body {
 }
 
 .bivouac-popup-container .maplibregl-popup-close-button {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  background: rgba(17, 34, 48, 0.08);
-  border-radius: 6px;
-  color: rgba(17, 34, 48, 0.6);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  display: none;
 }
 
-.bivouac-popup-container .maplibregl-popup-close-button:hover {
-  background: rgba(17, 34, 48, 0.15);
-  color: rgba(17, 34, 48, 0.9);
+/* Stat icons in popup labels */
+.bivouac-popup__stat-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  vertical-align: -2px;
+  margin-right: 4px;
+  fill: currentColor;
+  opacity: 0.7;
+}
+
+.bivouac-popup__stat--sun .bivouac-popup__stat-icon {
+  color: #f59e0b;
+  opacity: 1;
+}
+
+.bivouac-popup__stat--water .bivouac-popup__stat-icon {
+  color: #3b82f6;
+  opacity: 1;
+}
+
+.bivouac-popup__stat--weather .bivouac-popup__stat-icon {
+  color: #6b7280;
+  opacity: 0.8;
+}
+
+.bivouac-popup__stat-value--placeholder {
+  color: rgba(17, 34, 48, 0.45);
+  font-style: italic;
+}
+
+/* Water options list */
+.bivouac-popup__water-options {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bivouac-popup__water-option {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(17, 34, 48, 0.85);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bivouac-popup__water-option::before {
+  content: '💧';
+  font-size: 10px;
 }
 
 .profile-legend {
@@ -1671,6 +1757,13 @@ body {
   pointer-events: none;
 }
 
+.elevation-grid-line {
+  stroke: rgba(17, 34, 48, 0.15);
+  stroke-width: 0.5;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .elevation-area-fill {
   fill-opacity: 0.78;
 }
@@ -1712,8 +1805,8 @@ body {
 /* Elevation chart tooltip - shown on hover */
 .elevation-chart-tooltip {
   position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
+  top: 4px;
+  left: 0;
   transform: translateX(-50%);
   background: rgba(17, 34, 48, 0.92);
   color: #f6fbff;
@@ -1753,7 +1846,9 @@ body {
 }
 
 .elevation-chart-tooltip__elevation,
-.elevation-chart-tooltip__grade {
+.elevation-chart-tooltip__grade,
+.elevation-chart-tooltip__duration,
+.elevation-chart-tooltip__ascent {
   font-variant-numeric: tabular-nums;
 }
 
@@ -1825,6 +1920,11 @@ body {
 .elevation-marker.bivouac .elevation-marker__icon {
   --elevation-marker-icon-width: 26px;
   --elevation-marker-icon-height: 26px;
+}
+
+/* Hide title label above bivouac markers in elevation chart */
+.elevation-marker.bivouac .elevation-marker__label {
+  display: none;
 }
 
 .elevation-marker.poi {
@@ -1924,7 +2024,8 @@ body {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
   pointer-events: none;
   display: none;
-  z-index: 100;
+  z-index: 2;
+  /* Keep below directions dock (z-index: 3) */
   min-width: 120px;
 }
 

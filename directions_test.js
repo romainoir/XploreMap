@@ -1005,9 +1005,13 @@ const SUMMARY_ICONS = {
   waypoint: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>'
 };
 
-// Use the shared bivouac marker PNG so the UI references the canonical asset.
-const BIVOUAC_ICON_URL = new URL('./data/bivouac.png', import.meta.url).href;
-const BIVOUAC_ELEVATION_ICON = `<img class="elevation-marker__icon" src="${BIVOUAC_ICON_URL}" alt="" aria-hidden="true" loading="lazy" decoding="async" />`;
+// Inline SVG bivouac icon for elevation chart markers (matches the new tent design)
+const BIVOUAC_ELEVATION_ICON = `<svg class="elevation-marker__icon" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+  <line x1="44" y1="0" x2="50" y2="12" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+  <line x1="56" y1="0" x2="50" y2="12" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+  <path d="M50 12 L5 88 L38 88 L50 60 L62 88 L95 88 Z" fill="currentColor"/>
+  <line x1="3" y1="93" x2="97" y2="93" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+</svg>`;
 
 const DISTANCE_MARKER_PREFIX = 'distance-marker-';
 const DEFAULT_DISTANCE_MARKER_COLOR = '#f38b1c';
@@ -1361,7 +1365,6 @@ function isProfileGradientMode(mode) {
   return PROFILE_GRADIENT_MODES.includes(mode);
 }
 
-let bivouacMarkerImagePromise = null;
 
 function cloneClassificationEntry(entry) {
   if (!entry || typeof entry !== 'object') {
@@ -1382,25 +1385,7 @@ function isUnknownCategoryClassification(classification) {
   return !color;
 }
 
-function loadBivouacMarkerImageElement() {
-  if (bivouacMarkerImagePromise) {
-    return bivouacMarkerImagePromise;
-  }
-  bivouacMarkerImagePromise = new Promise((resolve) => {
-    try {
-      const image = new Image();
-      image.decoding = 'async';
-      image.crossOrigin = 'anonymous';
-      image.onload = () => resolve(image);
-      image.onerror = () => resolve(null);
-      image.src = BIVOUAC_ICON_URL;
-    } catch (error) {
-      console.warn('Failed to start loading bivouac marker PNG', error);
-      resolve(null);
-    }
-  });
-  return bivouacMarkerImagePromise;
-}
+
 
 function createMarkerCanvas(baseSize = 52) {
   const ratio = 2;
@@ -1480,48 +1465,62 @@ function createTentMarkerImage(fillColor) {
   }
 
   const { ctx, size } = base;
-  const baseY = size * 0.84;
-  const topY = size * 0.18;
-  const leftX = size * 0.24;
-  const rightX = size * 0.76;
-  const centerX = size * 0.5;
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-  ctx.beginPath();
-  ctx.ellipse(centerX, baseY + size * 0.03, size * 0.28, size * 0.1, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // Scale factor to fit the 100x100 SVG viewBox to our canvas size
+  const scale = size / 100;
 
-  const shade = adjustHexColor(fillColor, -0.2);
-  const gradient = ctx.createLinearGradient(leftX, topY, rightX, baseY);
-  gradient.addColorStop(0, fillColor);
-  gradient.addColorStop(1, shade);
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.moveTo(centerX, topY);
-  ctx.lineTo(rightX, baseY);
-  ctx.lineTo(leftX, baseY);
-  ctx.closePath();
-  ctx.fill();
+  // Helper to draw the complete tent shape with configurable line thickness
+  const drawTent = (lineMultiplier = 1) => {
+    // Crossed poles - continuation of tent edges
+    ctx.lineWidth = 5 * scale * lineMultiplier;
+    ctx.beginPath();
+    ctx.moveTo(44 * scale, 0);
+    ctx.lineTo(50 * scale, 12 * scale);
+    ctx.stroke();
 
-  ctx.strokeStyle = adjustHexColor(fillColor, -0.35);
-  ctx.lineWidth = size * 0.03;
-  ctx.beginPath();
-  ctx.moveTo(centerX, topY);
-  ctx.lineTo(centerX, baseY);
-  ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(56 * scale, 0);
+    ctx.lineTo(50 * scale, 12 * scale);
+    ctx.stroke();
 
-  ctx.fillStyle = adjustHexColor(fillColor, -0.35);
-  ctx.beginPath();
-  ctx.moveTo(centerX, topY + size * 0.05);
-  ctx.lineTo(centerX + size * 0.04, baseY);
-  ctx.lineTo(centerX - size * 0.04, baseY);
-  ctx.closePath();
-  ctx.fill();
+    // Main tent body with entrance cutout
+    ctx.lineWidth = 4 * scale * lineMultiplier;
+    ctx.beginPath();
+    ctx.moveTo(50 * scale, 12 * scale);
+    ctx.lineTo(5 * scale, 88 * scale);
+    ctx.lineTo(38 * scale, 88 * scale);
+    ctx.lineTo(50 * scale, 60 * scale);
+    ctx.lineTo(62 * scale, 88 * scale);
+    ctx.lineTo(95 * scale, 88 * scale);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Ground bar
+    ctx.lineWidth = 6 * scale * lineMultiplier;
+    ctx.beginPath();
+    ctx.moveTo(3 * scale, 93 * scale);
+    ctx.lineTo(97 * scale, 93 * scale);
+    ctx.stroke();
+  };
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // First pass: Draw white halo/outline with thicker lines
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+  drawTent(2.5); // 2.5x thicker for halo effect
+
+  // Second pass: Draw colored fill on top with normal lines
+  ctx.fillStyle = fillColor;
+  ctx.strokeStyle = fillColor;
+  drawTent(1);
 
   return finalizeMarkerImage(base);
 }
 
-function ensureSegmentMarkerImages(map) {
+function ensureSegmentMarkerImages(map, bivouacColor = SEGMENT_MARKER_COLORS.bivouac) {
   if (!map || typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') {
     return;
   }
@@ -1540,37 +1539,82 @@ function ensureSegmentMarkerImages(map) {
     }
   }
 
-  if (!map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
-    loadBivouacMarkerImageElement()
-      .then((image) => {
-        if (!map || typeof map.addImage !== 'function') {
-          return;
-        }
-        if (map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
-          return;
-        }
-        if (image) {
-          try {
-            map.addImage(BIVOUAC_MARKER_ICON_ID, image, { pixelRatio: 1 });
-            return;
-          } catch (error) {
-            console.warn('Unable to register bivouac marker PNG', error);
-          }
-        }
-        const fallbackIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
-        if (fallbackIcon && !map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
-          map.addImage(BIVOUAC_MARKER_ICON_ID, fallbackIcon.image, { pixelRatio: fallbackIcon.pixelRatio });
-        }
-      })
-      .catch((error) => {
-        console.warn('Failed to load bivouac marker PNG', error);
-        const fallbackIcon = createTentMarkerImage(SEGMENT_MARKER_COLORS.bivouac);
-        if (fallbackIcon && !map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
-          map.addImage(BIVOUAC_MARKER_ICON_ID, fallbackIcon.image, { pixelRatio: fallbackIcon.pixelRatio });
-        }
-      });
+  // Always use the generated tent icon with the specified color
+  const tentIcon = createTentMarkerImage(bivouacColor);
+  if (tentIcon) {
+    // Remove existing image if present to allow color update
+    if (map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+      map.removeImage(BIVOUAC_MARKER_ICON_ID);
+    }
+    map.addImage(BIVOUAC_MARKER_ICON_ID, tentIcon.image, { pixelRatio: tentIcon.pixelRatio });
   }
 }
+
+/**
+ * Update the bivouac marker icon with a new color.
+ * @param {maplibregl.Map} map - The map instance
+ * @param {string} color - The color for the bivouac icon
+ */
+function updateBivouacMarkerColor(map, color) {
+  if (!map || typeof map.hasImage !== 'function') {
+    return;
+  }
+
+  const tentIcon = createTentMarkerImage(color);
+  if (!tentIcon) {
+    return;
+  }
+
+  try {
+    if (map.hasImage(BIVOUAC_MARKER_ICON_ID)) {
+      map.removeImage(BIVOUAC_MARKER_ICON_ID);
+    }
+    map.addImage(BIVOUAC_MARKER_ICON_ID, tentIcon.image, { pixelRatio: tentIcon.pixelRatio });
+  } catch (error) {
+    console.warn('Failed to update bivouac marker color', error);
+  }
+}
+
+/**
+ * Get or create a bivouac marker icon for a specific color.
+ * Returns the icon ID to use in the layer.
+ * @param {maplibregl.Map} map - The map instance
+ * @param {string} color - The hex color for the icon
+ * @returns {string} The icon ID
+ */
+function getOrCreateBivouacIcon(map, color) {
+  if (!map || typeof map.hasImage !== 'function') {
+    return BIVOUAC_MARKER_ICON_ID;
+  }
+
+  // Normalize color to lowercase hex
+  const normalizedColor = (color || '').trim().toLowerCase();
+  if (!normalizedColor || !/^#[0-9a-f]{6}$/i.test(normalizedColor)) {
+    return BIVOUAC_MARKER_ICON_ID;
+  }
+
+  // Create a unique icon ID for this color
+  const colorIconId = `bivouac-${normalizedColor.slice(1)}`;
+
+  // Check if icon already exists
+  if (map.hasImage(colorIconId)) {
+    return colorIconId;
+  }
+
+  // Create new icon with this color
+  const tentIcon = createTentMarkerImage(normalizedColor);
+  if (tentIcon) {
+    try {
+      map.addImage(colorIconId, tentIcon.image, { pixelRatio: tentIcon.pixelRatio });
+      return colorIconId;
+    } catch (error) {
+      console.warn('Failed to create bivouac icon for color', normalizedColor, error);
+    }
+  }
+
+  return BIVOUAC_MARKER_ICON_ID;
+}
+
 
 function adjustHexColor(hex, ratio = 0) {
   if (typeof hex !== 'string' || !/^#([0-9a-f]{6})$/i.test(hex)) {
@@ -1905,6 +1949,7 @@ export class DirectionsManager {
     this.router = null;
 
     this.handleWaypointMouseDown = (event) => this.onWaypointMouseDown(event);
+    this.handleMapMouseDown = (event) => this.onMapMouseDown(event);
     this.handleMapMouseMove = (event) => this.onMapMouseMove(event);
     this.handleMapMouseUp = (event) => this.onMapMouseUp(event);
     this.handleMapMouseLeave = () => {
@@ -1919,6 +1964,10 @@ export class DirectionsManager {
     this.handleRouteContextMenu = (event) => this.onRouteContextMenu(event);
     this.handleSegmentMarkerMouseDown = (event) => this.onSegmentMarkerMouseDown(event);
     this.handleBivouacClick = (event) => this.onBivouacClick(event);
+    this.handleBivouacMouseEnter = (event) => this.onBivouacMouseEnter(event);
+    this.handleBivouacMouseLeave = (event) => this.onBivouacMouseLeave(event);
+    this.handleWaypointMouseEnter = (event) => this.onWaypointMouseEnter(event);
+    this.handleWaypointMouseLeave = (event) => this.onWaypointMouseLeave(event);
 
     this.routeHoverTooltip = null;
     this.bivouacPopup = null;
@@ -1996,6 +2045,12 @@ export class DirectionsManager {
     });
 
     this.map.addSource('route-hover-point-source', {
+      type: 'geojson',
+      data: EMPTY_COLLECTION
+    });
+
+    // Source for drag preview visualization (dashed lines during via point drag)
+    this.map.addSource('drag-preview-source', {
       type: 'geojson',
       data: EMPTY_COLLECTION
     });
@@ -2223,7 +2278,7 @@ export class DirectionsManager {
       filter: ['==', ['get', 'showLabel'], true]
     });
 
-    ensureSegmentMarkerImages(this.map);
+    ensureSegmentMarkerImages(this.map, this.modeColors[this.currentMode]);
     this.map.addLayer({
       id: SEGMENT_MARKER_LAYER_ID,
       type: 'symbol',
@@ -2237,11 +2292,11 @@ export class DirectionsManager {
           ['linear'],
           ['zoom'],
           8,
-          ['match', ['get', 'type'], 'bivouac', 0.12, 0.55],
+          ['match', ['get', 'type'], 'bivouac', 0.4, 0.55],
           12,
-          ['match', ['get', 'type'], 'bivouac', 0.18, 0.75],
+          ['match', ['get', 'type'], 'bivouac', 0.6, 0.75],
           16,
-          ['match', ['get', 'type'], 'bivouac', 0.24, 0.95]
+          ['match', ['get', 'type'], 'bivouac', 0.8, 0.95]
         ],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
@@ -2343,11 +2398,24 @@ export class DirectionsManager {
       type: 'circle',
       source: 'route-hover-point-source',
       paint: {
-        'circle-radius': 6,
+        'circle-radius': 10,
         'circle-color': '#fff',
-        'circle-stroke-width': 3,
+        'circle-stroke-width': 4,
         'circle-stroke-color': this.modeColors[this.currentMode],
         'circle-opacity': 0
+      }
+    });
+
+    // Layer for drag preview visualization (dashed lines)
+    this.map.addLayer({
+      id: 'drag-preview-line',
+      type: 'line',
+      source: 'drag-preview-source',
+      paint: {
+        'line-color': this.modeColors[this.currentMode],
+        'line-width': 3,
+        'line-dasharray': [4, 4],
+        'line-opacity': 0.8
       }
     });
 
@@ -2613,9 +2681,14 @@ export class DirectionsManager {
 
   setupMapHandlers() {
     this.map.on('mousedown', 'waypoints-hit-area', this.handleWaypointMouseDown);
+    this.map.on('mouseenter', 'waypoints-hit-area', this.handleWaypointMouseEnter);
+    this.map.on('mouseleave', 'waypoints-hit-area', this.handleWaypointMouseLeave);
     this.map.on('mousedown', SEGMENT_MARKER_LAYER_ID, this.handleSegmentMarkerMouseDown);
     this.map.on('touchstart', SEGMENT_MARKER_LAYER_ID, this.handleSegmentMarkerMouseDown);
     this.map.on('click', SEGMENT_MARKER_LAYER_ID, this.handleBivouacClick);
+    this.map.on('mouseenter', SEGMENT_MARKER_LAYER_ID, this.handleBivouacMouseEnter);
+    this.map.on('mouseleave', SEGMENT_MARKER_LAYER_ID, this.handleBivouacMouseLeave);
+    this.map.on('mousedown', this.handleMapMouseDown);
     this.map.on('mousemove', this.handleMapMouseMove);
     this.map.on('mouseup', this.handleMapMouseUp);
     this.map.on('mouseleave', this.handleMapMouseLeave);
@@ -3902,12 +3975,15 @@ export class DirectionsManager {
       if (!boundary) {
         continue;
       }
+      // Use the color of the NEXT segment (the day starting at this bivouac)
+      const segmentColor = next?.color || current?.color || this.modeColors[this.currentMode];
       markers.push({
         type: 'bivouac',
         title: `Bivouac ${index + 1}`,
         name: `Bivouac ${index + 1}`,
         coordinates: boundary,
-        labelColor: SEGMENT_MARKER_COLORS.bivouac,
+        labelColor: segmentColor,
+        segmentColor: segmentColor,  // Store for icon coloring
         icon: SEGMENT_MARKER_ICONS.bivouac,
         segmentIndex: index + 1,
         order: index + 1
@@ -4040,6 +4116,13 @@ export class DirectionsManager {
         if (!coords || coords.length < 2) {
           return null;
         }
+
+        // For bivouac markers, create a color-specific icon
+        let iconId = marker.icon;
+        if (marker.type === 'bivouac' && marker.segmentColor) {
+          iconId = getOrCreateBivouacIcon(this.map, marker.segmentColor);
+        }
+
         return {
           type: 'Feature',
           properties: {
@@ -4047,7 +4130,7 @@ export class DirectionsManager {
             title: marker.title,
             name: marker.name,
             labelColor: marker.labelColor,
-            icon: marker.icon,
+            icon: iconId,
             order: marker.order ?? index,
             segmentIndex: marker.segmentIndex ?? index
           },
@@ -5550,6 +5633,22 @@ export class DirectionsManager {
     this.updateCutDisplays();
   }
 
+  removeBivouacCut(index) {
+    if (!Array.isArray(this.routeCutDistances) || !this.routeCutDistances.length) {
+      return;
+    }
+
+    if (!Number.isInteger(index) || index < 0 || index >= this.routeCutDistances.length) {
+      return;
+    }
+
+    this.recordWaypointState();
+    const nextCuts = [...this.routeCutDistances];
+    nextCuts.splice(index, 1);
+    this.setRouteCutDistances(nextCuts);
+    this.updateCutDisplays();
+  }
+
   mirrorRouteCutsForReversedRoute() {
     if (!this.routeProfile || !Array.isArray(this.routeCutDistances) || !this.routeCutDistances.length) {
       return;
@@ -5794,12 +5893,104 @@ export class DirectionsManager {
     this.draggedWaypointIndex = Number(feature.properties.index);
     this.setHoveredWaypointIndex(this.draggedWaypointIndex);
     this.map.dragPan?.disable();
+    // Change cursor to grabbing
+    this.map.getCanvas().style.cursor = 'grabbing';
+  }
+
+  /**
+   * Handle mouse entering a waypoint for hover effects
+   */
+  onWaypointMouseEnter(event) {
+    if (!this.isPanelVisible() || this.isDragging) return;
+    const feature = event.features?.[0];
+    if (!feature) return;
+
+    const role = feature.properties?.role;
+
+    // Show grab cursor
+    this.map.getCanvas().style.cursor = 'grab';
+
+    // Scale up the flag icons for start/end waypoints
+    if ((role === 'start' || role === 'end') && this.map.getLayer(SEGMENT_MARKER_LAYER_ID)) {
+      const type = role; // 'start' or 'end'
+      this._hoveredMarkerType = type;
+
+      this.map.setLayoutProperty(SEGMENT_MARKER_LAYER_ID, 'icon-size', [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8,
+        ['match', ['get', 'type'],
+          type, 0.75,  // Hover size for flag (larger)
+          'bivouac', 0.4,
+          0.55
+        ],
+        12,
+        ['match', ['get', 'type'],
+          type, 1.0,  // Hover size (larger)
+          'bivouac', 0.6,
+          0.75
+        ],
+        16,
+        ['match', ['get', 'type'],
+          type, 1.25,  // Hover size (larger)
+          'bivouac', 0.8,
+          0.95
+        ]
+      ]);
+    }
+  }
+
+  /**
+   * Handle mouse leaving a waypoint
+   */
+  onWaypointMouseLeave(event) {
+    if (!this.isPanelVisible()) return;
+
+    // Restore cursor only if not dragging
+    if (!this.isDragging) {
+      this.map.getCanvas().style.cursor = '';
+    }
+
+    // Restore icon sizes
+    if (this._hoveredMarkerType && this.map.getLayer(SEGMENT_MARKER_LAYER_ID)) {
+      this._hoveredMarkerType = null;
+      this.map.setLayoutProperty(SEGMENT_MARKER_LAYER_ID, 'icon-size', [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8,
+        ['match', ['get', 'type'], 'bivouac', 0.4, 0.55],
+        12,
+        ['match', ['get', 'type'], 'bivouac', 0.6, 0.75],
+        16,
+        ['match', ['get', 'type'], 'bivouac', 0.8, 0.95]
+      ]);
+    }
   }
 
   onSegmentMarkerMouseDown(event) {
     if (!this.isPanelVisible()) return;
     const feature = event.features?.[0];
     const type = feature?.properties?.type;
+
+    // Handle start/end markers (departure/arrival) - they should be draggable like waypoints
+    if (type === 'start' || type === 'end') {
+      const waypointIndex = type === 'start' ? 0 : this.waypoints.length - 1;
+      if (waypointIndex >= 0 && waypointIndex < this.waypoints.length) {
+        this.isDragging = true;
+        this.draggedWaypointIndex = waypointIndex;
+        this.setHoveredWaypointIndex(waypointIndex);
+        this.map.dragPan?.disable();
+        this.map.getCanvas().style.cursor = 'grabbing';
+
+        event.preventDefault?.();
+        event.originalEvent?.preventDefault?.();
+      }
+      return;
+    }
+
+    // Handle bivouac markers
     if (type !== 'bivouac') {
       return;
     }
@@ -5814,21 +6005,49 @@ export class DirectionsManager {
       return;
     }
 
-    this.isDragging = true;
-    this.draggedWaypointIndex = null;
-    this.draggedBivouacIndex = cutIndex;
-    if (event?.lngLat && Number.isFinite(event.lngLat.lng) && Number.isFinite(event.lngLat.lat)) {
-      this.draggedBivouacLngLat = [event.lngLat.lng, event.lngLat.lat];
-      this.updateSegmentMarkers();
-    }
-    this.map.dragPan?.disable();
+    // Store pending drag info but don't start drag immediately
+    // Require a long press (300ms) before drag activates
+    this._pendingBivouacDrag = {
+      cutIndex,
+      startLngLat: event?.lngLat ? [event.lngLat.lng, event.lngLat.lat] : null,
+      startTime: Date.now()
+    };
+
+    // Set timeout to activate drag after long press
+    this._bivouacDragTimeout = setTimeout(() => {
+      if (this._pendingBivouacDrag) {
+        this.isDragging = true;
+        this.draggedWaypointIndex = null;
+        this.draggedBivouacIndex = this._pendingBivouacDrag.cutIndex;
+        if (this._pendingBivouacDrag.startLngLat) {
+          this.draggedBivouacLngLat = this._pendingBivouacDrag.startLngLat;
+          this.updateSegmentMarkers();
+        }
+        this.map.dragPan?.disable();
+        // Change cursor to indicate dragging is active
+        this.map.getCanvas().style.cursor = 'grabbing';
+      }
+    }, 300);
+
     event.preventDefault?.();
     event.originalEvent?.preventDefault?.();
   }
-
   onBivouacClick(event) {
+    // Cancel any pending drag - a click means we released before long press activated
+    if (this._bivouacDragTimeout) {
+      clearTimeout(this._bivouacDragTimeout);
+      this._bivouacDragTimeout = null;
+    }
+    this._pendingBivouacDrag = null;
+
     // Only show popup if not dragging
     if (this.isDragging) return;
+
+    // Close any existing bivouac popup first
+    if (this.bivouacPopup) {
+      this.bivouacPopup.remove();
+      this.bivouacPopup = null;
+    }
 
     const feature = event.features?.[0];
     const type = feature?.properties?.type;
@@ -5872,14 +6091,42 @@ export class DirectionsManager {
     const bivouacMarker = markers.find(m => m.type === 'bivouac' && m.order === order);
     const bivouacName = bivouacMarker?.name ?? bivouacMarker?.title ?? `Bivouac ${cutIndex + 1}`;
 
+    // Get day color for this segment
+    const dayColor = this.getSegmentColor(dayNumber);
+
     // Build popup content
-    const slopeLabel = Number.isFinite(slope) ? `${slope > 0 ? '+' : ''}${slope.toFixed(1)}%` : '—';
     const elevationLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : '—';
 
+    // Calculate sunrise/sunset times for this location
+    const [lng, lat] = coordinates;
+    const sunTimes = this.calculateSunTimes(lat, lng);
+    const sunriseLabel = sunTimes?.sunrise ?? '—';
+    const sunsetLabel = sunTimes?.sunset ?? '—';
+
+    // Find nearest water sources (up to 2 different types)
+    const waterSources = this.findNearestWaterSources(coordinates, 2);
+    const formatWaterDistance = (d) => d < 1 ? `${Math.round(d * 1000)} m` : `${d.toFixed(1)} km`;
+
+    // Build water options HTML
+    let waterOptionsHtml = '';
+    if (waterSources.length === 0) {
+      waterOptionsHtml = '<span class="bivouac-popup__stat-value">—</span>';
+    } else {
+      waterOptionsHtml = waterSources.map((source, i) => {
+        const distLabel = formatWaterDistance(source.distance);
+        return `<span class="bivouac-popup__water-option">${source.type}: ${distLabel}</span>`;
+      }).join('');
+    }
+
     const popupHtml = `
-      <div class="bivouac-popup">
+      <div class="bivouac-popup" style="--day-color: ${dayColor}">
         <div class="bivouac-popup__header">
           <span class="bivouac-popup__title">${escapeHtml(bivouacName)}</span>
+          <button class="bivouac-popup__delete" data-bivouac-index="${cutIndex}" title="Delete bivouac" aria-label="Delete bivouac">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+            </svg>
+          </button>
         </div>
         <div class="bivouac-popup__stats">
           <div class="bivouac-popup__stat">
@@ -5890,13 +6137,26 @@ export class DirectionsManager {
             <span class="bivouac-popup__stat-label">Elevation</span>
             <span class="bivouac-popup__stat-value">${elevationLabel}</span>
           </div>
-          <div class="bivouac-popup__stat">
-            <span class="bivouac-popup__stat-label">Slope</span>
-            <span class="bivouac-popup__stat-value">${slopeLabel}</span>
+          <div class="bivouac-popup__stat bivouac-popup__stat--sun">
+            <span class="bivouac-popup__stat-label">
+              <svg class="bivouac-popup__stat-icon" viewBox="0 0 24 24"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06c-.39-.39-1.03-.39-1.41 0zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
+              Sunrise / Sunset
+            </span>
+            <span class="bivouac-popup__stat-value">${sunriseLabel} / ${sunsetLabel}</span>
           </div>
-          <div class="bivouac-popup__stat">
-            <span class="bivouac-popup__stat-label">Distance from start</span>
-            <span class="bivouac-popup__stat-value">${this.formatDistance(distanceKm)} km</span>
+          <div class="bivouac-popup__stat bivouac-popup__stat--water">
+            <span class="bivouac-popup__stat-label">
+              <svg class="bivouac-popup__stat-icon" viewBox="0 0 24 24"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2c0-3.32-2.67-7.25-8-11.8zm0 18c-3.35 0-6-2.57-6-6.2 0-2.34 1.95-5.44 6-9.14 4.05 3.7 6 6.79 6 9.14 0 3.63-2.65 6.2-6 6.2z"/></svg>
+              Nearby Water
+            </span>
+            <div class="bivouac-popup__water-options">${waterOptionsHtml}</div>
+          </div>
+          <div class="bivouac-popup__stat bivouac-popup__stat--weather">
+            <span class="bivouac-popup__stat-label">
+              <svg class="bivouac-popup__stat-icon" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+              Weather
+            </span>
+            <span class="bivouac-popup__stat-value bivouac-popup__stat-value--placeholder">Loading...</span>
           </div>
         </div>
       </div>
@@ -5920,6 +6180,20 @@ export class DirectionsManager {
       .setHTML(popupHtml)
       .addTo(this.map);
 
+    // Add click handler for delete button
+    const popupEl = this.bivouacPopup.getElement();
+    const deleteBtn = popupEl?.querySelector('.bivouac-popup__delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const index = Number(deleteBtn.dataset.bivouacIndex);
+        if (Number.isInteger(index) && index >= 0) {
+          this.removeBivouacCut(index);
+          this.bivouacPopup?.remove();
+        }
+      });
+    }
+
     // Stop event propagation to prevent map click from adding waypoint
     if (event.originalEvent) {
       event.originalEvent.stopPropagation();
@@ -5930,6 +6204,418 @@ export class DirectionsManager {
     setTimeout(() => { this._bivouacClickHandled = false; }, 50);
   }
 
+  /**
+   * Calculate sunrise and sunset times for a given location.
+   * Uses a simplified astronomical calculation.
+   * @param {number} lat - Latitude in degrees
+   * @param {number} lng - Longitude in degrees
+   * @param {Date} date - Optional date (defaults to today)
+   * @returns {{ sunrise: string, sunset: string } | null}
+   */
+  calculateSunTimes(lat, lng, date = new Date()) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return null;
+    }
+
+    try {
+      const toRad = (deg) => deg * Math.PI / 180;
+      const toDeg = (rad) => rad * 180 / Math.PI;
+
+      // Day of year
+      const start = new Date(date.getFullYear(), 0, 0);
+      const diff = date - start;
+      const oneDay = 1000 * 60 * 60 * 24;
+      const dayOfYear = Math.floor(diff / oneDay);
+
+      // Solar declination
+      const declination = -23.45 * Math.cos(toRad(360 / 365 * (dayOfYear + 10)));
+
+      // Hour angle
+      const latRad = toRad(lat);
+      const declRad = toRad(declination);
+      const cosHourAngle = -Math.tan(latRad) * Math.tan(declRad);
+
+      // Check for polar day/night
+      if (cosHourAngle < -1 || cosHourAngle > 1) {
+        return { sunrise: 'N/A', sunset: 'N/A' };
+      }
+
+      const hourAngle = toDeg(Math.acos(cosHourAngle));
+
+      // Time correction for longitude (4 minutes per degree from 15° multiples)
+      const timezone = Math.round(lng / 15);
+      const timeCorrection = (lng - timezone * 15) * 4; // minutes
+
+      // Equation of time approximation
+      const B = toRad(360 / 365 * (dayOfYear - 81));
+      const eot = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
+
+      // Solar noon in minutes from midnight
+      const solarNoon = 720 - timeCorrection - eot;
+
+      // Sunrise and sunset in minutes
+      const sunriseMinutes = solarNoon - hourAngle * 4;
+      const sunsetMinutes = solarNoon + hourAngle * 4;
+
+      const formatTime = (minutes) => {
+        const h = Math.floor(minutes / 60) % 24;
+        const m = Math.round(minutes % 60);
+        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+      };
+
+      return {
+        sunrise: formatTime(sunriseMinutes),
+        sunset: formatTime(sunsetMinutes)
+      };
+    } catch (error) {
+      console.warn('Failed to calculate sun times', error);
+      return null;
+    }
+  }
+
+  /**
+   * Find the nearest water sources from a given coordinate.
+   * Searches map features for water bodies and POIs (fountains, springs, etc.)
+   * @param {number[]} coordinates - [lng, lat] coordinates
+   * @param {number} maxResults - Maximum number of results to return (default 2)
+   * @returns {Array<{ distance: number, type: string }>}
+   */
+  findNearestWaterSources(coordinates, maxResults = 2) {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) {
+      return [];
+    }
+
+    const [lng, lat] = coordinates;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      return [];
+    }
+
+    try {
+      // Water layer definitions with human-readable type labels
+      const waterLayerConfig = [
+        { id: 'Water', type: 'Lake' },
+        { id: 'Water intermittent', type: 'Seasonal lake' },
+        { id: 'River', type: 'River' },
+        { id: 'River intermittent', type: 'Seasonal river' },
+        { id: 'Other waterway', type: 'Stream' },
+        { id: 'Other waterway intermittent', type: 'Seasonal stream' },
+        { id: 'Glacier', type: 'Glacier' }
+      ];
+
+      // POI classes that indicate water sources
+      const waterPoiClasses = new Set([
+        'drinking_water', 'fountain', 'water_well', 'spring',
+        'waterfall', 'watering_place'
+      ]);
+
+      // Human-readable type from POI subclass
+      const poiTypeMap = {
+        'drinking_water': 'Drinking water',
+        'fountain': 'Fountain',
+        'water_well': 'Well',
+        'spring': 'Spring',
+        'waterfall': 'Waterfall',
+        'watering_place': 'Watering place'
+      };
+
+      // Use a fixed geographic radius (in km) instead of pixels
+      // This ensures consistent results regardless of zoom level
+      const SEARCH_RADIUS_KM = 5; // 5km search radius
+
+      // Convert km to approximate degrees (at this latitude)
+      // 1 degree latitude ≈ 111 km
+      // 1 degree longitude ≈ 111 * cos(lat) km
+      const latRadiusDeg = SEARCH_RADIUS_KM / 111;
+      const lngRadiusDeg = SEARCH_RADIUS_KM / (111 * Math.cos(lat * Math.PI / 180));
+
+      // Calculate geographic bounding box
+      const minLng = lng - lngRadiusDeg;
+      const maxLng = lng + lngRadiusDeg;
+      const minLat = lat - latRadiusDeg;
+      const maxLat = lat + latRadiusDeg;
+
+      // Convert to screen coordinates for queryRenderedFeatures
+      const sw = this.map.project([minLng, minLat]);
+      const ne = this.map.project([maxLng, maxLat]);
+
+      const bbox = [
+        [Math.min(sw.x, ne.x), Math.min(sw.y, ne.y)],
+        [Math.max(sw.x, ne.x), Math.max(sw.y, ne.y)]
+      ];
+
+      // Collect all water sources with distances
+      const waterSources = [];
+      const seenTypes = new Set();
+
+
+      // Helper to calculate distance to geometry
+      const calcGeometryDistance = (geometry) => {
+        let distance = Infinity;
+
+        if (geometry.type === 'Point') {
+          const [fLng, fLat] = geometry.coordinates;
+          distance = this.haversineDistance(lat, lng, fLat, fLng);
+        } else if (geometry.type === 'LineString') {
+          for (const coord of geometry.coordinates) {
+            const d = this.haversineDistance(lat, lng, coord[1], coord[0]);
+            if (d < distance) distance = d;
+          }
+        } else if (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') {
+          const rings = geometry.type === 'Polygon'
+            ? [geometry.coordinates[0]]
+            : geometry.coordinates.map(p => p[0]);
+          for (const ring of rings) {
+            for (const coord of ring) {
+              const d = this.haversineDistance(lat, lng, coord[1], coord[0]);
+              if (d < distance) distance = d;
+            }
+          }
+        }
+
+        return distance;
+      };
+
+      // Query water body layers
+      for (const { id, type } of waterLayerConfig) {
+        if (!this.map.getLayer(id)) continue;
+
+        const features = this.map.queryRenderedFeatures(bbox, { layers: [id] });
+
+        for (const feature of features) {
+          const geometry = feature.geometry;
+          if (!geometry) continue;
+
+          const distance = calcGeometryDistance(geometry);
+          if (distance !== Infinity) {
+            waterSources.push({ distance, type });
+          }
+        }
+      }
+
+      // Query POI layer for water-related points (fountains, springs, etc.)
+      const poiLayers = ['poi', 'POI', 'poi_z16', 'poi_z15', 'poi_z14'];
+      for (const layerId of poiLayers) {
+        if (!this.map.getLayer(layerId)) continue;
+
+        const features = this.map.queryRenderedFeatures(bbox, { layers: [layerId] });
+
+        for (const feature of features) {
+          const props = feature.properties || {};
+          const subclass = props.subclass || props.class || '';
+
+          if (!waterPoiClasses.has(subclass)) continue;
+
+          const geometry = feature.geometry;
+          if (!geometry) continue;
+
+          const distance = calcGeometryDistance(geometry);
+          if (distance !== Infinity) {
+            const type = poiTypeMap[subclass] || subclass;
+            waterSources.push({ distance, type });
+          }
+        }
+      }
+
+      // Sort by distance and return unique types (prefer closest of each type)
+      waterSources.sort((a, b) => a.distance - b.distance);
+
+      const results = [];
+      for (const source of waterSources) {
+        // Skip if we already have this type (keep only closest of each type)
+        if (seenTypes.has(source.type)) continue;
+
+        seenTypes.add(source.type);
+        results.push(source);
+
+        if (results.length >= maxResults) break;
+      }
+
+      return results;
+    } catch (error) {
+      console.warn('Failed to find nearest water', error);
+      return [];
+    }
+  }
+
+  /**
+   * Calculate haversine distance between two points in km
+   */
+  haversineDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  onBivouacMouseEnter(event) {
+    const feature = event.features?.[0];
+    const type = feature?.properties?.type;
+
+    // Handle all segment marker types (start, end, bivouac)
+    if (!type || !['start', 'end', 'bivouac'].includes(type)) return;
+
+    // Change cursor to grab for draggable markers
+    this.map.getCanvas().style.cursor = 'grab';
+
+    // Store hovered marker type for the expression
+    this._hoveredMarkerType = type;
+
+    // Scale up the hovered marker type
+    if (this.map.getLayer(SEGMENT_MARKER_LAYER_ID)) {
+      this.map.setLayoutProperty(SEGMENT_MARKER_LAYER_ID, 'icon-size', [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8,
+        ['match', ['get', 'type'],
+          type, type === 'bivouac' ? 0.5 : 0.75,  // Hover size (larger)
+          'bivouac', 0.4,
+          0.55
+        ],
+        12,
+        ['match', ['get', 'type'],
+          type, type === 'bivouac' ? 0.75 : 1.0,  // Hover size (larger)
+          'bivouac', 0.6,
+          0.75
+        ],
+        16,
+        ['match', ['get', 'type'],
+          type, type === 'bivouac' ? 1.0 : 1.25,  // Hover size (larger)
+          'bivouac', 0.8,
+          0.95
+        ]
+      ]);
+    }
+  }
+
+  onBivouacMouseLeave(event) {
+    // Restore cursor
+    this.map.getCanvas().style.cursor = '';
+
+    this._hoveredMarkerType = null;
+
+    // Restore original icon size
+    if (this.map.getLayer(SEGMENT_MARKER_LAYER_ID)) {
+      this.map.setLayoutProperty(SEGMENT_MARKER_LAYER_ID, 'icon-size', [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8,
+        ['match', ['get', 'type'], 'bivouac', 0.4, 0.55],
+        12,
+        ['match', ['get', 'type'], 'bivouac', 0.6, 0.75],
+        16,
+        ['match', ['get', 'type'], 'bivouac', 0.8, 0.95]
+      ]);
+    }
+  }
+
+  /**
+   * Handle mousedown on the map to enable click-and-drag via point insertion.
+   * When LEFT-clicking on a hovered route segment, creates a via point and starts dragging it.
+   * Right-click is handled by contextmenu for bivouac creation.
+   */
+  onMapMouseDown(event) {
+    if (!this.isPanelVisible() || this.isDragging) return;
+
+    // Only handle left mouse button (button === 0)
+    // Right-click (button === 2) should still create bivouacs via contextmenu
+    if (event.originalEvent?.button !== 0) return;
+
+    // Skip if clicking on waypoints or bivouac markers (handled by their own handlers)
+    const hitWaypoints = this.map.queryRenderedFeatures(event.point, { layers: ['waypoints-hit-area'] });
+    if (hitWaypoints.length) return;
+
+    const hitBivouacs = this.map.queryRenderedFeatures(event.point, { layers: [SEGMENT_MARKER_LAYER_ID] });
+    if (hitBivouacs.length) return;
+
+    // Check if we're hovering over the route (have a hovered segment)
+    if (this.hoveredSegmentIndex === null || this.waypoints.length < 2) return;
+
+    // Project click onto route to get insert position
+    const projection = this.projectOntoRoute(event.lngLat, ROUTE_CLICK_PIXEL_TOLERANCE);
+    if (!projection) return;
+
+    const segmentIndex = Number.isInteger(projection.segmentIndex)
+      ? projection.segmentIndex
+      : this.hoveredSegmentIndex;
+
+    // Find the leg index for this segment
+    const segment = this.routeSegments?.[segmentIndex];
+    if (!segment) return;
+
+    // Calculate insert index - determine which leg this segment belongs to
+    let insertIndex = 1;
+    let legIndex = segment.legIndex;
+
+    // If legIndex is not set, try to determine it from segment position
+    if (!Number.isInteger(legIndex)) {
+      // Find which leg contains this segment by comparing its distance to waypoint distances
+      const segmentDistanceKm = segment.startDistanceKm ?? 0;
+      const waypointDistances = this.getWaypointDistances();
+
+      // Find the leg that contains this distance
+      for (let i = 0; i < waypointDistances.length - 1; i++) {
+        const legStart = waypointDistances[i];
+        const legEnd = waypointDistances[i + 1];
+        if (segmentDistanceKm >= legStart && segmentDistanceKm < legEnd) {
+          legIndex = i;
+          break;
+        }
+      }
+      // If still not found, default to last leg
+      if (!Number.isInteger(legIndex) && waypointDistances.length > 1) {
+        legIndex = waypointDistances.length - 2;
+      }
+    }
+
+    if (Number.isInteger(legIndex)) {
+      insertIndex = Math.min(this.waypoints.length, Math.max(0, legIndex) + 1);
+    }
+    insertIndex = Math.max(1, insertIndex);
+
+    // Get the projected coordinates for the via point
+    const projectedCoords = Array.isArray(projection.projection?.coordinates)
+      ? projection.projection.coordinates.slice()
+      : [event.lngLat.lng, event.lngLat.lat];
+
+    // Store neighbor waypoint coordinates BEFORE inserting (for correct drag preview)
+    // Use legIndex to get exact waypoint neighbors of this leg
+    const prevNeighborCoords = Number.isInteger(legIndex) && this.waypoints[legIndex]
+      ? this.waypoints[legIndex].slice(0, 2)
+      : this.waypoints[insertIndex - 1]?.slice(0, 2) ?? null;
+    const nextNeighborCoords = Number.isInteger(legIndex) && this.waypoints[legIndex + 1]
+      ? this.waypoints[legIndex + 1].slice(0, 2)
+      : this.waypoints[insertIndex]?.slice(0, 2) ?? null;
+
+    // Record state for undo
+    this.recordWaypointState();
+
+    // Insert via waypoint at the projected location
+    const waypoint = this.buildWaypointCoordinate(projectedCoords) ?? projectedCoords;
+    this.waypoints.splice(insertIndex, 0, waypoint);
+    this.updateWaypoints();
+
+    // Immediately start dragging the inserted waypoint
+    this.isDragging = true;
+    this.draggedWaypointIndex = insertIndex;
+    this._viaInsertedByDrag = true; // Flag to prevent click handler from adding another point
+    this._dragPrevNeighbor = prevNeighborCoords; // Store for updateDragPreview
+    this._dragNextNeighbor = nextNeighborCoords; // Store for updateDragPreview
+    this.setHoveredWaypointIndex(insertIndex);
+    this.map.dragPan?.disable();
+
+    // Hide the route hover point since we're now dragging a waypoint
+    this.resetSegmentHover('map');
+
+    event.preventDefault?.();
+    event.originalEvent?.preventDefault?.();
+  }
+
   onMapMouseMove(event) {
     if (!this.isPanelVisible()) return;
 
@@ -5937,6 +6623,9 @@ export class DirectionsManager {
       const coords = [event.lngLat.lng, event.lngLat.lat];
       this.waypoints[this.draggedWaypointIndex] = this.buildWaypointCoordinate(coords) ?? coords;
       this.updateWaypoints();
+
+      // Show drag preview lines (dashed lines from neighbors to drag position)
+      this.updateDragPreview(this.draggedWaypointIndex, coords);
     }
 
     if (this.isDragging && this.draggedBivouacIndex !== null) {
@@ -5977,6 +6666,11 @@ export class DirectionsManager {
     this.draggedWaypointIndex = null;
     this.map.dragPan?.enable();
     this.setHoveredWaypointIndex(null);
+    // Clear drag preview lines and stored neighbor coords
+    this.clearDragPreview();
+    this._dragPrevNeighbor = null;
+    this._dragNextNeighbor = null;
+
     if (movedWaypoint && this.waypoints.length >= 2) {
       const startLeg = Math.max(0, movedWaypointIndex - 1);
       const endLeg = Math.min(this.waypoints.length - 2, movedWaypointIndex);
@@ -5990,11 +6684,129 @@ export class DirectionsManager {
     }
   }
 
+  /**
+   * Update the drag preview visualization showing dashed lines
+   * from neighboring waypoints to the current drag position.
+   */
+  updateDragPreview(waypointIndex, dragCoords) {
+    const source = this.map.getSource('drag-preview-source');
+    if (!source) return;
+
+    const features = [];
+
+    // Use stored neighbor coords if available (for newly inserted via points)
+    // Otherwise fall back to waypoints array neighbors (for dragging existing waypoints)
+    const prevCoords = this._dragPrevNeighbor ?? this.waypoints[waypointIndex - 1]?.slice(0, 2);
+    const nextCoords = this._dragNextNeighbor ?? this.waypoints[waypointIndex + 1]?.slice(0, 2);
+
+    // Line from previous waypoint to drag position
+    if (prevCoords) {
+      features.push({
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: [prevCoords, dragCoords]
+        }
+      });
+    }
+
+    // Line from drag position to next waypoint
+    if (nextCoords) {
+      features.push({
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: [dragCoords, nextCoords]
+        }
+      });
+    }
+
+    source.setData({
+      type: 'FeatureCollection',
+      features
+    });
+  }
+
+  /**
+   * Clear the drag preview visualization.
+   */
+  clearDragPreview() {
+    const source = this.map.getSource('drag-preview-source');
+    if (source) {
+      source.setData(EMPTY_COLLECTION);
+    }
+  }
+
+  /**
+   * Get cumulative distances (in km) at each waypoint position.
+   * Used to determine which leg a route segment belongs to.
+   * @returns {number[]} Array of cumulative distances, one per waypoint
+   */
+  getWaypointDistances() {
+    const distances = [0];
+
+    // If we have route profile with day data, use it
+    if (this.routeProfile?.totalDistanceKm && this.waypoints.length >= 2) {
+      // Find waypoint positions in the route by matching coordinates
+      const routeCoords = this.routeGeojson?.geometry?.coordinates;
+      if (Array.isArray(routeCoords) && routeCoords.length >= 2) {
+        let cumulativeKm = 0;
+        let waypointIdx = 1;
+
+        for (let i = 0; i < routeCoords.length - 1 && waypointIdx < this.waypoints.length; i++) {
+          const coord = routeCoords[i];
+          const nextCoord = routeCoords[i + 1];
+
+          // Calculate segment distance
+          const segDist = this.haversineDistance(coord[1], coord[0], nextCoord[1], nextCoord[0]);
+          cumulativeKm += segDist;
+
+          // Check if next waypoint matches next coord (approximately)
+          const waypoint = this.waypoints[waypointIdx];
+          if (waypoint && this.coordinatesMatch(waypoint, nextCoord)) {
+            distances.push(cumulativeKm);
+            waypointIdx++;
+          }
+        }
+
+        // If we didn't find all waypoints, add the total distance for remaining
+        while (distances.length < this.waypoints.length) {
+          distances.push(this.routeProfile.totalDistanceKm);
+        }
+      }
+    }
+
+    // Fallback: split total distance evenly between waypoints
+    if (distances.length < this.waypoints.length && this.waypoints.length >= 2) {
+      const totalKm = this.routeProfile?.totalDistanceKm ?? 0;
+      const numLegs = this.waypoints.length - 1;
+      for (let i = 1; i < this.waypoints.length; i++) {
+        distances[i] = (i / numLegs) * totalKm;
+      }
+    }
+
+    return distances;
+  }
+
   async onMapClick(event) {
     if (!this.isPanelVisible() || this.isDragging) return;
 
+    // Skip if via waypoint was already inserted by drag
+    if (this._viaInsertedByDrag) {
+      this._viaInsertedByDrag = false;
+      return;
+    }
+
     // Skip if bivouac was clicked (handled separately)
     if (this._bivouacClickHandled) return;
+
+    // If bivouac popup is open, close it and don't add a waypoint
+    if (this.bivouacPopup && this.bivouacPopup.isOpen?.()) {
+      this.bivouacPopup.remove();
+      return;
+    }
 
     // Check if click was on a segment marker (bivouac)
     const hitSegmentMarkers = this.map.queryRenderedFeatures(event.point, { layers: [SEGMENT_MARKER_LAYER_ID] });
@@ -6068,6 +6880,33 @@ export class DirectionsManager {
     if (!this.routeSegments.length) {
       this.resetSegmentHover('map');
       return;
+    }
+
+    // Check if we're near a bivouac marker - if so, don't show route hover
+    // This makes it easier to click on bivouacs
+    const BIVOUAC_EXCLUSION_RADIUS = 30; // pixels
+    const bivouacFeatures = this.map.queryRenderedFeatures(event.point, {
+      layers: [SEGMENT_MARKER_LAYER_ID]
+    });
+    const nearBivouac = bivouacFeatures.some((feature) => {
+      return feature.properties?.type === 'bivouac';
+    });
+
+    if (nearBivouac) {
+      // Also check the wider radius for exclusion
+      const mousePixel = this.map.project(event.lngLat);
+      const markers = this.computeSegmentMarkers();
+      const isTooCloseToAnyBivouac = markers.some((marker) => {
+        if (marker.type !== 'bivouac' || !marker.coordinates) return false;
+        const markerPixel = this.map.project(toLngLat(marker.coordinates));
+        const dist = Math.hypot(mousePixel.x - markerPixel.x, mousePixel.y - markerPixel.y);
+        return dist < BIVOUAC_EXCLUSION_RADIUS;
+      });
+
+      if (isTooCloseToAnyBivouac) {
+        this.resetSegmentHover('map');
+        return;
+      }
     }
 
     const mousePixel = this.map.project(event.lngLat);
@@ -7622,6 +8461,11 @@ export class DirectionsManager {
     if (this.map.getLayer('route-hover-point')) {
       this.map.setPaintProperty('route-hover-point', 'circle-stroke-color', this.modeColors[this.currentMode]);
     }
+    if (this.map.getLayer('drag-preview-line')) {
+      this.map.setPaintProperty('drag-preview-line', 'line-color', this.modeColors[this.currentMode]);
+    }
+    // Update bivouac marker icon to match route color
+    updateBivouacMarkerColor(this.map, this.modeColors[this.currentMode]);
     if (this.cutSegments.length) {
       this.updateCutSegmentColors();
       this.updateRouteLineSource();
@@ -8498,17 +9342,47 @@ export class DirectionsManager {
 
     const tickTarget = Math.max(2, Math.round(maxTicks));
     const span = max - min;
-    const step = span / (tickTarget - 1);
-    const ticks = [];
-    for (let index = 0; index < tickTarget; index += 1) {
-      const value = min + step * index;
-      ticks.push(Number(value.toFixed(6)));
+
+    // Calculate a nice step size (0.5, 1, 2, 5, 10, 20, 50, etc.)
+    const rawStep = span / (tickTarget - 1);
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const normalized = rawStep / magnitude;
+
+    let niceStep;
+    if (normalized <= 0.5) {
+      niceStep = 0.5 * magnitude;
+    } else if (normalized <= 1) {
+      niceStep = 1 * magnitude;
+    } else if (normalized <= 2) {
+      niceStep = 2 * magnitude;
+    } else if (normalized <= 5) {
+      niceStep = 5 * magnitude;
+    } else {
+      niceStep = 10 * magnitude;
     }
-    if (ticks.length) {
+
+    // Round min down and max up to nice step boundaries
+    const niceMin = Math.floor(min / niceStep) * niceStep;
+    const niceMax = Math.ceil(max / niceStep) * niceStep;
+
+    const ticks = [];
+    for (let value = niceMin; value <= niceMax + niceStep * 0.001; value += niceStep) {
+      // Only include ticks within or close to the actual range
+      if (value >= min - niceStep * 0.001 && value <= max + niceStep * 0.001) {
+        const rounded = Math.round(value * 1000) / 1000;
+        ticks.push(rounded);
+      }
+    }
+
+    // Always include exact min and max
+    if (ticks.length && Math.abs(ticks[0] - min) > niceStep * 0.1) {
       ticks[0] = Number(min.toFixed(6));
+    }
+    if (ticks.length && Math.abs(ticks[ticks.length - 1] - max) > niceStep * 0.1) {
       ticks[ticks.length - 1] = Number(max.toFixed(6));
     }
-    return { ticks, min, max, step };
+
+    return { ticks, min, max, step: niceStep };
   }
 
   formatElevationLabel(value) {
@@ -9029,9 +9903,6 @@ export class DirectionsManager {
 
       dayDetailsHtml = `
         <div class="day-details is-visible">
-          <div class="day-details__header">
-            <span class="day-details__title">Day ${selectedDay.dayNumber}</span>
-          </div>
           <div class="day-details__grid">
             <div class="day-details__item">
               <span class="day-details__item-label">Estimated Time:</span>
@@ -9231,6 +10102,9 @@ export class DirectionsManager {
       // Update Y-axis labels with altitude min/max
       this.updateElevationYAxisLabels();
 
+      // Update grid lines to match Y-axis labels
+      this.updateElevationGridLines();
+
       // Update marker positions and visibility
       this.updateElevationMarkerPositions();
       // Delay visibility update to ensure DOM is fully updated
@@ -9281,20 +10155,116 @@ export class DirectionsManager {
     const yAxisLabels = document.getElementById('elevationYAxisLabels');
     if (!yAxisLabels) return;
 
-    const yMaxLabel = yAxisLabels.querySelector('.chart-card__y-max');
-    const yMinLabel = yAxisLabels.querySelector('.chart-card__y-min');
-    if (!yMaxLabel || !yMinLabel) return;
-
     const yAxis = this.elevationYAxis;
     if (!yAxis || !Number.isFinite(yAxis.min) || !Number.isFinite(yAxis.max)) {
-      yMaxLabel.textContent = '';
-      yMinLabel.textContent = '';
+      yAxisLabels.innerHTML = '';
       return;
     }
 
-    // Format as integers
-    yMaxLabel.textContent = Math.round(yAxis.max).toLocaleString();
-    yMinLabel.textContent = Math.round(yAxis.min).toLocaleString();
+    const yMin = yAxis.min;
+    const yMax = yAxis.max;
+    const ySpan = yMax - yMin;
+
+    if (ySpan <= 0) {
+      yAxisLabels.innerHTML = '';
+      return;
+    }
+
+    const ticks = [];
+
+    // Always include min (at bottom)
+    ticks.push({ value: yMin, percent: 0, isEdge: true, isMax: false });
+
+    // Add ONE intermediate tick at a nice round number near the middle
+    // Round to 100m, 50m, or 25m depending on elevation span
+    const midValue = (yMin + yMax) / 2;
+    let step;
+    if (ySpan >= 100) {
+      step = 100;
+    } else if (ySpan >= 50) {
+      step = 50;
+    } else {
+      step = 25;
+    }
+
+    // Round midValue to nearest step
+    const roundedMid = Math.round(midValue / step) * step;
+
+    // Only add if not too close to min or max (within 20% of span from edges)
+    const minDistance = ySpan * 0.2;
+    if (roundedMid - yMin > minDistance && yMax - roundedMid > minDistance) {
+      const percent = ((roundedMid - yMin) / ySpan) * 100;
+      ticks.push({ value: roundedMid, percent, isEdge: false, isMax: false });
+    }
+
+    // Always include max (at top)
+    ticks.push({ value: yMax, percent: 100, isEdge: true, isMax: true });
+
+    // Generate HTML - labels positioned using bottom percentage
+    const labelsHtml = ticks.map(tick => {
+      const label = Math.round(tick.value).toLocaleString();
+      const className = tick.isEdge
+        ? (tick.isMax ? 'chart-card__y-max' : 'chart-card__y-min')
+        : 'chart-card__y-mid';
+      return `<span class="${className}" style="bottom: ${tick.percent.toFixed(2)}%">${label}</span>`;
+    }).join('');
+
+    yAxisLabels.innerHTML = labelsHtml;
+  }
+
+  updateElevationGridLines() {
+    if (!this.elevationChartContainer) return;
+
+    const svgElement = this.elevationChartContainer.querySelector('.elevation-area');
+    if (!svgElement) return;
+
+    // Remove existing grid lines
+    const existingLines = svgElement.querySelectorAll('.elevation-grid-line');
+    existingLines.forEach(line => line.remove());
+
+    const yAxis = this.elevationYAxis;
+    if (!yAxis || !Number.isFinite(yAxis.min) || !Number.isFinite(yAxis.max)) return;
+
+    const yMin = yAxis.min;
+    const yMax = yAxis.max;
+    const ySpan = yMax - yMin;
+    if (ySpan <= 0) return;
+
+    // Round to 100m, 50m, or 25m depending on elevation span
+    const midValue = (yMin + yMax) / 2;
+    let step;
+    if (ySpan >= 100) {
+      step = 100;
+    } else if (ySpan >= 50) {
+      step = 50;
+    } else {
+      step = 25;
+    }
+
+    // Round midValue to nearest step
+    const roundedMid = Math.round(midValue / step) * step;
+
+    // Only add if not too close to min or max (within 20% of span from edges)
+    const minDistance = ySpan * 0.2;
+    if (roundedMid - yMin > minDistance && yMax - roundedMid > minDistance) {
+      const yPercent = 100 - ((roundedMid - yMin) / ySpan) * 100;
+
+      // Create and insert the grid line
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('class', 'elevation-grid-line');
+      line.setAttribute('x1', '0');
+      line.setAttribute('y1', yPercent.toFixed(2));
+      line.setAttribute('x2', '100');
+      line.setAttribute('y2', yPercent.toFixed(2));
+
+      // Insert before the fill path
+      const fillPath = svgElement.querySelector('.elevation-area-fill');
+      if (fillPath) {
+        svgElement.insertBefore(line, fillPath);
+      } else {
+        svgElement.appendChild(line);
+      }
+    }
   }
 
   updateElevationGradient() {
@@ -9311,86 +10281,81 @@ export class DirectionsManager {
     const fallbackColor = this.modeColors[this.currentMode];
     const gradientStops = [];
 
-    // Build gradient stops for current domain
-    const addGradientStop = (distanceKm, color) => {
-      if (!Number.isFinite(distanceKm) || typeof color !== 'string') return;
-      const trimmed = color.trim();
-      if (!trimmed) return;
-
-      // Calculate ratio relative to current domain
-      const clampedDistance = Math.min(domainMax, Math.max(domainMin, distanceKm));
-      const ratio = (clampedDistance - domainMin) / domainSpan;
-      gradientStops.push({ offset: Math.max(0, Math.min(1, ratio)), color: trimmed });
-    };
-
-    // Get segments to build gradient from
-    const gradientSegments = (() => {
-      if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
-        return this.profileSegments;
-      }
-      if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
-        return this.cutSegments;
-      }
-      return [];
-    })();
-
-    gradientSegments.forEach((segment) => {
-      if (!segment) return;
-      const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
-      if (!segmentColor) return;
-
-      let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
-      let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
-
-      addGradientStop(startKm, segmentColor);
-      addGradientStop(endKm, segmentColor);
-    });
-
-    // Add sharp transitions at cut segment boundaries
+    // Add gradient stops for cut segments with SHARP transitions at boundaries
     if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
-      this.cutSegments.forEach((segment, index) => {
-        if (index === 0 || !segment) return;
-        const prevSegment = this.cutSegments[index - 1];
-        if (!prevSegment) return;
+      const cutSegs = this.cutSegments;
+      for (let i = 0; i < cutSegs.length; i += 1) {
+        const segment = cutSegs[i];
+        if (!segment) continue;
 
-        const boundaryKm = Number(segment.startKm ?? segment.startDistanceKm);
-        if (!Number.isFinite(boundaryKm)) return;
+        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
+        let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+        let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
 
-        const prevColor = prevSegment.color?.trim?.() || fallbackColor;
-        const currColor = segment.color?.trim?.() || fallbackColor;
+        // Calculate ratios
+        const startRatio = Math.max(0, Math.min(1, (startKm - domainMin) / domainSpan));
+        const endRatio = Math.max(0, Math.min(1, (endKm - domainMin) / domainSpan));
 
-        const ratio = (boundaryKm - domainMin) / domainSpan;
-        if (ratio > 0 && ratio < 1) {
-          gradientStops.push({ offset: ratio - 0.0001, color: prevColor });
-          gradientStops.push({ offset: ratio, color: currColor });
+        // Add start and end stops for this segment
+        gradientStops.push({ offset: startRatio, color: segmentColor });
+
+        // For sharp transition: add current color just before boundary, next color at boundary
+        if (i < cutSegs.length - 1) {
+          const nextSegment = cutSegs[i + 1];
+          if (nextSegment) {
+            const nextColor = typeof nextSegment.color === 'string' ? nextSegment.color.trim() : fallbackColor;
+            // Current segment color just before boundary (tiny offset before)
+            gradientStops.push({ offset: Math.max(0, endRatio - 0.0001), color: segmentColor });
+            // Next segment color at boundary
+            gradientStops.push({ offset: endRatio, color: nextColor });
+          }
+        } else {
+          // Last segment - just add end stop
+          gradientStops.push({ offset: endRatio, color: segmentColor });
         }
+      }
+    } else {
+      // Single segment or profile segments - no sharp transitions needed
+      const gradientSegments = (() => {
+        if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
+          return this.profileSegments;
+        }
+        if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
+          return this.cutSegments;
+        }
+        return [];
+      })();
+
+      gradientSegments.forEach((segment) => {
+        if (!segment) return;
+        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
+        if (!segmentColor) return;
+
+        let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+        let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
+
+        const startRatio = Math.max(0, Math.min(1, (startKm - domainMin) / domainSpan));
+        const endRatio = Math.max(0, Math.min(1, (endKm - domainMin) / domainSpan));
+
+        gradientStops.push({ offset: startRatio, color: segmentColor });
+        gradientStops.push({ offset: endRatio, color: segmentColor });
       });
     }
 
-    // Sort and deduplicate stops
+    // Sort stops by offset
     gradientStops.sort((a, b) => a.offset - b.offset);
-
-    // Remove duplicates but keep sharp transitions
-    const uniqueStops = [];
-    for (let i = 0; i < gradientStops.length; i++) {
-      const stop = gradientStops[i];
-      const prev = uniqueStops[uniqueStops.length - 1];
-      if (!prev || Math.abs(prev.offset - stop.offset) > 1e-6 || prev.color !== stop.color) {
-        uniqueStops.push(stop);
-      }
-    }
 
     // Clear existing stops
     gradientEl.innerHTML = '';
 
     // Add new stops
-    if (uniqueStops.length === 0) {
+    if (gradientStops.length === 0) {
       const stopEl = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
       stopEl.setAttribute('offset', '0%');
       stopEl.setAttribute('stop-color', fallbackColor);
       gradientEl.appendChild(stopEl);
     } else {
-      uniqueStops.forEach((stop) => {
+      gradientStops.forEach((stop) => {
         const stopEl = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
         stopEl.setAttribute('offset', `${(stop.offset * 100).toFixed(4)}%`);
         stopEl.setAttribute('stop-color', stop.color);
@@ -9445,14 +10410,31 @@ export class DirectionsManager {
     const grade = this.computeGradeAtDistance(distanceKm);
     const totalDistance = Number(this.routeProfile?.totalDistanceKm) || 0;
 
-    // Calculate cumulative metrics from start to current position for duration
-    const cumulativeMetrics = this.computeCumulativeMetrics(distanceKm, 0);
+    // Find the current day segment (from last bivouac)
+    // On multiday routes, compute from day segment start, not route start
+    let segmentStartKm = 0;
+    if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
+      const currentSegment = this.getCutSegmentForDistance(distanceKm);
+      if (currentSegment) {
+        const startKm = Number(currentSegment.startKm ?? currentSegment.startDistanceKm);
+        if (Number.isFinite(startKm)) {
+          segmentStartKm = startKm;
+        }
+      }
+    }
+
+    // Calculate distance from segment start (day distance)
+    const dayDistanceKm = distanceKm - segmentStartKm;
+
+    // Calculate cumulative metrics from segment start to current position
+    const cumulativeMetrics = this.computeCumulativeMetrics(distanceKm, segmentStartKm);
     const ascent = Math.max(0, Math.round(cumulativeMetrics?.ascent ?? 0));
     const descent = Math.max(0, Math.round(cumulativeMetrics?.descent ?? 0));
-    const durationHours = this.estimateTravelTimeHours(distanceKm, ascent, descent);
+    const durationHours = this.estimateTravelTimeHours(dayDistanceKm, ascent, descent);
 
-    // Show tooltip on the elevation chart
-    this.showElevationChartTooltip(distanceKm, elevation, grade, durationHours, totalDistance);
+    // Show tooltip on the elevation chart with day-relative values
+    // Pass both display distance (day-relative) and position distance (absolute)
+    this.showElevationChartTooltip(dayDistanceKm, elevation, grade, durationHours, ascent, distanceKm, totalDistance);
   }
 
   ensureElevationChartTooltip() {
@@ -9477,14 +10459,14 @@ export class DirectionsManager {
     return tooltip;
   }
 
-  showElevationChartTooltip(distanceKm, elevation, grade, durationHours, totalDistance) {
+  showElevationChartTooltip(displayDistanceKm, elevation, grade, durationHours, cumulativeAscent, positionDistanceKm, totalDistance) {
     if (!this.elevationChartContainer) {
       return;
     }
 
     const tooltip = this.ensureElevationChartTooltip();
 
-    // Calculate horizontal position based on distance
+    // Calculate horizontal position based on absolute position distance
     let domainMin = Number(this.elevationDomain?.min);
     let domainMax = Number(this.elevationDomain?.max);
     if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
@@ -9497,20 +10479,22 @@ export class DirectionsManager {
       return;
     }
 
-    const ratio = (distanceKm - domainMin) / span;
+    const ratio = (positionDistanceKm - domainMin) / span;
     const clampedRatio = Math.max(0, Math.min(1, ratio));
     const percent = clampedRatio * 100;
 
-    // Format labels
-    const distanceLabel = this.formatDistance(distanceKm);
+    // Format labels - use display distance (from day start on multiday routes)
+    const distanceLabel = this.formatDistance(displayDistanceKm);
     const elevationLabel = Number.isFinite(elevation) ? `${Math.round(elevation)} m` : '—';
     const gradeLabel = Number.isFinite(grade) ? `${grade > 0 ? '+' : ''}${grade.toFixed(1)}%` : '—';
     const durationLabel = Number.isFinite(durationHours) ? this.formatDurationHours(durationHours) : '—';
+    const ascentLabel = Number.isFinite(cumulativeAscent) && cumulativeAscent > 0 ? `+${cumulativeAscent} m` : '—';
 
     tooltip.innerHTML = `
       <div class="elevation-chart-tooltip__distance">${escapeHtml(distanceLabel)} km</div>
       <div class="elevation-chart-tooltip__details">
         <span class="elevation-chart-tooltip__elevation">Alt. ${escapeHtml(elevationLabel)}</span>
+        <span class="elevation-chart-tooltip__ascent">↗ ${escapeHtml(ascentLabel)}</span>
         <span class="elevation-chart-tooltip__grade">${escapeHtml(gradeLabel)}</span>
         <span class="elevation-chart-tooltip__duration">${escapeHtml(durationLabel)}</span>
       </div>
@@ -9775,6 +10759,7 @@ export class DirectionsManager {
     }
     this.detachElevationChartEvents();
     this.lastElevationHoverDistance = null;
+    this.elevationChartTooltip = null; // Clear tooltip so it's recreated for new container
     if (this.elevationResizeObserver) {
       this.elevationResizeObserver.disconnect();
       this.elevationResizeObserver = null;
@@ -9786,6 +10771,7 @@ export class DirectionsManager {
       this.fullRouteDomain = null;
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
+      this.elevationChartTooltip = null;
       this.elevationHoverIndicator = null;
       this.elevationHoverLine = null;
       this.highlightedElevationBar = null;
@@ -9803,6 +10789,7 @@ export class DirectionsManager {
       this.fullRouteDomain = null;
       this.elevationYAxis = null;
       this.elevationChartContainer = null;
+      this.elevationChartTooltip = null;
       this.elevationHoverIndicator = null;
       this.elevationHoverLine = null;
       this.highlightedElevationBar = null;
@@ -9931,21 +10918,30 @@ export class DirectionsManager {
         if (!Number.isFinite(endKm)) endKm = Number(segment.endDistanceKm);
         if (!Number.isFinite(endKm)) endKm = startKm;
 
-        // Add stops for this segment
-        addGradientStop(startKm, segmentColor);
-        addGradientStop(endKm, segmentColor);
+        // Calculate ratios for this segment
+        const clampedStart = Math.min(xMax, Math.max(xMin, startKm));
+        const clampedEnd = Math.min(xMax, Math.max(xMin, endKm));
+        const startRatio = Math.max(0, Math.min(1, (clampedStart - xMin) / safeXSpan));
+        const endRatio = Math.max(0, Math.min(1, (clampedEnd - xMin) / safeXSpan));
 
-        // For sharp transitions: at segment boundaries, add the next segment's color
-        // at the exact same position as this segment's end
+        // Add segment start color
+        gradientStops.push({ offset: startRatio, color: segmentColor });
+
+        // For sharp transitions: add current color just BEFORE boundary, next color AT boundary
         if (i < cutSegs.length - 1) {
           const nextSegment = cutSegs[i + 1];
           if (nextSegment) {
             const nextColor = typeof nextSegment.color === 'string'
               ? nextSegment.color.trim()
               : fallbackColor;
-            // Add stop at boundary with next segment's color (creates sharp step)
-            addGradientStop(endKm, nextColor);
+            // Current color just before boundary (tiny offset difference creates hard edge)
+            gradientStops.push({ offset: Math.max(0, endRatio - 0.0001), color: segmentColor });
+            // Next color at boundary
+            gradientStops.push({ offset: endRatio, color: nextColor });
           }
+        } else {
+          // Last segment - add end stop
+          gradientStops.push({ offset: endRatio, color: segmentColor });
         }
       }
     }
@@ -9973,8 +10969,12 @@ export class DirectionsManager {
         };
         const startColor = resolveSegmentColor(sample.startDistanceKm);
         const endColor = resolveSegmentColor(sample.endDistanceKm);
-        addGradientStop(sample.startDistanceKm, startColor);
-        addGradientStop(sample.endDistanceKm, endColor);
+        // Only add sample-based gradient stops if we don't have cut segments
+        // Cut segments handle their own gradient stops with sharp transitions
+        if (!Array.isArray(this.cutSegments) || this.cutSegments.length <= 1) {
+          addGradientStop(sample.startDistanceKm, startColor);
+          addGradientStop(sample.endDistanceKm, endColor);
+        }
         const segment = baseSegment;
         const accentColor = adjustHexColor(baseColor, 0.18);
         const spanKm = Math.max(0, sample.endDistanceKm - sample.startDistanceKm);
@@ -10004,7 +11004,6 @@ export class DirectionsManager {
             data-mid-km="${((sample.startDistanceKm + sample.endDistanceKm) / 2).toFixed(6)}"
             data-segment-index="${segment ? segment.index : -1}"
             style="${style}"
-            title="${title}"
           ></div>
         `;
       })
@@ -10048,40 +11047,61 @@ export class DirectionsManager {
       if (!gradientStops.length) {
         return '';
       }
+      // Sort by offset
       const sorted = gradientStops
         .map((stop) => ({
           offset: Math.max(0, Math.min(1, stop.offset ?? 0)),
           color: stop.color
         }))
         .sort((a, b) => a.offset - b.offset);
-      // Deduplicate while preserving sharp transitions (same offset, different colors)
-      const deduped = [];
-      sorted.forEach((stop) => {
-        const last = deduped[deduped.length - 1];
-        // Keep stops that are at different offsets OR have different colors
-        // This allows "step" transitions where we have two stops at same offset with different colors
-        if (!last || Math.abs(stop.offset - last.offset) > 1e-4 || last.color !== stop.color) {
-          deduped.push(stop);
-        } else if (last.color === stop.color) {
-          // Same offset and same color - just update to latest
-          deduped[deduped.length - 1] = stop;
-        }
-      });
-      if (deduped.length < 2) {
+
+      if (sorted.length < 2) {
         return '';
       }
-      const stopsMarkup = deduped
-        .map((stop) => `<stop offset="${(stop.offset * 100).toFixed(3)}%" stop-color="${stop.color}" />`)
+      const stopsMarkup = sorted
+        .map((stop) => `<stop offset="${(stop.offset * 100).toFixed(4)}%" stop-color="${stop.color}" />`)
         .join('');
       return `<defs><linearGradient id="${gradientId}" gradientUnits="objectBoundingBox">${stopsMarkup}</linearGradient></defs>`;
     })();
 
     const areaPaths = this.buildElevationAreaPaths(samples, yAxis, { min: xMin, max: xMax });
     const areaFillColor = adjustHexColor(fallbackColor, 0.08);
+
+    // Generate horizontal grid lines at nice elevation intervals
+    const gridLinesMarkup = (() => {
+      const yMin = yAxis.min;
+      const yMax = yAxis.max;
+      const ySpan = yMax - yMin;
+      if (ySpan <= 0) return '';
+
+      // Round to 100m, 50m, or 25m depending on elevation span
+      const midValue = (yMin + yMax) / 2;
+      let step;
+      if (ySpan >= 100) {
+        step = 100;
+      } else if (ySpan >= 50) {
+        step = 50;
+      } else {
+        step = 25;
+      }
+
+      // Round midValue to nearest step
+      const roundedMid = Math.round(midValue / step) * step;
+
+      // Only add if not too close to min or max (within 20% of span from edges)
+      const minDistance = ySpan * 0.2;
+      if (roundedMid - yMin > minDistance && yMax - roundedMid > minDistance) {
+        const yPercent = 100 - ((roundedMid - yMin) / ySpan) * 100;
+        return `<line class="elevation-grid-line" x1="0" y1="${yPercent.toFixed(2)}" x2="100" y2="${yPercent.toFixed(2)}" />`;
+      }
+      return '';
+    })();
+
     const areaSvg = areaPaths.fill
       ? `
         <svg class="elevation-area" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           ${gradientMarkup}
+          ${gridLinesMarkup}
           <path class="elevation-area-fill" d="${areaPaths.fill}" fill="${gradientMarkup ? `url(#${gradientId})` : areaFillColor}"/>
         </svg>
       `
