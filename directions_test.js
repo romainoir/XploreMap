@@ -23,6 +23,8 @@ const DISTANCE_TICK_TARGET = 6;
 const ROUTE_CUT_EPSILON_KM = 0.02;
 const ROUTE_CLICK_PIXEL_TOLERANCE = 18;
 const ROUTE_GRADIENT_BLEND_DISTANCE_KM = 0.05;
+const OVERLAP_DETECTION_TOLERANCE_METERS = 15;
+const OVERLAP_LINE_OFFSET_PX = 1;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
 const POI_SEARCH_RADIUS_METERS = 100;
@@ -971,6 +973,215 @@ const bearingBetween = (start, end) => {
   }
   bearing = (bearing + 360) % 360;
   return bearing;
+};
+
+/**
+ * Detect overlapping segments in a route (e.g., out-and-back sections)
+ * and compute offset values to visually separate them.
+ * 
+ * @param {Array<[number, number]>} coordinates - Route coordinates [lng, lat]
+ * @param {number} toleranceMeters - Distance threshold to consider points as overlapping
+ * @returns {Float32Array} Array of offset values for each coordinate (positive = outbound, negative = return)
+ */
+const computeRouteOverlapOffsets = (coordinates, toleranceMeters = OVERLAP_DETECTION_TOLERANCE_METERS) => {
+  if (!Array.isArray(coordinates) || coordinates.length < 3) {
+    return new Float32Array(coordinates?.length || 0);
+  }
+
+  const count = coordinates.length;
+  const offsets = new Float32Array(count);
+
+  // Build spatial grid for efficient neighbor lookup
+  // Grid cell size based on tolerance (in degrees, roughly)
+  const cellSizeDeg = (toleranceMeters / 111000) * 2;
+  const grid = new Map();
+
+  const getGridKey = (coord) => {
+    const cellX = Math.floor(coord[0] / cellSizeDeg);
+    const cellY = Math.floor(coord[1] / cellSizeDeg);
+    return `${cellX},${cellY}`;
+  };
+
+  const getNeighborKeys = (coord) => {
+    const cellX = Math.floor(coord[0] / cellSizeDeg);
+    const cellY = Math.floor(coord[1] / cellSizeDeg);
+    const keys = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        keys.push(`${cellX + dx},${cellY + dy}`);
+      }
+    }
+    return keys;
+  };
+
+  // Index all coordinates in grid
+  for (let i = 0; i < count; i++) {
+    const coord = coordinates[i];
+    if (!Array.isArray(coord) || coord.length < 2) continue;
+    const key = getGridKey(coord);
+    if (!grid.has(key)) {
+      grid.set(key, []);
+    }
+    grid.get(key).push(i);
+  }
+
+  // Minimum index gap to consider as potential overlap (not just consecutive points)
+  const minIndexGap = Math.max(10, Math.floor(count * 0.05));
+
+  // Track which points are in overlap regions
+  const isOverlap = new Uint8Array(count);
+
+  // For each point, check if it overlaps with a distant point
+  for (let i = 0; i < count; i++) {
+    const coord = coordinates[i];
+    if (!Array.isArray(coord) || coord.length < 2) continue;
+
+    const neighborKeys = getNeighborKeys(coord);
+
+    for (const key of neighborKeys) {
+      const indices = grid.get(key);
+      if (!indices) continue;
+
+      for (const j of indices) {
+        // Skip if too close in sequence (not a real overlap)
+        if (Math.abs(j - i) < minIndexGap) continue;
+
+        // Check distance
+        const other = coordinates[j];
+        if (!Array.isArray(other) || other.length < 2) continue;
+
+        const distance = haversineDistanceMeters(coord, other);
+        if (distance === null || distance > toleranceMeters) continue;
+
+        // Found an overlap! Mark both points
+        isOverlap[i] = 1;
+        isOverlap[j] = 1;
+
+        // Determine which is "outbound" (earlier) vs "return" (later)
+        if (i < j) {
+          // Current point is outbound, later point is return
+          // Check bearings to confirm they're going opposite directions
+          const bearingI = i > 0 ? bearingBetween(coordinates[i - 1], coord) : null;
+          const bearingJ = j > 0 ? bearingBetween(coordinates[j - 1], other) : null;
+
+          if (bearingI !== null && bearingJ !== null) {
+            // Calculate bearing difference (should be ~180° for out-and-back)
+            const bearingDiff = Math.abs(bearingI - bearingJ);
+            const normalizedDiff = bearingDiff > 180 ? 360 - bearingDiff : bearingDiff;
+
+            // Only apply offset if bearings are roughly opposite (>90°)
+            if (normalizedDiff > 90) {
+              offsets[i] = OVERLAP_LINE_OFFSET_PX;
+              offsets[j] = -OVERLAP_LINE_OFFSET_PX;
+            }
+          } else {
+            // Fallback: just use index order
+            offsets[i] = OVERLAP_LINE_OFFSET_PX;
+            offsets[j] = -OVERLAP_LINE_OFFSET_PX;
+          }
+        }
+      }
+    }
+  }
+
+  // Smooth the offsets to avoid abrupt changes (simple moving average)
+  const smoothed = new Float32Array(count);
+  const smoothWindow = 3;
+  for (let i = 0; i < count; i++) {
+    let sum = 0;
+    let weightSum = 0;
+    for (let j = Math.max(0, i - smoothWindow); j <= Math.min(count - 1, i + smoothWindow); j++) {
+      const weight = 1 - Math.abs(j - i) / (smoothWindow + 1);
+      sum += offsets[j] * weight;
+      weightSum += weight;
+    }
+    smoothed[i] = weightSum > 0 ? sum / weightSum : 0;
+  }
+
+  return { offsets: smoothed, isOverlap };
+};
+
+/**
+ * Apply geometric offset to coordinates by shifting them perpendicular to the route direction.
+ * This physically moves the coordinates rather than relying on MapLibre's line-offset property.
+ * 
+ * @param {Array<[number, number, number?]>} coordinates - Route coordinates [lng, lat, elevation?]
+ * @param {Float32Array|Array<number>} offsets - Offset values in pixels (positive = right, negative = left)
+ * @param {number} metersPerPixel - Conversion factor from pixels to meters (depends on zoom level, ~1-3m at typical zoom)
+ * @returns {Array<[number, number, number?]>} New coordinates with geometric offset applied
+ */
+const geometricOffsetCoordinates = (coordinates, offsets, metersPerPixel = 2) => {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return coordinates;
+  }
+  if (!offsets || offsets.length !== coordinates.length) {
+    return coordinates;
+  }
+
+  const count = coordinates.length;
+  const result = new Array(count);
+
+  // Earth radius for coordinate conversion
+  const earthRadius = 6371000;
+
+  for (let i = 0; i < count; i++) {
+    const coord = coordinates[i];
+    if (!Array.isArray(coord) || coord.length < 2) {
+      result[i] = coord;
+      continue;
+    }
+
+    const offsetPx = offsets[i] ?? 0;
+    if (Math.abs(offsetPx) < 0.1) {
+      // No significant offset, keep original
+      result[i] = coord.slice();
+      continue;
+    }
+
+    // Calculate bearing to next point (or from previous point for last)
+    let bearing;
+    if (i < count - 1) {
+      bearing = bearingBetween(coord, coordinates[i + 1]);
+    } else if (i > 0) {
+      bearing = bearingBetween(coordinates[i - 1], coord);
+    } else {
+      result[i] = coord.slice();
+      continue;
+    }
+
+    if (bearing === null) {
+      result[i] = coord.slice();
+      continue;
+    }
+
+    // Perpendicular bearing (90° to the right for positive offset)
+    const perpBearing = (bearing + 90) % 360;
+    const perpBearingRad = toRadians(perpBearing);
+
+    // Convert offset from pixels to meters
+    const offsetMeters = offsetPx * metersPerPixel;
+
+    // Calculate new position
+    const lat = coord[1];
+    const lng = coord[0];
+    const latRad = toRadians(lat);
+
+    // Offset in degrees
+    const deltaLat = (offsetMeters * Math.cos(perpBearingRad)) / earthRadius;
+    const deltaLng = (offsetMeters * Math.sin(perpBearingRad)) / (earthRadius * Math.cos(latRad));
+
+    const newLng = lng + toDegrees(deltaLng);
+    const newLat = lat + toDegrees(deltaLat);
+
+    // Preserve elevation if present
+    if (coord.length > 2 && Number.isFinite(coord[2])) {
+      result[i] = [newLng, newLat, coord[2]];
+    } else {
+      result[i] = [newLng, newLat];
+    }
+  }
+
+  return result;
 };
 
 const SEGMENT_COLOR_PALETTE = [
@@ -2006,6 +2217,7 @@ export class DirectionsManager {
     };
 
     removeLayer('route-line');
+    removeLayer('route-line-casing');
     removeLayer('route-line-manual');
     removeLayer('route-line-manual-bg');
     removeLayer('route-segment-hover');
@@ -2068,6 +2280,22 @@ export class DirectionsManager {
     this.map.addSource(ROUTE_POI_SOURCE_ID, {
       type: 'geojson',
       data: EMPTY_COLLECTION
+    });
+
+    // Add white casing layer (border effect behind the main route)
+    this.map.addLayer({
+      id: 'route-line-casing',
+      type: 'line',
+      source: 'route-line-source',
+      layout: {
+        'line-join': 'round',
+        'line-cap': 'round'
+      },
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': 6,
+        'line-opacity': 0.9
+      }
     });
 
     const routeLineLayer = {
@@ -3066,10 +3294,52 @@ export class DirectionsManager {
     };
   }
 
+  /**
+   * Compute smoothed grade for a segment by looking at a window around it
+   * This reduces the noisy/fragmented appearance of slope colors
+   */
   computeSegmentGrade(segment) {
     if (!segment) {
       return 0;
     }
+
+    const segmentIndex = segment.index;
+    const routeSegments = this.routeSegments;
+
+    // If we have route segments and a valid index, use smoothed calculation
+    if (Array.isArray(routeSegments) && Number.isInteger(segmentIndex) && segmentIndex >= 0) {
+      // Smoothing window: look 50m before and after
+      const smoothingDistanceKm = 0.05; // 50 meters
+      const targetStartKm = (segment.startDistanceKm || 0) - smoothingDistanceKm;
+      const targetEndKm = (segment.endDistanceKm || segment.startDistanceKm || 0) + smoothingDistanceKm;
+
+      let totalElevationChange = 0;
+      let totalDistanceM = 0;
+
+      for (const seg of routeSegments) {
+        if (!seg) continue;
+        const segStartKm = seg.startDistanceKm || 0;
+        const segEndKm = seg.endDistanceKm || segStartKm;
+
+        // Check if this segment overlaps with our window
+        if (segEndKm < targetStartKm || segStartKm > targetEndKm) continue;
+
+        const startElev = seg.startElevation;
+        const endElev = seg.endElevation;
+        const distKm = seg.distanceKm || (segEndKm - segStartKm);
+
+        if (Number.isFinite(startElev) && Number.isFinite(endElev) && distKm > 0) {
+          totalElevationChange += (endElev - startElev);
+          totalDistanceM += distKm * 1000;
+        }
+      }
+
+      if (totalDistanceM > 10) { // Minimum 10m to avoid noise
+        return (totalElevationChange / totalDistanceM) * 100;
+      }
+    }
+
+    // Fallback to original calculation for single segment
     const distanceKm = Number(segment.distanceKm);
     const startElevation = Number(segment.startElevation);
     const endElevation = Number(segment.endElevation);
@@ -4801,6 +5071,16 @@ export class DirectionsManager {
       ? this.profileSegments
       : this.cutSegments;
 
+    // Compute overlap offsets for the entire route
+    const routeCoordinates = this.routeGeojson?.geometry?.coordinates ?? [];
+    const overlapResult = computeRouteOverlapOffsets(routeCoordinates);
+    const overlapOffsets = overlapResult.offsets;
+    this.routeOverlapOffsets = overlapOffsets;
+    this.routeOverlapMarkers = overlapResult.isOverlap;
+
+    // Apply geometric offset to route coordinates for overlapping sections
+    const offsetRouteCoordinates = geometricOffsetCoordinates(routeCoordinates, overlapOffsets);
+
     const allowGradient = isProfileGradientMode(this.profileMode);
     const useBaseColor = this.profileMode === 'none' && displaySegments !== this.cutSegments;
     const fallbackColor = this.modeColors[this.currentMode];
@@ -4849,6 +5129,47 @@ export class DirectionsManager {
         }
       }
       return totalMeters / 1000;
+    };
+
+    // Helper to compute average offset for a segment's coordinates
+    // and return the geometrically offset coordinates
+    const computeSegmentOffsetAndCoords = (segmentCoords) => {
+      if (!segmentCoords?.length || !overlapOffsets?.length || !routeCoordinates?.length) {
+        return { offset: 0, offsetCoords: segmentCoords };
+      }
+
+      // Build array of offsets for this segment's coordinates
+      const segmentOffsets = new Float32Array(segmentCoords.length);
+      let totalOffset = 0;
+      let matchCount = 0;
+
+      for (let k = 0; k < segmentCoords.length; k++) {
+        const coord = segmentCoords[k];
+        if (!Array.isArray(coord) || coord.length < 2) continue;
+
+        // Find closest matching coordinate in main route
+        for (let i = 0; i < routeCoordinates.length; i++) {
+          const routeCoord = routeCoordinates[i];
+          if (!Array.isArray(routeCoord) || routeCoord.length < 2) continue;
+          if (Math.abs(coord[0] - routeCoord[0]) < COORD_EPSILON * 10 &&
+            Math.abs(coord[1] - routeCoord[1]) < COORD_EPSILON * 10) {
+            const offset = overlapOffsets[i] ?? 0;
+            segmentOffsets[k] = offset;
+            if (offset !== 0) {
+              totalOffset += offset;
+              matchCount++;
+            }
+            break;
+          }
+        }
+      }
+
+      const avgOffset = matchCount > 0 ? totalOffset / matchCount : 0;
+
+      // Apply geometric offset to segment coordinates
+      const offsetCoords = geometricOffsetCoordinates(segmentCoords, segmentOffsets);
+
+      return { offset: avgOffset, offsetCoords };
     };
 
     if (Array.isArray(displaySegments)) {
@@ -4921,6 +5242,9 @@ export class DirectionsManager {
           }
         }
 
+        // Compute offset and geometrically offset coordinates for this segment
+        const { offset: segmentOffset, offsetCoords } = computeSegmentOffsetAndCoords(coordinates);
+
         fallbackFeatures.push({
           type: 'Feature',
           properties: {
@@ -4928,16 +5252,17 @@ export class DirectionsManager {
             segmentIndex: segment.index,
             name: segment.name,
             startKm: Number.isFinite(startKm) ? startKm : null,
-            endKm: Number.isFinite(endKm) ? endKm : null
+            endKm: Number.isFinite(endKm) ? endKm : null,
+            offset: segmentOffset
           },
           geometry: {
             type: 'LineString',
-            coordinates
+            coordinates: offsetCoords
           }
         });
 
         normalizedSegments.push({
-          coordinates,
+          coordinates: offsetCoords,
           color: segmentColorValue,
           normalizedColor: normalizedCurrent,
           distanceKm,
@@ -4999,6 +5324,8 @@ export class DirectionsManager {
       this.routeLineGradientData = EMPTY_COLLECTION;
     }
 
+    // Use gradient mode when available and supported
+    // Geometric offset is now applied to coordinates, so works for all modes
     const shouldUseGradient = allowGradient
       && this.routeLineGradientSupported
       && Array.isArray(this.routeLineGradientExpression)
@@ -6882,28 +7209,31 @@ export class DirectionsManager {
       return;
     }
 
-    // Check if we're near a bivouac marker - if so, don't show route hover
-    // This makes it easier to click on bivouacs
-    const BIVOUAC_EXCLUSION_RADIUS = 30; // pixels
-    const bivouacFeatures = this.map.queryRenderedFeatures(event.point, {
+    // Check if we're near a marker (bivouac, start, end) - if so, don't show route hover
+    // This makes it easier to click on these markers
+    // Radius is ~1.5x the symbol size for comfortable interaction
+    const MARKER_EXCLUSION_RADIUS = 45; // pixels
+    const markerFeatures = this.map.queryRenderedFeatures(event.point, {
       layers: [SEGMENT_MARKER_LAYER_ID]
     });
-    const nearBivouac = bivouacFeatures.some((feature) => {
-      return feature.properties?.type === 'bivouac';
+    const nearMarker = markerFeatures.some((feature) => {
+      const type = feature.properties?.type;
+      return type === 'bivouac' || type === 'start' || type === 'end';
     });
 
-    if (nearBivouac) {
+    if (nearMarker) {
       // Also check the wider radius for exclusion
       const mousePixel = this.map.project(event.lngLat);
       const markers = this.computeSegmentMarkers();
-      const isTooCloseToAnyBivouac = markers.some((marker) => {
-        if (marker.type !== 'bivouac' || !marker.coordinates) return false;
+      const isTooCloseToAnyMarker = markers.some((marker) => {
+        const type = marker.type;
+        if (!['bivouac', 'start', 'end'].includes(type) || !marker.coordinates) return false;
         const markerPixel = this.map.project(toLngLat(marker.coordinates));
         const dist = Math.hypot(mousePixel.x - markerPixel.x, mousePixel.y - markerPixel.y);
-        return dist < BIVOUAC_EXCLUSION_RADIUS;
+        return dist < MARKER_EXCLUSION_RADIUS;
       });
 
-      if (isTooCloseToAnyBivouac) {
+      if (isTooCloseToAnyMarker) {
         this.resetSegmentHover('map');
         return;
       }
