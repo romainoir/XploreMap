@@ -645,15 +645,18 @@ export class OrsRouter {
           return;
         }
         const metrics = sanitizeSegmentMetrics(segment);
+        const routingMode = segment.routingMode || null;
         preservedMap.set(startIndex, {
           endIndex,
           coordinates: sequence,
-          metrics
+          metrics,
+          routingMode
         });
         sanitizedPreserved.push({
           startIndex,
           endIndex,
           coordinates: sequence.map((coord) => coord.slice()),
+          routingMode,
           ...(metrics || {})
         });
       });
@@ -663,245 +666,345 @@ export class OrsRouter {
 
     const computeRoute = async () => {
       if (travelMode === 'manual') {
-        return this.buildManualRoute(coords);
-      }
+        // For manual mode, use preserved segments when available to maintain original routing modes
+        if (!preservedMap.size) {
+          // No preserved segments, build simple manual route
+          const manualRoute = this.buildManualRoute(coords);
+          // Add segment_modes to mark all segments as manual
+          manualRoute.properties.segment_modes = coords.slice(0, -1).map(() => 'manual');
+          return manualRoute;
+        }
 
-    try {
-      if (!preservedMap.size) {
-        const requestCoords = coords.map((coord) => [coord[0], coord[1]]);
-        const routeFeature = await this.requestRoute(requestCoords, travelMode);
-        const rawCoordinates = Array.isArray(routeFeature.geometry?.coordinates)
-          ? routeFeature.geometry.coordinates
-          : [];
-        const geometryCoordinates = sanitizeCoordinateSequence(rawCoordinates)
-          || rawCoordinates.map((coord) => sanitizeCoordinate(coord)).filter(Boolean);
+        // Build route with preserved segments
+        const geometryCoords = [];
+        const segments = [];
+        const segmentModes = [];
+        let totalDistanceKm = 0;
+        let totalAscent = 0;
+        let totalDescent = 0;
 
-        const summaryMetrics = sanitizeSummaryMetrics(routeFeature.properties?.summary);
-        const geometrySummary = this.buildSummaryFromGeometry(geometryCoordinates, travelMode);
+        for (let index = 0; index < coords.length - 1; index += 1) {
+          const startWaypoint = coords[index];
+          const endWaypoint = coords[index + 1];
+          const preserved = preservedMap.get(index);
 
-        const totalDistance = Number.isFinite(summaryMetrics?.distance)
-          ? summaryMetrics.distance
-          : geometrySummary.distance;
-        const totalDuration = Number.isFinite(summaryMetrics?.duration)
-          ? summaryMetrics.duration
-          : geometrySummary.duration;
-        const totalAscent = Number.isFinite(summaryMetrics?.ascent)
-          ? summaryMetrics.ascent
-          : geometrySummary.ascent;
-        const totalDescent = Number.isFinite(summaryMetrics?.descent)
-          ? summaryMetrics.descent
-          : geometrySummary.descent;
+          if (preserved && preserved.endIndex === index + 1) {
+            // Use preserved segment
+            const sequence = preserved.coordinates.map((coord) => coord.slice(0, 3));
+            if (sequence.length >= 2) {
+              const first = sequence[0];
+              const last = sequence[sequence.length - 1];
+              if (!coordinatesAlmostEqual(first, startWaypoint)) {
+                sequence[0] = mergeCoordinates(startWaypoint, first);
+              }
+              if (!coordinatesAlmostEqual(last, endWaypoint)) {
+                sequence[sequence.length - 1] = mergeCoordinates(endWaypoint, last);
+              }
+              appendCoordinateSequence(geometryCoords, sequence);
+              const metrics = preserved.metrics || accumulateSequenceMetrics(sequence);
+              const distanceKm = Number.isFinite(metrics.distance)
+                ? metrics.distance / 1000
+                : (Number.isFinite(metrics.distanceKm) ? metrics.distanceKm : accumulateSequenceMetrics(sequence).distanceKm);
+              totalDistanceKm += distanceKm;
+              totalAscent += Number.isFinite(metrics.ascent) ? metrics.ascent : 0;
+              totalDescent += Number.isFinite(metrics.descent) ? metrics.descent : 0;
+              segments.push({
+                distance: distanceKm * 1000,
+                duration: this.estimateDurationSeconds(distanceKm, travelMode),
+                ascent: Number.isFinite(metrics.ascent) ? metrics.ascent : 0,
+                descent: Number.isFinite(metrics.descent) ? metrics.descent : 0,
+                start_index: index,
+                end_index: index + 1
+              });
+              // Preserve original routing mode - use preserved routingMode if available
+              segmentModes.push(preserved.routingMode || 'foot-hiking');
+              continue;
+            }
+          }
 
-        const segmentData = Array.isArray(routeFeature.properties?.segments)
-          ? routeFeature.properties.segments
-          : [];
-
-        const coordinateMetadata = buildCoordinateMetadataFromExtras(
-          geometryCoordinates,
-          routeFeature.properties?.extras,
-          { distance: totalDistance, duration: totalDuration }
-        );
-
-        const segments = segmentData.map((segment, index) => {
-          const metrics = sanitizeSegmentMetrics(segment);
-          const distance = Number.isFinite(metrics?.distance)
-            ? metrics.distance
-            : segmentData.length ? totalDistance / segmentData.length : totalDistance;
-          const duration = Number.isFinite(metrics?.duration)
-            ? metrics.duration
-            : this.estimateDurationSeconds(distance / 1000, travelMode);
-          const ascent = Number.isFinite(metrics?.ascent) ? metrics.ascent : 0;
-          const descent = Number.isFinite(metrics?.descent) ? metrics.descent : 0;
-          return {
-            distance,
-            duration,
-            ascent,
-            descent,
+          // New manual segment (no preserved data)
+          const metrics = computeSegmentMetrics(startWaypoint, endWaypoint);
+          if (!metrics) {
+            throw new Error('Manual routing requires valid coordinate pairs');
+          }
+          appendCoordinateSequence(geometryCoords, [startWaypoint, endWaypoint]);
+          totalDistanceKm += metrics.distanceKm;
+          totalAscent += metrics.ascent;
+          totalDescent += metrics.descent;
+          segments.push({
+            distance: metrics.distanceKm * 1000,
+            duration: this.estimateDurationSeconds(metrics.distanceKm, 'manual'),
+            ascent: metrics.ascent,
+            descent: metrics.descent,
             start_index: index,
             end_index: index + 1
+          });
+          segmentModes.push('manual');
+        }
+
+        return {
+          type: 'Feature',
+          properties: {
+            profile: 'manual',
+            summary: {
+              distance: totalDistanceKm * 1000,
+              duration: this.estimateDurationSeconds(totalDistanceKm, 'manual'),
+              ascent: totalAscent,
+              descent: totalDescent
+            },
+            segments,
+            segment_modes: segmentModes
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: geometryCoords
+          }
+        };
+      }
+
+      try {
+        if (!preservedMap.size) {
+          const requestCoords = coords.map((coord) => [coord[0], coord[1]]);
+          const routeFeature = await this.requestRoute(requestCoords, travelMode);
+          const rawCoordinates = Array.isArray(routeFeature.geometry?.coordinates)
+            ? routeFeature.geometry.coordinates
+            : [];
+          const geometryCoordinates = sanitizeCoordinateSequence(rawCoordinates)
+            || rawCoordinates.map((coord) => sanitizeCoordinate(coord)).filter(Boolean);
+
+          const summaryMetrics = sanitizeSummaryMetrics(routeFeature.properties?.summary);
+          const geometrySummary = this.buildSummaryFromGeometry(geometryCoordinates, travelMode);
+
+          const totalDistance = Number.isFinite(summaryMetrics?.distance)
+            ? summaryMetrics.distance
+            : geometrySummary.distance;
+          const totalDuration = Number.isFinite(summaryMetrics?.duration)
+            ? summaryMetrics.duration
+            : geometrySummary.duration;
+          const totalAscent = Number.isFinite(summaryMetrics?.ascent)
+            ? summaryMetrics.ascent
+            : geometrySummary.ascent;
+          const totalDescent = Number.isFinite(summaryMetrics?.descent)
+            ? summaryMetrics.descent
+            : geometrySummary.descent;
+
+          const segmentData = Array.isArray(routeFeature.properties?.segments)
+            ? routeFeature.properties.segments
+            : [];
+
+          const coordinateMetadata = buildCoordinateMetadataFromExtras(
+            geometryCoordinates,
+            routeFeature.properties?.extras,
+            { distance: totalDistance, duration: totalDuration }
+          );
+
+          const segments = segmentData.map((segment, index) => {
+            const metrics = sanitizeSegmentMetrics(segment);
+            const distance = Number.isFinite(metrics?.distance)
+              ? metrics.distance
+              : segmentData.length ? totalDistance / segmentData.length : totalDistance;
+            const duration = Number.isFinite(metrics?.duration)
+              ? metrics.duration
+              : this.estimateDurationSeconds(distance / 1000, travelMode);
+            const ascent = Number.isFinite(metrics?.ascent) ? metrics.ascent : 0;
+            const descent = Number.isFinite(metrics?.descent) ? metrics.descent : 0;
+            return {
+              distance,
+              duration,
+              ascent,
+              descent,
+              start_index: index,
+              end_index: index + 1
+            };
+          });
+
+          return {
+            type: 'Feature',
+            properties: {
+              profile: travelMode,
+              summary: {
+                distance: totalDistance,
+                duration: totalDuration,
+                ascent: totalAscent,
+                descent: totalDescent
+              },
+              segments,
+              segment_modes: segments.map(() => travelMode),
+              ...(coordinateMetadata.length ? { coordinate_metadata: coordinateMetadata } : {})
+            },
+            geometry: {
+              type: 'LineString',
+              coordinates: geometryCoordinates
+            }
           };
-        });
+        }
+
+        const geometryCoords = [];
+        const segments = [];
+        const segmentModes = [];
+        const coordinateMetadata = [];
+        let totalDistance = 0;
+        let totalDuration = 0;
+        let totalAscent = 0;
+        let totalDescent = 0;
+        let coordinateOffsetKm = 0;
+
+        const appendMetrics = (distance, duration, ascent, descent, startIndex) => {
+          const segmentDistance = Number.isFinite(distance) ? distance : 0;
+          const segmentDuration = Number.isFinite(duration) ? duration : 0;
+          const segmentAscent = Number.isFinite(ascent) ? ascent : 0;
+          const segmentDescent = Number.isFinite(descent) ? descent : 0;
+          totalDistance += segmentDistance;
+          totalDuration += segmentDuration;
+          totalAscent += segmentAscent;
+          totalDescent += segmentDescent;
+          segments.push({
+            distance: segmentDistance,
+            duration: Number.isFinite(duration) ? duration : null,
+            ascent: Number.isFinite(ascent) ? ascent : null,
+            descent: Number.isFinite(descent) ? descent : null,
+            start_index: startIndex,
+            end_index: startIndex + 1
+          });
+        };
+
+        for (let index = 0; index < coords.length - 1; index += 1) {
+          const startWaypoint = coords[index];
+          const endWaypoint = coords[index + 1];
+          const preserved = preservedMap.get(index);
+          if (preserved && preserved.endIndex === index + 1) {
+            const sequence = preserved.coordinates.map((coord) => coord.slice(0, 3));
+            if (sequence.length < 2) {
+              continue;
+            }
+            const first = sequence[0];
+            const last = sequence[sequence.length - 1];
+            if (!coordinatesAlmostEqual(first, startWaypoint)) {
+              sequence[0] = mergeCoordinates(startWaypoint, first);
+            }
+            if (!coordinatesAlmostEqual(last, endWaypoint)) {
+              sequence[sequence.length - 1] = mergeCoordinates(endWaypoint, last);
+            }
+            appendCoordinateSequence(geometryCoords, sequence);
+            const metrics = preserved.metrics || {};
+            const accumulated = accumulateSequenceMetrics(sequence);
+            const distance = Number.isFinite(metrics.distance)
+              ? metrics.distance
+              : metersFromKm(accumulated.distanceKm);
+            const duration = Number.isFinite(metrics.duration)
+              ? metrics.duration
+              : this.estimateDurationSeconds(accumulated.distanceKm, travelMode);
+            const ascent = Number.isFinite(metrics.ascent) ? metrics.ascent : accumulated.ascent;
+            const descent = Number.isFinite(metrics.descent) ? metrics.descent : accumulated.descent;
+            appendMetrics(distance, duration, ascent, descent, index);
+            // Preserve original routing mode
+            segmentModes.push(preserved.routingMode || travelMode);
+            coordinateOffsetKm += Number.isFinite(distance) ? distance / 1000 : accumulated.distanceKm;
+            continue;
+          }
+
+          const segmentFeature = await this.requestRoute([startWaypoint, endWaypoint], travelMode);
+          const rawSegmentCoords = Array.isArray(segmentFeature.geometry?.coordinates)
+            ? segmentFeature.geometry.coordinates
+            : [];
+          const segmentCoords = sanitizeCoordinateSequence(rawSegmentCoords)
+            || [sanitizeCoordinate(startWaypoint), sanitizeCoordinate(endWaypoint)].filter(Boolean);
+          appendCoordinateSequence(geometryCoords, segmentCoords);
+          const summary = sanitizeSummaryMetrics(segmentFeature.properties?.summary);
+          const geometrySummary = this.buildSummaryFromGeometry(segmentCoords, travelMode);
+          const distance = Number.isFinite(summary?.distance) ? summary.distance : geometrySummary.distance;
+          const duration = Number.isFinite(summary?.duration) ? summary.duration : geometrySummary.duration;
+          const ascent = Number.isFinite(summary?.ascent) ? summary.ascent : geometrySummary.ascent;
+          const descent = Number.isFinite(summary?.descent) ? summary.descent : geometrySummary.descent;
+          appendMetrics(distance, duration, ascent, descent, index);
+          // New segment uses current travel mode
+          segmentModes.push(travelMode);
+
+          const metadataEntries = buildCoordinateMetadataFromExtras(
+            segmentCoords,
+            segmentFeature.properties?.extras,
+            { distance, duration }
+          );
+
+          metadataEntries.forEach((entry) => {
+            const startKm = Number.isFinite(entry.startDistanceKm)
+              ? entry.startDistanceKm + coordinateOffsetKm
+              : null;
+            const endKm = Number.isFinite(entry.endDistanceKm)
+              ? entry.endDistanceKm + coordinateOffsetKm
+              : null;
+            const distanceKm = Number.isFinite(startKm) && Number.isFinite(endKm)
+              ? Math.max(0, endKm - startKm)
+              : entry.distanceKm;
+            coordinateMetadata.push({
+              ...entry,
+              startDistanceKm: startKm,
+              endDistanceKm: endKm,
+              distanceKm
+            });
+          });
+
+          coordinateOffsetKm += Number.isFinite(distance) ? distance / 1000 : geometrySummary.distance / 1000;
+        }
+
+        const summary = {
+          distance: totalDistance,
+          duration: totalDuration,
+          ascent: totalAscent,
+          descent: totalDescent
+        };
 
         return {
           type: 'Feature',
           properties: {
             profile: travelMode,
-            summary: {
-              distance: totalDistance,
-              duration: totalDuration,
-              ascent: totalAscent,
-              descent: totalDescent
-            },
+            summary,
             segments,
+            segment_modes: segmentModes,
             ...(coordinateMetadata.length ? { coordinate_metadata: coordinateMetadata } : {})
           },
           geometry: {
             type: 'LineString',
-            coordinates: geometryCoordinates
+            coordinates: geometryCoords
           }
         };
-      }
+      } catch (error) {
+        const supportsFallback = this.fallbackRouter
+          && typeof this.fallbackRouter.getRoute === 'function'
+          && (!this.fallbackRouter.supportsMode
+            || this.fallbackRouter.supportsMode(travelMode));
 
-      const geometryCoords = [];
-      const segments = [];
-      const coordinateMetadata = [];
-      let totalDistance = 0;
-      let totalDuration = 0;
-      let totalAscent = 0;
-      let totalDescent = 0;
-      let coordinateOffsetKm = 0;
-
-      const appendMetrics = (distance, duration, ascent, descent, startIndex) => {
-        const segmentDistance = Number.isFinite(distance) ? distance : 0;
-        const segmentDuration = Number.isFinite(duration) ? duration : 0;
-        const segmentAscent = Number.isFinite(ascent) ? ascent : 0;
-        const segmentDescent = Number.isFinite(descent) ? descent : 0;
-        totalDistance += segmentDistance;
-        totalDuration += segmentDuration;
-        totalAscent += segmentAscent;
-        totalDescent += segmentDescent;
-        segments.push({
-          distance: segmentDistance,
-          duration: Number.isFinite(duration) ? duration : null,
-          ascent: Number.isFinite(ascent) ? ascent : null,
-          descent: Number.isFinite(descent) ? descent : null,
-          start_index: startIndex,
-          end_index: startIndex + 1
-        });
-      };
-
-      for (let index = 0; index < coords.length - 1; index += 1) {
-        const startWaypoint = coords[index];
-        const endWaypoint = coords[index + 1];
-        const preserved = preservedMap.get(index);
-        if (preserved && preserved.endIndex === index + 1) {
-          const sequence = preserved.coordinates.map((coord) => coord.slice(0, 3));
-          if (sequence.length < 2) {
-            continue;
-          }
-          const first = sequence[0];
-          const last = sequence[sequence.length - 1];
-          if (!coordinatesAlmostEqual(first, startWaypoint)) {
-            sequence[0] = mergeCoordinates(startWaypoint, first);
-          }
-          if (!coordinatesAlmostEqual(last, endWaypoint)) {
-            sequence[sequence.length - 1] = mergeCoordinates(endWaypoint, last);
-          }
-          appendCoordinateSequence(geometryCoords, sequence);
-          const metrics = preserved.metrics || {};
-          const accumulated = accumulateSequenceMetrics(sequence);
-          const distance = Number.isFinite(metrics.distance)
-            ? metrics.distance
-            : metersFromKm(accumulated.distanceKm);
-          const duration = Number.isFinite(metrics.duration)
-            ? metrics.duration
-            : this.estimateDurationSeconds(accumulated.distanceKm, travelMode);
-          const ascent = Number.isFinite(metrics.ascent) ? metrics.ascent : accumulated.ascent;
-          const descent = Number.isFinite(metrics.descent) ? metrics.descent : accumulated.descent;
-          appendMetrics(distance, duration, ascent, descent, index);
-          coordinateOffsetKm += Number.isFinite(distance) ? distance / 1000 : accumulated.distanceKm;
-          continue;
+        if (!supportsFallback) {
+          throw error;
         }
 
-        const segmentFeature = await this.requestRoute([startWaypoint, endWaypoint], travelMode);
-        const rawSegmentCoords = Array.isArray(segmentFeature.geometry?.coordinates)
-          ? segmentFeature.geometry.coordinates
-          : [];
-        const segmentCoords = sanitizeCoordinateSequence(rawSegmentCoords)
-          || [sanitizeCoordinate(startWaypoint), sanitizeCoordinate(endWaypoint)].filter(Boolean);
-        appendCoordinateSequence(geometryCoords, segmentCoords);
-        const summary = sanitizeSummaryMetrics(segmentFeature.properties?.summary);
-        const geometrySummary = this.buildSummaryFromGeometry(segmentCoords, travelMode);
-        const distance = Number.isFinite(summary?.distance) ? summary.distance : geometrySummary.distance;
-        const duration = Number.isFinite(summary?.duration) ? summary.duration : geometrySummary.duration;
-        const ascent = Number.isFinite(summary?.ascent) ? summary.ascent : geometrySummary.ascent;
-        const descent = Number.isFinite(summary?.descent) ? summary.descent : geometrySummary.descent;
-        appendMetrics(distance, duration, ascent, descent, index);
-
-        const metadataEntries = buildCoordinateMetadataFromExtras(
-          segmentCoords,
-          segmentFeature.properties?.extras,
-          { distance, duration }
-        );
-
-        metadataEntries.forEach((entry) => {
-          const startKm = Number.isFinite(entry.startDistanceKm)
-            ? entry.startDistanceKm + coordinateOffsetKm
-            : null;
-          const endKm = Number.isFinite(entry.endDistanceKm)
-            ? entry.endDistanceKm + coordinateOffsetKm
-            : null;
-          const distanceKm = Number.isFinite(startKm) && Number.isFinite(endKm)
-            ? Math.max(0, endKm - startKm)
-            : entry.distanceKm;
-          coordinateMetadata.push({
-            ...entry,
-            startDistanceKm: startKm,
-            endDistanceKm: endKm,
-            distanceKm
+        console.warn('OpenRouteService routing failed. Falling back to the offline router.', error);
+        try {
+          const fallbackRoute = await this.fallbackRouter.getRoute(coords, {
+            mode: travelMode,
+            preservedSegments: sanitizedPreserved
           });
-        });
-
-        coordinateOffsetKm += Number.isFinite(distance) ? distance / 1000 : geometrySummary.distance / 1000;
-      }
-
-      const summary = {
-        distance: totalDistance,
-        duration: totalDuration,
-        ascent: totalAscent,
-        descent: totalDescent
-      };
-
-      return {
-        type: 'Feature',
-        properties: {
-          profile: travelMode,
-          summary,
-          segments,
-          ...(coordinateMetadata.length ? { coordinate_metadata: coordinateMetadata } : {})
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates: geometryCoords
+          if (fallbackRoute && typeof fallbackRoute === 'object') {
+            const properties = fallbackRoute.properties && typeof fallbackRoute.properties === 'object'
+              ? { ...fallbackRoute.properties }
+              : {};
+            const warnings = Array.isArray(properties.warnings) ? [...properties.warnings] : [];
+            warnings.push('OpenRouteService request failed; offline routing was used instead.');
+            fallbackRoute.properties = {
+              ...properties,
+              warnings,
+              fallbackSource: 'openrouteservice'
+            };
+          }
+          return fallbackRoute;
+        } catch (fallbackError) {
+          const combined = new Error('OpenRouteService routing failed and offline fallback was unsuccessful');
+          combined.cause = fallbackError;
+          combined.originalError = error;
+          throw combined;
         }
-      };
-    } catch (error) {
-      const supportsFallback = this.fallbackRouter
-        && typeof this.fallbackRouter.getRoute === 'function'
-        && (!this.fallbackRouter.supportsMode
-          || this.fallbackRouter.supportsMode(travelMode));
-
-      if (!supportsFallback) {
-        throw error;
       }
-
-      console.warn('OpenRouteService routing failed. Falling back to the offline router.', error);
-      try {
-        const fallbackRoute = await this.fallbackRouter.getRoute(coords, {
-          mode: travelMode,
-          preservedSegments: sanitizedPreserved
-        });
-        if (fallbackRoute && typeof fallbackRoute === 'object') {
-          const properties = fallbackRoute.properties && typeof fallbackRoute.properties === 'object'
-            ? { ...fallbackRoute.properties }
-            : {};
-          const warnings = Array.isArray(properties.warnings) ? [...properties.warnings] : [];
-          warnings.push('OpenRouteService request failed; offline routing was used instead.');
-          fallbackRoute.properties = {
-            ...properties,
-            warnings,
-            fallbackSource: 'openrouteservice'
-          };
-        }
-        return fallbackRoute;
-      } catch (fallbackError) {
-        const combined = new Error('OpenRouteService routing failed and offline fallback was unsuccessful');
-        combined.cause = fallbackError;
-        combined.originalError = error;
-        throw combined;
-      }
-    }
-  };
+    };
 
     if (!cacheKey) {
       return computeRoute();

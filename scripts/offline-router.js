@@ -1134,7 +1134,12 @@ export class OfflineRouter {
               const last = preservedCoords[preservedCoords.length - 1];
               const normalizedStart = sanitizeCoordinate(start) || first;
               const normalizedEnd = sanitizeCoordinate(end) || last;
-              if (coordinatesAlmostEqual(first, normalizedStart) && coordinatesAlmostEqual(last, normalizedEnd)) {
+              const startMatch = coordinatesAlmostEqual(first, normalizedStart);
+              const endMatch = coordinatesAlmostEqual(last, normalizedEnd);
+              if (this.debugLoggingEnabled) {
+                console.log(`[OfflineRouter] Segment ${index}: preserved mode=${preserved.routingMode}, startMatch=${startMatch}, endMatch=${endMatch}`);
+              }
+              if (startMatch && endMatch) {
                 preservedCoords[0] = mergeCoordinates(start, preservedCoords[0]);
                 preservedCoords[preservedCoords.length - 1] = mergeCoordinates(end, preservedCoords[preservedCoords.length - 1]);
                 const metrics = accumulateSequenceMetrics(preservedCoords);

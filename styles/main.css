@@ -2,20 +2,30 @@ html,
 body {
   margin: 0;
   height: 100%;
+  font-family: var(--font-ui);
 }
 
 :root {
   --ui-density-scale: 1;
   --ui-viewport-scale: 1;
   --ui-scale: calc(var(--ui-density-scale) * var(--ui-viewport-scale));
-  --glass-surface: linear-gradient(145deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.12));
-  --glass-surface-strong: linear-gradient(160deg, rgba(12, 24, 36, 0.78), rgba(12, 24, 36, 0.52));
-  --glass-border: rgba(255, 255, 255, 0.24);
-  --glass-border-strong: rgba(255, 255, 255, 0.34);
-  --glass-highlight: rgba(255, 255, 255, 0.45);
+
+  /* Typography */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', 'Monaco', monospace;
+
+  /* Glassmorphism - increased opacity for better contrast */
+  --glass-surface: linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.28));
+  --glass-surface-strong: linear-gradient(160deg, rgba(12, 24, 36, 0.85), rgba(12, 24, 36, 0.68));
+  --glass-border: rgba(255, 255, 255, 0.28);
+  --glass-border-strong: rgba(255, 255, 255, 0.38);
+  --glass-highlight: rgba(255, 255, 255, 0.5);
   --glass-shadow: 0 22px 52px rgba(6, 12, 20, 0.48);
   --glass-blur: clamp(14px, 1.8vw, 22px);
   --glass-radius: clamp(14px, 1.5vw, 22px);
+
+  /* Text shadows for readability */
+  --text-shadow-subtle: 0 1px 2px rgba(255, 255, 255, 0.5);
 }
 
 @media (max-resolution: 1dppx) {
@@ -817,9 +827,10 @@ body {
   justify-content: space-between;
   align-items: flex-end;
   padding: 2px 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  color: rgba(17, 34, 48, 0.5);
+  font-family: var(--font-mono);
+  color: rgba(17, 34, 48, 0.6);
   min-width: 48px;
   flex-shrink: 0;
 }
@@ -1030,12 +1041,13 @@ body {
 }
 
 .route-stats {
-  color: rgba(17, 34, 48, 0.72);
-  font-size: 13px;
+  color: rgba(17, 34, 48, 0.85);
+  font-size: 14px;
   display: none;
   width: 100%;
   margin-inline: auto;
   box-sizing: border-box;
+  text-shadow: var(--text-shadow-subtle);
 }
 
 .route-stats.has-stats {
@@ -1094,7 +1106,9 @@ body {
 
 .route-stats__summary-value {
   font-weight: 600;
-  color: rgba(17, 34, 48, 0.85);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: rgba(17, 34, 48, 0.95);
 }
 
 /* Day timeline tabs - Arrow/chevron style */
@@ -1220,11 +1234,12 @@ body {
 }
 
 .day-tab__stats {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
-  opacity: 0.9;
+  font-family: var(--font-mono);
+  opacity: 0.95;
   display: flex;
-  gap: 3px;
+  gap: 4px;
   white-space: nowrap;
 }
 
@@ -1322,20 +1337,22 @@ body {
 }
 
 .day-details__item-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  color: rgba(17, 34, 48, 0.55);
+  color: rgba(17, 34, 48, 0.65);
   text-transform: none;
   letter-spacing: 0.01em;
 }
 
 .day-details__item-value {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: rgba(17, 34, 48, 0.9);
+  color: rgba(17, 34, 48, 0.95);
   display: flex;
   align-items: center;
   gap: 6px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .day-details__item-value svg {
@@ -1478,17 +1495,19 @@ body {
 }
 
 .bivouac-popup__stat-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: rgba(17, 34, 48, 0.5);
+  color: rgba(17, 34, 48, 0.6);
 }
 
 .bivouac-popup__stat-value {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: rgba(17, 34, 48, 0.85);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: rgba(17, 34, 48, 0.95);
 }
 
 .bivouac-popup-container .maplibregl-popup-close-button {
@@ -1743,6 +1762,7 @@ body {
   position: relative;
   min-height: 120px;
   overflow: visible;
+  /* Allow icons to overflow */
   touch-action: none;
   cursor: crosshair;
   width: 100%;
@@ -1805,9 +1825,10 @@ body {
 /* Elevation chart tooltip - shown on hover */
 .elevation-chart-tooltip {
   position: absolute;
-  top: 4px;
+  bottom: 100%;
   left: 0;
   transform: translateX(-50%);
+  margin-bottom: 8px;
   background: rgba(17, 34, 48, 0.92);
   color: #f6fbff;
   font: 11px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -1833,16 +1854,18 @@ body {
 
 .elevation-chart-tooltip__distance {
   font-weight: 600;
-  font-size: 12px;
+  font-size: 13px;
   margin-bottom: 2px;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .elevation-chart-tooltip__details {
   display: flex;
   gap: 8px;
-  font-size: 10px;
-  opacity: 0.85;
+  font-size: 11px;
+  opacity: 0.9;
+  font-family: var(--font-mono);
 }
 
 .elevation-chart-tooltip__elevation,
@@ -1925,6 +1948,24 @@ body {
 /* Hide title label above bivouac markers in elevation chart */
 .elevation-marker.bivouac .elevation-marker__label {
   display: none;
+}
+
+/* Dashed vertical line below bivouac markers to mark position on chart */
+.elevation-marker.bivouac::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  /* Height is set via CSS variable from JavaScript, based on marker position */
+  height: var(--bivouac-line-height, 0px);
+  background: repeating-linear-gradient(to bottom,
+      rgba(17, 34, 48, 0.45) 0px,
+      rgba(17, 34, 48, 0.45) 4px,
+      transparent 4px,
+      transparent 8px);
+  pointer-events: none;
 }
 
 .elevation-marker.poi {
@@ -2602,4 +2643,50 @@ body {
 
 .vignette {
   display: none;
+}
+
+/* Météo widget styles */
+.weather-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.weather-widget {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.weather-temp {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #333;
+  min-width: 28px;
+}
+
+.weather-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.weather-rain-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  padding: 2px;
+}
+
+.weather-loading {
+  color: #888;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+.weather-unavailable {
+  color: #999;
+  font-size: 0.85em;
 }

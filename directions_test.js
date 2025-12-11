@@ -129,6 +129,153 @@ const ELEVATION_PROFILE_POI_CLUSTER_MIN_WINDOW_KM = 0.4;
 const ELEVATION_PROFILE_POI_CLUSTER_MAX_WINDOW_KM = 2;
 const ELEVATION_PROFILE_POI_CLUSTER_DISTANCE_SCALE = 30;
 
+// Météo-France API configuration
+const METEO_FRANCE_API_DOMAIN = 'https://webservice.meteofrance.com';
+const METEO_FRANCE_API_TOKEN = '__Wj7dVSTjV9YGu1guveLyDq0g7S7TfTjaHBTPTpO0kj8__';
+const METEO_FRANCE_ICON_BASE_URL = 'https://meteofrance.com/modules/custom/mf_tools_common_theme_public/svg/weather/';
+const METEO_FRANCE_RAIN_ICON_BASE_URL = 'https://meteofrance.com/modules/custom/mf_tools_common_theme_public/svg/rain/';
+
+// Cache for weather data to avoid repeated API calls
+const weatherDataCache = new Map();
+const WEATHER_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Fetch weather forecast from Météo-France API
+ * @param {number} lon - Longitude
+ * @param {number} lat - Latitude
+ * @returns {Promise<Object|null>} Weather data or null on error
+ */
+async function fetchMeteoFrance(lon, lat) {
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    return null;
+  }
+
+  // Round coordinates to reduce cache fragmentation
+  const roundedLon = Math.round(lon * 100) / 100;
+  const roundedLat = Math.round(lat * 100) / 100;
+  const cacheKey = `${roundedLon},${roundedLat}`;
+
+  // Check cache
+  const cached = weatherDataCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < WEATHER_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  try {
+    const forecastUrl = `${METEO_FRANCE_API_DOMAIN}/forecast?lon=${lon}&lat=${lat}&token=${METEO_FRANCE_API_TOKEN}`;
+    const response = await fetch(forecastUrl);
+
+    if (!response.ok) {
+      console.warn('Météo-France API error:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+
+    // Cache the result
+    weatherDataCache.set(cacheKey, { data, timestamp: Date.now() });
+
+    return data;
+  } catch (error) {
+    console.warn('Failed to fetch Météo-France data:', error);
+    return null;
+  }
+}
+
+/**
+ * Get weather forecast from Météo-France data for a specific day
+ * @param {Object} weatherData - Raw forecast data from API
+ * @param {number} dayOffset - Day offset from today (0 = today, 1 = tomorrow, etc.)
+ * @returns {Object|null} Weather info for the specified day
+ */
+function getWeatherForDay(weatherData, dayOffset = 0) {
+  if (!weatherData?.forecast || !Array.isArray(weatherData.forecast)) {
+    return null;
+  }
+
+  const now = new Date();
+  const targetDate = new Date(now);
+  targetDate.setDate(targetDate.getDate() + dayOffset);
+
+  // For today (offset 0), use current hour
+  // For future days, target noon (12:00) for representative weather
+  const targetHour = dayOffset === 0 ? now.getHours() : 12;
+  targetDate.setHours(targetHour, 0, 0, 0);
+  const targetTimestamp = targetDate.getTime();
+
+  // Find the forecast closest to target time
+  const relevantForecast = weatherData.forecast
+    .map((f) => ({
+      ...f,
+      date: new Date(f.dt * 1000),
+      diff: Math.abs(f.dt * 1000 - targetTimestamp)
+    }))
+    .filter((f) => {
+      const forecastDate = f.date;
+      // For future days, only consider forecasts on that specific day
+      if (dayOffset > 0) {
+        return forecastDate.toDateString() === targetDate.toDateString();
+      }
+      // For today, allow forecasts from last hour onwards
+      return f.date >= new Date(Date.now() - 3600000);
+    })
+    .sort((a, b) => a.diff - b.diff)[0];
+
+  if (!relevantForecast) {
+    return null;
+  }
+
+  const temperature = Math.round(relevantForecast.T?.value ?? 0);
+  const weatherIcon = relevantForecast.weather?.icon || '';
+  const weatherDesc = relevantForecast.weather?.desc || '';
+  const rainAmount = relevantForecast.rain?.['1h'] ?? 0;
+  const isRaining = rainAmount > 0;
+
+  return {
+    temperature,
+    weatherIcon,
+    weatherDesc,
+    rainAmount,
+    isRaining,
+    locationName: weatherData.position?.name || '',
+    weatherIconUrl: weatherIcon ? `${METEO_FRANCE_ICON_BASE_URL}${weatherIcon}.svg` : '',
+    rainIconUrl: isRaining
+      ? `${METEO_FRANCE_RAIN_ICON_BASE_URL}pluie-moderee.svg`
+      : `${METEO_FRANCE_RAIN_ICON_BASE_URL}pas-de-pluie.svg`,
+    dayOffset,
+    forecastDate: relevantForecast.date
+  };
+}
+
+// Backward compatibility alias
+function getCurrentHourWeather(weatherData) {
+  return getWeatherForDay(weatherData, 0);
+}
+
+/**
+ * Render weather widget HTML
+ * @param {Object} weather - Current weather data from getCurrentHourWeather
+ * @returns {string} HTML string for weather display
+ */
+function renderWeatherWidget(weather) {
+  if (!weather) {
+    return '<span class="weather-loading">Chargement...</span>';
+  }
+
+  const tempDisplay = `${weather.temperature}°`;
+  const rainTitle = weather.isRaining
+    ? `Pluie: ${weather.rainAmount} mm/h`
+    : 'Pas de pluie';
+
+  return `
+    <span class="weather-widget" title="${weather.weatherDesc}. ${rainTitle}">
+      <span class="weather-temp">${tempDisplay}</span>
+      <img class="weather-icon" src="${weather.weatherIconUrl}" alt="${weather.weatherDesc}" width="24" height="24" loading="lazy" />
+      <img class="weather-rain-icon" src="${weather.rainIconUrl}" alt="${rainTitle}" width="20" height="20" loading="lazy" />
+    </span>
+  `;
+}
+
 const PEAK_CATEGORY_KEYS = Object.freeze(['peak', 'volcano']);
 const PEAK_CATEGORY_SET = new Set(PEAK_CATEGORY_KEYS);
 const PASS_CATEGORY_KEYS = Object.freeze(['mountain_pass', 'saddle']);
@@ -1217,7 +1364,14 @@ const SUMMARY_ICONS = {
 };
 
 // Inline SVG bivouac icon for elevation chart markers (matches the new tent design)
+// Includes white halo/outline for better visibility against any background
 const BIVOUAC_ELEVATION_ICON = `<svg class="elevation-marker__icon" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+  <!-- White halo/outline (drawn first, thicker) -->
+  <line x1="44" y1="0" x2="50" y2="12" stroke="rgba(255,255,255,0.95)" stroke-width="12" stroke-linecap="round"/>
+  <line x1="56" y1="0" x2="50" y2="12" stroke="rgba(255,255,255,0.95)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M50 12 L5 88 L38 88 L50 60 L62 88 L95 88 Z" fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.95)" stroke-width="8" stroke-linejoin="round"/>
+  <line x1="3" y1="93" x2="97" y2="93" stroke="rgba(255,255,255,0.95)" stroke-width="14" stroke-linecap="round"/>
+  <!-- Colored icon on top -->
   <line x1="44" y1="0" x2="50" y2="12" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
   <line x1="56" y1="0" x2="50" y2="12" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
   <path d="M50 12 L5 88 L38 88 L50 60 L62 88 L95 88 Z" fill="currentColor"/>
@@ -1554,7 +1708,7 @@ const PROFILE_MODE_DEFINITIONS = Object.freeze({
   poi: { key: 'poi', label: 'POI' }
 });
 
-const PROFILE_GRADIENT_MODES = Object.freeze(['slope', 'surface']);
+const PROFILE_GRADIENT_MODES = Object.freeze(['slope', 'surface', 'category']);
 
 const PROFILE_LEGEND_SHOW_DELAY_MS = 1000;
 
@@ -2596,25 +2750,25 @@ export class DirectionsManager {
           'case',
           ['==', ['get', 'role'], 'start'], 0,
           ['==', ['get', 'role'], 'end'], 0,
-          7
+          10
         ],
         'circle-color': [
           'case',
           ['==', ['get', 'role'], 'start'], '#2f8f3b',
           ['==', ['get', 'role'], 'end'], '#d64545',
-          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
+          '#fff'
         ],
         'circle-stroke-width': [
           'case',
           ['==', ['get', 'role'], 'start'], 0,
           ['==', ['get', 'role'], 'end'], 0,
-          2
+          4
         ],
         'circle-stroke-color': [
           'case',
           ['==', ['get', 'role'], 'start'], 'rgba(255, 255, 255, 0.95)',
           ['==', ['get', 'role'], 'end'], 'rgba(255, 255, 255, 0.95)',
-          'rgba(255, 255, 255, 0.85)'
+          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
         ],
         'circle-opacity': 0.95
       },
@@ -2640,7 +2794,7 @@ export class DirectionsManager {
       type: 'line',
       source: 'drag-preview-source',
       paint: {
-        'line-color': this.modeColors[this.currentMode],
+        'line-color': ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]],
         'line-width': 3,
         'line-dasharray': [4, 4],
         'line-opacity': 0.8
@@ -2692,9 +2846,15 @@ export class DirectionsManager {
       this.recordWaypointState();
       this.mirrorRouteCutsForReversedRoute();
       this.waypoints.reverse();
-      this.invalidateCachedLegSegments();
+      // Reverse the cached leg segments to preserve routing modes
+      this.reverseCachedLegSegments();
       this.updateWaypoints();
-      this.getRoute();
+      // Use cached segments to rebuild route, preserving original modes
+      if (this.cachedLegSegments instanceof Map && this.cachedLegSegments.size > 0) {
+        this.rebuildRouteFromCachedSegments();
+      } else {
+        this.getRoute();
+      }
     });
 
     this.undoButton?.addEventListener('click', () => {
@@ -3118,6 +3278,12 @@ export class DirectionsManager {
       return;
     }
     this.updateProfileSegments();
+    // Update manual route overlay colors to match the new profile mode
+    this.updateManualRouteSource();
+    // Refresh distance markers to update colors based on new profile mode
+    this.updateDistanceMarkers(this.routeGeojson);
+    // Refresh waypoint colors to match the new profile mode
+    this.updateWaypoints();
     if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
       && this.routeGeojson.geometry.coordinates.length >= 2) {
       this.updateElevationProfile(this.routeGeojson.geometry.coordinates);
@@ -3829,7 +3995,231 @@ export class DirectionsManager {
   createHistorySnapshot() {
     const waypoints = this.cloneWaypoints();
     const routeCuts = this.cloneRouteCuts();
-    return { waypoints, routeCuts };
+    // Clone the cached leg segments to preserve routing modes (manual vs snapping)
+    const legSegments = this.cloneCachedLegSegments();
+    return { waypoints, routeCuts, legSegments };
+  }
+
+  /**
+   * Clone cachedLegSegments Map to preserve segment data including routing modes.
+   */
+  cloneCachedLegSegments() {
+    if (!(this.cachedLegSegments instanceof Map) || !this.cachedLegSegments.size) {
+      return [];
+    }
+    const cloned = [];
+    for (const [index, segment] of this.cachedLegSegments.entries()) {
+      if (!segment) continue;
+      cloned.push({
+        index,
+        startIndex: segment.startIndex,
+        endIndex: segment.endIndex,
+        coordinates: Array.isArray(segment.coordinates)
+          ? segment.coordinates.map((c) => (Array.isArray(c) ? c.slice() : c))
+          : null,
+        distance: segment.distance,
+        duration: segment.duration,
+        ascent: segment.ascent,
+        descent: segment.descent,
+        metadata: Array.isArray(segment.metadata)
+          ? segment.metadata.map((m) => (m && typeof m === 'object' ? { ...m } : m))
+          : [],
+        routingMode: segment.routingMode || null
+      });
+    }
+    return cloned;
+  }
+
+  /**
+   * Restore cachedLegSegments from a cloned array.
+   */
+  restoreCachedLegSegments(legSegmentsArray) {
+    if (!Array.isArray(legSegmentsArray) || !legSegmentsArray.length) {
+      this.cachedLegSegments = new Map();
+      return;
+    }
+    const restored = new Map();
+    for (const segment of legSegmentsArray) {
+      if (!segment || !Number.isInteger(segment.index)) continue;
+      restored.set(segment.index, {
+        startIndex: segment.startIndex,
+        endIndex: segment.endIndex,
+        coordinates: Array.isArray(segment.coordinates)
+          ? segment.coordinates.map((c) => (Array.isArray(c) ? c.slice() : c))
+          : null,
+        distance: segment.distance,
+        duration: segment.duration,
+        ascent: segment.ascent,
+        descent: segment.descent,
+        metadata: Array.isArray(segment.metadata)
+          ? segment.metadata.map((m) => (m && typeof m === 'object' ? { ...m } : m))
+          : [],
+        routingMode: segment.routingMode || null
+      });
+    }
+    this.cachedLegSegments = restored;
+  }
+
+  /**
+   * Reverse the cached leg segments when the route direction is swapped.
+   * This preserves the routing mode (manual vs snapping) for each segment
+   * while remapping the indices to match the reversed waypoint order.
+   */
+  reverseCachedLegSegments() {
+    if (!(this.cachedLegSegments instanceof Map) || !this.cachedLegSegments.size) {
+      return;
+    }
+
+    const numWaypoints = this.waypoints.length;
+    if (numWaypoints < 2) {
+      this.cachedLegSegments = new Map();
+      return;
+    }
+
+    const numLegs = numWaypoints - 1;
+    const reversed = new Map();
+
+    // Each segment at old index i becomes segment at new index (numLegs - 1 - i)
+    // And its coordinates need to be reversed
+    for (const [oldIndex, segment] of this.cachedLegSegments.entries()) {
+      if (!segment) continue;
+
+      const newIndex = numLegs - 1 - oldIndex;
+      if (newIndex < 0 || newIndex >= numLegs) continue;
+
+      // Reverse the coordinates array for this segment
+      const reversedCoords = Array.isArray(segment.coordinates)
+        ? segment.coordinates.slice().reverse()
+        : null;
+
+      // Swap ascent and descent since direction is reversed
+      const newAscent = segment.descent;
+      const newDescent = segment.ascent;
+
+      reversed.set(newIndex, {
+        startIndex: newIndex,
+        endIndex: newIndex + 1,
+        coordinates: reversedCoords,
+        distance: segment.distance,
+        duration: segment.duration,
+        ascent: newAscent,
+        descent: newDescent,
+        metadata: Array.isArray(segment.metadata)
+          ? segment.metadata.map((m) => (m && typeof m === 'object' ? { ...m } : m))
+          : [],
+        routingMode: segment.routingMode || null
+      });
+    }
+
+    this.cachedLegSegments = reversed;
+    this.updateManualRouteSource();
+  }
+
+  /**
+   * Rebuild the route display from cached leg segments without calling the router.
+   * This is used when restoring from undo/redo to preserve original routing modes.
+   */
+  rebuildRouteFromCachedSegments() {
+    if (!(this.cachedLegSegments instanceof Map) || !this.cachedLegSegments.size) {
+      // No cached segments, fall back to routing
+      this.getRoute();
+      return;
+    }
+
+    // Build coordinates, segments, and segment_modes from cached data
+    const coordinates = [];
+    const segments = [];
+    const segmentModes = [];
+    const segmentMetadata = [];
+    let totalDistance = 0;
+    let totalAscent = 0;
+    let totalDescent = 0;
+
+    // Sort segments by index
+    const sortedSegments = Array.from(this.cachedLegSegments.entries())
+      .sort((a, b) => a[0] - b[0]);
+
+    for (const [index, segment] of sortedSegments) {
+      if (!segment || !Array.isArray(segment.coordinates) || segment.coordinates.length < 2) {
+        continue;
+      }
+
+      // Append coordinates (avoiding duplicates at boundaries)
+      segment.coordinates.forEach((coord, coordIndex) => {
+        if (!Array.isArray(coord) || coord.length < 2) return;
+        if (coordinates.length > 0 && coordIndex === 0) {
+          // Skip first coord if it matches the last one (boundary)
+          const last = coordinates[coordinates.length - 1];
+          if (Math.abs(last[0] - coord[0]) < 1e-8 && Math.abs(last[1] - coord[1]) < 1e-8) {
+            return;
+          }
+        }
+        coordinates.push(coord.slice());
+      });
+
+      const distanceMeters = (segment.distance ?? 0);
+      const distanceKm = distanceMeters / 1000;
+      const ascent = segment.ascent ?? 0;
+      const descent = segment.descent ?? 0;
+
+      totalDistance += distanceMeters;
+      totalAscent += ascent;
+      totalDescent += descent;
+
+      segments.push({
+        distance: distanceMeters,
+        duration: segment.duration ?? 0,
+        ascent,
+        descent,
+        start_index: segment.startIndex,
+        end_index: segment.endIndex
+      });
+
+      // Preserve the routing mode for this segment
+      segmentModes.push(segment.routingMode || 'foot-hiking');
+
+      // Preserve metadata
+      segmentMetadata.push(Array.isArray(segment.metadata) ? segment.metadata : []);
+    }
+
+    if (coordinates.length < 2) {
+      // Not enough coordinates, fall back to routing
+      this.getRoute();
+      return;
+    }
+
+    // Build the route feature
+    const routeFeature = {
+      type: 'Feature',
+      properties: {
+        profile: this.currentMode,
+        summary: {
+          distance: totalDistance,
+          duration: this.estimateDuration(totalDistance / 1000),
+          ascent: totalAscent,
+          descent: totalDescent
+        },
+        segments,
+        segment_modes: segmentModes,
+        segment_metadata: segmentMetadata
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates
+      }
+    };
+
+    // Apply the rebuilt route
+    this.applyRoute(routeFeature);
+  }
+
+  /**
+   * Estimate duration in seconds based on distance and current mode.
+   */
+  estimateDuration(distanceKm) {
+    const speedKmh = 4.5; // Default hiking speed
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) return 0;
+    return (distanceKm / speedKmh) * 3600;
   }
 
   restoreStateFromSnapshot(snapshot) {
@@ -3839,6 +4229,7 @@ export class DirectionsManager {
 
     let waypointSnapshot = null;
     let routeCutSnapshot = [];
+    let legSegmentsSnapshot = null;
 
     if (Array.isArray(snapshot)) {
       waypointSnapshot = this.cloneWaypoints(snapshot);
@@ -3847,6 +4238,10 @@ export class DirectionsManager {
       routeCutSnapshot = this.cloneRouteCuts(
         Array.isArray(snapshot.routeCuts) ? snapshot.routeCuts : []
       );
+      // Restore leg segments if present in snapshot
+      if (Array.isArray(snapshot.legSegments)) {
+        legSegmentsSnapshot = snapshot.legSegments;
+      }
     }
 
     if (!Array.isArray(waypointSnapshot)) {
@@ -3855,6 +4250,12 @@ export class DirectionsManager {
 
     this.waypoints = waypointSnapshot;
     this.setRouteCutDistances(routeCutSnapshot);
+
+    // Restore leg segments if available (preserves manual/snapping modes)
+    if (legSegmentsSnapshot) {
+      this.restoreCachedLegSegments(legSegmentsSnapshot);
+    }
+
     return true;
   }
 
@@ -3895,6 +4296,8 @@ export class DirectionsManager {
     }
     const previous = this.waypointHistory.pop();
     const currentSnapshot = this.createHistorySnapshot();
+    // Check if the previous snapshot has leg segments before restoring
+    const hasLegSegments = previous && Array.isArray(previous.legSegments) && previous.legSegments.length > 0;
     const restored = this.restoreStateFromSnapshot(previous);
     if (!restored) {
       this.updateUndoAvailability();
@@ -3904,10 +4307,18 @@ export class DirectionsManager {
       this.waypointRedoHistory.push(currentSnapshot);
       this.trimHistoryStack(this.waypointRedoHistory);
     }
-    this.invalidateCachedLegSegments();
+    // Refresh the manual route overlay
+    this.updateManualRouteSource();
     if (this.waypoints.length >= 2) {
       this.updateWaypoints();
-      this.getRoute();
+      // If we restored leg segments, use them to rebuild the route
+      // This preserves the original routing modes (manual vs snapping)
+      if (hasLegSegments && this.cachedLegSegments instanceof Map && this.cachedLegSegments.size > 0) {
+        this.rebuildRouteFromCachedSegments();
+      } else {
+        // No preserved segments, need to recalculate
+        this.getRoute();
+      }
     } else {
       this.clearRoute();
       this.updateWaypoints();
@@ -3924,6 +4335,8 @@ export class DirectionsManager {
     }
     const next = this.waypointRedoHistory.pop();
     const currentSnapshot = this.createHistorySnapshot();
+    // Check if the next snapshot has leg segments before restoring
+    const hasLegSegments = next && Array.isArray(next.legSegments) && next.legSegments.length > 0;
     const restored = this.restoreStateFromSnapshot(next);
     if (!restored) {
       this.updateUndoAvailability();
@@ -3933,10 +4346,18 @@ export class DirectionsManager {
       this.waypointHistory.push(currentSnapshot);
       this.trimHistoryStack(this.waypointHistory);
     }
-    this.invalidateCachedLegSegments();
+    // Refresh the manual route overlay
+    this.updateManualRouteSource();
     if (this.waypoints.length >= 2) {
       this.updateWaypoints();
-      this.getRoute();
+      // If we restored leg segments, use them to rebuild the route
+      // This preserves the original routing modes (manual vs snapping)
+      if (hasLegSegments && this.cachedLegSegments instanceof Map && this.cachedLegSegments.size > 0) {
+        this.rebuildRouteFromCachedSegments();
+      } else {
+        // No preserved segments, need to recalculate
+        this.getRoute();
+      }
     } else {
       this.clearRoute();
       this.updateWaypoints();
@@ -6222,6 +6643,31 @@ export class DirectionsManager {
     this.map.dragPan?.disable();
     // Change cursor to grabbing
     this.map.getCanvas().style.cursor = 'grabbing';
+
+    // Store neighbor waypoints for drag preview visualization
+    const waypointIndex = this.draggedWaypointIndex;
+    this._dragPrevNeighbor = this.waypoints[waypointIndex - 1]?.slice(0, 2) ?? null;
+    this._dragNextNeighbor = this.waypoints[waypointIndex + 1]?.slice(0, 2) ?? null;
+
+    // Store the segment color at this waypoint's position for consistent preview coloring
+    // Estimate distance based on waypoint index
+    if (this.routeProfile && Number.isFinite(this.routeProfile.totalDistanceKm) && this.waypoints.length > 1) {
+      const fraction = waypointIndex / (this.waypoints.length - 1);
+      const estimatedDistanceKm = fraction * this.routeProfile.totalDistanceKm;
+      this._dragSegmentColor = this.getColorForDistance(estimatedDistanceKm);
+    } else {
+      this._dragSegmentColor = this.modeColors[this.currentMode];
+    }
+
+    // Store the routing mode of the adjacent segments so new segments inherit it
+    // Check the segment before and after this waypoint - use the mode of either
+    // Priority: if both exist and have different modes, prefer the previous segment's mode
+    const prevLeg = this.cachedLegSegments?.get(waypointIndex - 1);
+    const nextLeg = this.cachedLegSegments?.get(waypointIndex);
+    const prevMode = prevLeg?.routingMode;
+    const nextMode = nextLeg?.routingMode;
+    // Use prevMode if available, otherwise nextMode, otherwise current global mode
+    this._dragSegmentMode = prevMode || nextMode || this.currentMode;
   }
 
   /**
@@ -6449,7 +6895,7 @@ export class DirectionsManager {
       <div class="bivouac-popup" style="--day-color: ${dayColor}">
         <div class="bivouac-popup__header">
           <span class="bivouac-popup__title">${escapeHtml(bivouacName)}</span>
-          <button class="bivouac-popup__delete" data-bivouac-index="${cutIndex}" title="Delete bivouac" aria-label="Delete bivouac">
+          <button class="bivouac-popup__delete" data-bivouac-index="${cutIndex}" title="Supprimer le bivouac" aria-label="Supprimer le bivouac">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
             </svg>
@@ -6457,33 +6903,35 @@ export class DirectionsManager {
         </div>
         <div class="bivouac-popup__stats">
           <div class="bivouac-popup__stat">
-            <span class="bivouac-popup__stat-label">Day ${dayNumber} Summary</span>
+            <span class="bivouac-popup__stat-label">Jour ${dayNumber} - Résumé</span>
             <span class="bivouac-popup__stat-value">${this.formatDistance(dayDistanceKm)} km · +${dayAscent}m · ${this.formatDurationHours(dayTime)}</span>
           </div>
           <div class="bivouac-popup__stat">
-            <span class="bivouac-popup__stat-label">Elevation</span>
+            <span class="bivouac-popup__stat-label">Altitude</span>
             <span class="bivouac-popup__stat-value">${elevationLabel}</span>
           </div>
           <div class="bivouac-popup__stat bivouac-popup__stat--sun">
             <span class="bivouac-popup__stat-label">
               <svg class="bivouac-popup__stat-icon" viewBox="0 0 24 24"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06c-.39-.39-1.03-.39-1.41 0zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
-              Sunrise / Sunset
+              Lever / Coucher
             </span>
             <span class="bivouac-popup__stat-value">${sunriseLabel} / ${sunsetLabel}</span>
           </div>
           <div class="bivouac-popup__stat bivouac-popup__stat--water">
             <span class="bivouac-popup__stat-label">
               <svg class="bivouac-popup__stat-icon" viewBox="0 0 24 24"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2c0-3.32-2.67-7.25-8-11.8zm0 18c-3.35 0-6-2.57-6-6.2 0-2.34 1.95-5.44 6-9.14 4.05 3.7 6 6.79 6 9.14 0 3.63-2.65 6.2-6 6.2z"/></svg>
-              Nearby Water
+              Eau à proximité
             </span>
             <div class="bivouac-popup__water-options">${waterOptionsHtml}</div>
           </div>
           <div class="bivouac-popup__stat bivouac-popup__stat--weather">
             <span class="bivouac-popup__stat-label">
               <svg class="bivouac-popup__stat-icon" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
-              Weather
+              Météo J+${dayNumber - 1}
             </span>
-            <span class="bivouac-popup__stat-value bivouac-popup__stat-value--placeholder">Loading...</span>
+            <span class="bivouac-popup__stat-value weather-container" data-bivouac-day="${dayNumber}" data-lon="${lng}" data-lat="${lat}">
+              <span class="weather-loading">Chargement...</span>
+            </span>
           </div>
         </div>
       </div>
@@ -6506,6 +6954,9 @@ export class DirectionsManager {
       .setLngLat(coordinates)
       .setHTML(popupHtml)
       .addTo(this.map);
+
+    // Fetch and update weather for this bivouac location
+    this.updateBivouacWeather(lng, lat, dayNumber);
 
     // Add click handler for delete button
     const popupEl = this.bivouacPopup.getElement();
@@ -6793,28 +7244,32 @@ export class DirectionsManager {
 
     // Scale up the hovered marker type
     if (this.map.getLayer(SEGMENT_MARKER_LAYER_ID)) {
+      // Build icon-size expression that scales up the hovered marker type
+      // We need to avoid duplicate labels in the match expression
+      const buildSizeExpression = (hoverBivouac, hoverOther, normalBivouac, normalOther) => {
+        if (type === 'bivouac') {
+          // When hovering bivouac, only distinguish bivouac from others
+          return ['match', ['get', 'type'],
+            'bivouac', hoverBivouac,
+            normalOther
+          ];
+        } else {
+          // When hovering start/end, distinguish hovered type, bivouac, and others
+          return ['match', ['get', 'type'],
+            type, hoverOther,
+            'bivouac', normalBivouac,
+            normalOther
+          ];
+        }
+      };
+
       this.map.setLayoutProperty(SEGMENT_MARKER_LAYER_ID, 'icon-size', [
         'interpolate',
         ['linear'],
         ['zoom'],
-        8,
-        ['match', ['get', 'type'],
-          type, type === 'bivouac' ? 0.5 : 0.75,  // Hover size (larger)
-          'bivouac', 0.4,
-          0.55
-        ],
-        12,
-        ['match', ['get', 'type'],
-          type, type === 'bivouac' ? 0.75 : 1.0,  // Hover size (larger)
-          'bivouac', 0.6,
-          0.75
-        ],
-        16,
-        ['match', ['get', 'type'],
-          type, type === 'bivouac' ? 1.0 : 1.25,  // Hover size (larger)
-          'bivouac', 0.8,
-          0.95
-        ]
+        8, buildSizeExpression(0.5, 0.75, 0.4, 0.55),
+        12, buildSizeExpression(0.75, 1.0, 0.6, 0.75),
+        16, buildSizeExpression(1.0, 1.25, 0.8, 0.95)
       ]);
     }
   }
@@ -6919,12 +7374,25 @@ export class DirectionsManager {
       ? this.waypoints[legIndex + 1].slice(0, 2)
       : this.waypoints[insertIndex]?.slice(0, 2) ?? null;
 
+    // IMPORTANT: Capture segment color and mode BEFORE inserting waypoint and updating state
+    // This ensures we get the correct values before the route is recalculated
+    const dragDistanceKm = Number.isFinite(projection.distanceKm)
+      ? projection.distanceKm
+      : (segment?.startDistanceKm ?? 0);
+    const capturedSegmentColor = this.getColorForDistance(dragDistanceKm);
+    const cachedLeg = this.cachedLegSegments?.get(legIndex);
+    const capturedSegmentMode = cachedLeg?.routingMode || this.currentMode;
+
     // Record state for undo
     this.recordWaypointState();
 
     // Insert via waypoint at the projected location
     const waypoint = this.buildWaypointCoordinate(projectedCoords) ?? projectedCoords;
     this.waypoints.splice(insertIndex, 0, waypoint);
+    // IMPORTANT: Re-index cached leg segments AFTER insertion
+    // This ensures segments after the insertion point get their indices shifted
+    // e.g., if we insert at index 3, segment at cache[3] becomes cache[4], etc.
+    this.shiftCachedLegSegments(insertIndex, 1);
     this.updateWaypoints();
 
     // Immediately start dragging the inserted waypoint
@@ -6933,6 +7401,9 @@ export class DirectionsManager {
     this._viaInsertedByDrag = true; // Flag to prevent click handler from adding another point
     this._dragPrevNeighbor = prevNeighborCoords; // Store for updateDragPreview
     this._dragNextNeighbor = nextNeighborCoords; // Store for updateDragPreview
+    // Use pre-captured color and mode for consistent behavior
+    this._dragSegmentColor = capturedSegmentColor;
+    this._dragSegmentMode = capturedSegmentMode;
     this.setHoveredWaypointIndex(insertIndex);
     this.map.dragPan?.disable();
 
@@ -6953,6 +7424,9 @@ export class DirectionsManager {
 
       // Show drag preview lines (dashed lines from neighbors to drag position)
       this.updateDragPreview(this.draggedWaypointIndex, coords);
+
+      // Update the waypoint hover drag circle color to match the route segment color
+      this.updateDragWaypointColor(this.draggedWaypointIndex);
     }
 
     if (this.isDragging && this.draggedBivouacIndex !== null) {
@@ -6989,20 +7463,40 @@ export class DirectionsManager {
     const movedWaypoint = this.draggedWaypointIndex !== null;
     const movedWaypointIndex = this.draggedWaypointIndex;
     const movedBivouac = this.draggedBivouacIndex !== null;
+    // Capture the segment mode before clearing drag state
+    // This is the mode of the original segment that was being dragged
+    const dragSegmentMode = this._dragSegmentMode;
     this.isDragging = false;
     this.draggedWaypointIndex = null;
     this.map.dragPan?.enable();
     this.setHoveredWaypointIndex(null);
     // Clear drag preview lines and stored neighbor coords
     this.clearDragPreview();
+    this.resetDragWaypointColor();
     this._dragPrevNeighbor = null;
     this._dragNextNeighbor = null;
+    this._dragSegmentColor = null;
+    this._dragSegmentMode = null;
 
     if (movedWaypoint && this.waypoints.length >= 2) {
       const startLeg = Math.max(0, movedWaypointIndex - 1);
       const endLeg = Math.min(this.waypoints.length - 2, movedWaypointIndex);
       this.invalidateCachedLegSegments({ startIndex: startLeg, endIndex: endLeg });
-      this.getRoute();
+
+      // Use the original segment's mode for new segments created by dragging
+      // This ensures dragging from a manual segment creates manual segments,
+      // and dragging from a snapped segment creates snapped segments
+      // INDEPENDENT of the current global mode setting
+      if (dragSegmentMode && dragSegmentMode !== this.currentMode) {
+        const originalMode = this.currentMode;
+        this.currentMode = dragSegmentMode;
+        this.getRoute().finally(() => {
+          // Restore the original global mode after route calculation
+          this.currentMode = originalMode;
+        });
+      } else {
+        this.getRoute();
+      }
     }
     if (movedBivouac) {
       const releaseLngLat = event?.lngLat ?? null;
@@ -7014,6 +7508,7 @@ export class DirectionsManager {
   /**
    * Update the drag preview visualization showing dashed lines
    * from neighboring waypoints to the current drag position.
+   * Takes into account both waypoints and bivouacs as intermediate points.
    */
   updateDragPreview(waypointIndex, dragCoords) {
     const source = this.map.getSource('drag-preview-source');
@@ -7021,16 +7516,119 @@ export class DirectionsManager {
 
     const features = [];
 
-    // Use stored neighbor coords if available (for newly inserted via points)
-    // Otherwise fall back to waypoints array neighbors (for dragging existing waypoints)
-    const prevCoords = this._dragPrevNeighbor ?? this.waypoints[waypointIndex - 1]?.slice(0, 2);
-    const nextCoords = this._dragNextNeighbor ?? this.waypoints[waypointIndex + 1]?.slice(0, 2);
+    // Collect all key points on the route (waypoints + bivouacs) sorted by distance
+    const getAllRouteKeyPoints = () => {
+      const points = [];
+
+      // Add all waypoints with their estimated distances
+      const totalDistance = this.routeProfile?.totalDistanceKm ?? 0;
+      const waypointCount = this.waypoints.length;
+
+      this.waypoints.forEach((coords, idx) => {
+        if (!Array.isArray(coords) || coords.length < 2) return;
+        // Estimate distance for this waypoint
+        let distanceKm = 0;
+        if (waypointCount > 1 && totalDistance > 0) {
+          distanceKm = (idx / (waypointCount - 1)) * totalDistance;
+        }
+        points.push({
+          type: 'waypoint',
+          index: idx,
+          coordinates: coords.slice(0, 2),
+          distanceKm
+        });
+      });
+
+      // Add bivouac coordinates from cutSegments
+      if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
+        this.cutSegments.forEach((segment, idx) => {
+          // Each segment except the first has a bivouac at its start
+          if (idx > 0 && segment.startKm != null) {
+            const bivouacCoords = this.getCoordinateAtDistance(segment.startKm);
+            if (Array.isArray(bivouacCoords) && bivouacCoords.length >= 2) {
+              points.push({
+                type: 'bivouac',
+                index: idx,
+                coordinates: bivouacCoords.slice(0, 2),
+                distanceKm: segment.startKm
+              });
+            }
+          }
+        });
+      }
+
+      // Sort all points by distance
+      points.sort((a, b) => a.distanceKm - b.distanceKm);
+      return points;
+    };
+
+    // Get neighbors for the dragged waypoint (considering both waypoints AND bivouacs)
+    const findNeighbors = () => {
+      // If we have stored neighbors (from onMapMouseDown or onWaypointMouseDown), use them first
+      const storedPrev = this._dragPrevNeighbor;
+      const storedNext = this._dragNextNeighbor;
+
+      // Get all key points including bivouacs
+      const keyPoints = getAllRouteKeyPoints();
+
+      // Find the current waypoint in keyPoints
+      const currentWaypointPoint = keyPoints.find(p => p.type === 'waypoint' && p.index === waypointIndex);
+      if (!currentWaypointPoint) {
+        // Fallback to stored or waypoint neighbors
+        return {
+          prev: storedPrev ?? this.waypoints[waypointIndex - 1]?.slice(0, 2),
+          next: storedNext ?? this.waypoints[waypointIndex + 1]?.slice(0, 2)
+        };
+      }
+
+      // Find the index in sorted keyPoints
+      const sortedIndex = keyPoints.indexOf(currentWaypointPoint);
+
+      // Get previous and next points (could be waypoints or bivouacs)
+      const prevPoint = sortedIndex > 0 ? keyPoints[sortedIndex - 1] : null;
+      const nextPoint = sortedIndex < keyPoints.length - 1 ? keyPoints[sortedIndex + 1] : null;
+
+      return {
+        prev: prevPoint?.coordinates ?? storedPrev ?? this.waypoints[waypointIndex - 1]?.slice(0, 2),
+        next: nextPoint?.coordinates ?? storedNext ?? this.waypoints[waypointIndex + 1]?.slice(0, 2)
+      };
+    };
+
+    const neighbors = findNeighbors();
+    const prevCoords = neighbors.prev;
+    const nextCoords = neighbors.next;
+
+    // Get the appropriate color for the drag preview
+    // Use the color stored at drag start for consistency
+    const getPreviewColor = () => {
+      // Priority 1: Use the color stored when drag started
+      if (this._dragSegmentColor) {
+        return this._dragSegmentColor;
+      }
+      // Priority 2: Try to get the color based on the drag position using getColorForDistance
+      if (this.routeProfile && Number.isFinite(this.routeProfile.totalDistanceKm)) {
+        const totalWaypoints = this.waypoints.length;
+        if (totalWaypoints > 1) {
+          const fraction = waypointIndex / (totalWaypoints - 1);
+          const estimatedDistance = fraction * this.routeProfile.totalDistanceKm;
+          const color = this.getColorForDistance(estimatedDistance);
+          if (color) return color;
+        }
+      }
+      // Priority 3: Fall back to cut segments
+      if (Array.isArray(this.cutSegments) && this.cutSegments.length > 0) {
+        return this.cutSegments[0]?.color ?? this.modeColors[this.currentMode];
+      }
+      return this.modeColors[this.currentMode];
+    };
+
+    const previewColor = getPreviewColor();
 
     // Line from previous waypoint to drag position
     if (prevCoords) {
       features.push({
         type: 'Feature',
-        properties: {},
+        properties: { color: previewColor },
         geometry: {
           type: 'LineString',
           coordinates: [prevCoords, dragCoords]
@@ -7042,7 +7640,7 @@ export class DirectionsManager {
     if (nextCoords) {
       features.push({
         type: 'Feature',
-        properties: {},
+        properties: { color: previewColor },
         geometry: {
           type: 'LineString',
           coordinates: [dragCoords, nextCoords]
@@ -7063,6 +7661,57 @@ export class DirectionsManager {
     const source = this.map.getSource('drag-preview-source');
     if (source) {
       source.setData(EMPTY_COLLECTION);
+    }
+  }
+
+  /**
+ * Update the color of the waypoint-hover-drag circle during drag
+ * to match the current route segment color.
+ */
+  updateDragWaypointColor(waypointIndex) {
+    if (!this.map.getLayer('waypoint-hover-drag')) return;
+
+    // Priority 1: Use the color stored when drag started
+    let dragColor = this._dragSegmentColor;
+
+    // Priority 2: Calculate based on position if not stored
+    if (!dragColor) {
+      dragColor = this.modeColors[this.currentMode];
+      if (this.routeProfile && Number.isFinite(this.routeProfile.totalDistanceKm)) {
+        const totalWaypoints = this.waypoints.length;
+        if (totalWaypoints > 1) {
+          const fraction = waypointIndex / (totalWaypoints - 1);
+          const estimatedDistance = fraction * this.routeProfile.totalDistanceKm;
+          const color = this.getColorForDistance(estimatedDistance);
+          if (color) dragColor = color;
+        }
+      } else if (Array.isArray(this.cutSegments) && this.cutSegments.length > 0) {
+        dragColor = this.cutSegments[0]?.color ?? dragColor;
+      }
+    }
+
+    // Update the layer's stroke color for the dragged waypoint
+    try {
+      this.map.setPaintProperty('waypoint-hover-drag', 'circle-stroke-color', dragColor);
+    } catch (error) {
+      // Ignore errors if layer doesn't support dynamic updates
+    }
+  }
+
+  /**
+   * Reset the waypoint-hover-drag color to its default expression.
+   */
+  resetDragWaypointColor() {
+    if (!this.map.getLayer('waypoint-hover-drag')) return;
+    try {
+      this.map.setPaintProperty('waypoint-hover-drag', 'circle-stroke-color', [
+        'case',
+        ['==', ['get', 'role'], 'start'], 'rgba(255, 255, 255, 0.95)',
+        ['==', ['get', 'role'], 'end'], 'rgba(255, 255, 255, 0.95)',
+        ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
+      ]);
+    } catch (error) {
+      // Ignore errors
     }
   }
 
@@ -8472,6 +9121,8 @@ export class DirectionsManager {
     this.waypointHistory = [];
     this.waypointRedoHistory = [];
     this.updateUndoAvailability();
+    // Collapse the elevation chart when clearing the route
+    this.setElevationCollapsed(true);
   }
 
   normalizeImportedCoordinate(coord) {
@@ -8792,7 +9443,9 @@ export class DirectionsManager {
       this.map.setPaintProperty('route-hover-point', 'circle-stroke-color', this.modeColors[this.currentMode]);
     }
     if (this.map.getLayer('drag-preview-line')) {
-      this.map.setPaintProperty('drag-preview-line', 'line-color', this.modeColors[this.currentMode]);
+      // Use expression to get color from feature properties, with fallback to mode color
+      this.map.setPaintProperty('drag-preview-line', 'line-color',
+        ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]);
     }
     // Update bivouac marker icon to match route color
     updateBivouacMarkerColor(this.map, this.modeColors[this.currentMode]);
@@ -9093,11 +9746,14 @@ export class DirectionsManager {
       const localDistances = computeSegmentDistances(coordinates);
       const legLength = localDistances[localDistances.length - 1] || 0;
 
-      // If no cut segments or leg has no length, use fallback
+      // If no cut segments or leg has no length, use color based on distance
       if (!Array.isArray(this.cutSegments) || this.cutSegments.length === 0 || legLength <= 0) {
+        // Use getColorForDistance which respects profile mode (slope, difficulty, etc.)
+        const midpointKm = (legStartKm + legEndKm) / 2;
+        const segmentColor = this.getColorForDistance(midpointKm) || fallbackColor;
         features.push({
           type: 'Feature',
-          properties: { legIndex, color: fallbackColor },
+          properties: { legIndex, color: segmentColor },
           geometry: { type: 'LineString', coordinates }
         });
         continue;
@@ -9111,11 +9767,12 @@ export class DirectionsManager {
       });
 
       if (overlappingCuts.length === 0) {
-        // No overlaps, use first cut segment color or fallback
-        const firstCut = this.getCutSegmentForDistance(legStartKm);
+        // No overlaps, use color based on distance (respects profile mode)
+        const midpointKm = (legStartKm + legEndKm) / 2;
+        const segmentColor = this.getColorForDistance(midpointKm) || fallbackColor;
         features.push({
           type: 'Feature',
-          properties: { legIndex, color: firstCut?.color || fallbackColor },
+          properties: { legIndex, color: segmentColor },
           geometry: { type: 'LineString', coordinates }
         });
         continue;
@@ -9155,9 +9812,12 @@ export class DirectionsManager {
         }
 
         if (portionCoords.length >= 2) {
+          // Use getColorForDistance to respect profile mode (slope, difficulty, etc.)
+          const midpointKm = (cutStart + cutEnd) / 2;
+          const portionColor = this.getColorForDistance(midpointKm) || cut.color || fallbackColor;
           features.push({
             type: 'Feature',
-            properties: { legIndex, color: cut.color || fallbackColor },
+            properties: { legIndex, color: portionColor },
             geometry: { type: 'LineString', coordinates: portionCoords }
           });
         }
@@ -9277,8 +9937,9 @@ export class DirectionsManager {
       }
       const startWaypoint = this.waypoints[startIndex];
       const endWaypoint = this.waypoints[endIndex];
-      if (!this.coordinatesMatch(coordinates[0], startWaypoint)
-        || !this.coordinatesMatch(coordinates[coordinates.length - 1], endWaypoint)) {
+      const startMatch = this.coordinatesMatch(coordinates[0], startWaypoint);
+      const endMatch = this.coordinatesMatch(coordinates[coordinates.length - 1], endWaypoint);
+      if (!startMatch || !endMatch) {
         continue;
       }
       const distance = Number.isFinite(segment.distance) ? Number(segment.distance) : null;
@@ -10100,14 +10761,15 @@ export class DirectionsManager {
       </div>
       <div class="day-details__item">
         <span class="day-details__item-label">Météo :</span>
-        <span class="day-details__item-value">
-          ${SUMMARY_ICONS.weather || ''}
-          Bientôt disponible
+        <span class="day-details__item-value weather-container" data-weather-target="route">
+          <span class="weather-loading">Chargement...</span>
         </span>
       </div>
     </div>
   </div>
 `;
+    // Fetch and display weather data asynchronously
+    this.updateWeatherDisplay();
   }
 
   renderMultiDayTimeline(metrics) {
@@ -10241,9 +10903,8 @@ export class DirectionsManager {
             </div>
             <div class="day-details__item">
               <span class="day-details__item-label">Météo :</span>
-              <span class="day-details__item-value">
-                ${SUMMARY_ICONS.weather ?? ''}
-                <span>Bientôt disponible</span>
+              <span class="day-details__item-value weather-container" data-weather-target="day">
+                <span class="weather-loading">Chargement...</span>
               </span>
             </div>
           </div>
@@ -10304,9 +10965,8 @@ export class DirectionsManager {
             </div>
             <div class="day-details__item">
               <span class="day-details__item-label">Météo :</span>
-              <span class="day-details__item-value">
-                ${SUMMARY_ICONS.weather ?? ''}
-                <span>Bientôt disponible</span>
+              <span class="day-details__item-value weather-container" data-weather-target="route">
+                <span class="weather-loading">Chargement...</span>
               </span>
             </div>
           </div>
@@ -10321,6 +10981,9 @@ export class DirectionsManager {
 
     // Attach click handlers to day tabs
     this.attachDayTabHandlers();
+
+    // Fetch and display weather data asynchronously
+    this.updateWeatherDisplay();
   }
 
   attachDayTabHandlers() {
@@ -10346,6 +11009,140 @@ export class DirectionsManager {
         this.zoomElevationChartToDay(this.selectedDayIndex);
       });
     });
+  }
+
+  /**
+   * Fetch and display weather data for the current route
+   */
+  async updateWeatherDisplay() {
+    if (!this.routeStats) return;
+
+    const weatherContainers = this.routeStats.querySelectorAll('.weather-container');
+    if (!weatherContainers.length) return;
+
+    // Get coordinates based on current view (selected day or full route)
+    let targetCoordinates = null;
+    // Day offset for forecast: Jour 1 = today (0), Jour 2 = tomorrow (1), etc.
+    let dayOffset = this.selectedDayIndex !== null && this.selectedDayIndex !== undefined
+      ? this.selectedDayIndex
+      : 0;
+
+    if (this.selectedDayIndex !== null && this.selectedDayIndex !== undefined) {
+      // Get midpoint of selected day segment
+      const segment = this.cutSegments?.[this.selectedDayIndex];
+      if (segment) {
+        const startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+        const endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
+        const midKm = (startKm + endKm) / 2;
+        targetCoordinates = this.getCoordinateAtDistance(midKm);
+      }
+    }
+
+    // Fallback to route midpoint
+    if (!targetCoordinates) {
+      const coords = this.routeGeojson?.geometry?.coordinates;
+      if (Array.isArray(coords) && coords.length >= 2) {
+        const midIndex = Math.floor(coords.length / 2);
+        targetCoordinates = coords[midIndex];
+      }
+    }
+
+    if (!targetCoordinates || !Array.isArray(targetCoordinates) || targetCoordinates.length < 2) {
+      weatherContainers.forEach((container) => {
+        container.innerHTML = '<span class="weather-unavailable">Coordonnées non disponibles</span>';
+      });
+      return;
+    }
+
+    const [lon, lat] = targetCoordinates;
+
+    try {
+      const weatherData = await fetchMeteoFrance(lon, lat);
+      // Use day-specific forecast based on selected day
+      const weather = getWeatherForDay(weatherData, dayOffset);
+
+      if (weather) {
+        const weatherHtml = renderWeatherWidget(weather);
+        weatherContainers.forEach((container) => {
+          container.innerHTML = weatherHtml;
+        });
+      } else {
+        weatherContainers.forEach((container) => {
+          container.innerHTML = '<span class="weather-unavailable">Données non disponibles</span>';
+        });
+      }
+    } catch (error) {
+      console.warn('Weather update failed:', error);
+      weatherContainers.forEach((container) => {
+        container.innerHTML = '<span class="weather-unavailable">Erreur de chargement</span>';
+      });
+    }
+  }
+
+  /**
+   * Fetch and display weather for a specific bivouac popup
+   * @param {number} lon - Longitude
+   * @param {number} lat - Latitude  
+   * @param {number} dayNumber - Day number (1 = today, 2 = tomorrow, etc.)
+   */
+  async updateBivouacWeather(lon, lat, dayNumber) {
+    // Find the weather container in the popup
+    const popupEl = this.bivouacPopup?.getElement?.();
+    if (!popupEl) return;
+
+    const weatherContainer = popupEl.querySelector('.weather-container');
+    if (!weatherContainer) return;
+
+    // Day offset: day 1 = today (offset 0), day 2 = tomorrow (offset 1)
+    const dayOffset = dayNumber - 1;
+
+    try {
+      const weatherData = await fetchMeteoFrance(lon, lat);
+      const weather = getWeatherForDay(weatherData, dayOffset);
+
+      if (weather) {
+        weatherContainer.innerHTML = renderWeatherWidget(weather);
+      } else {
+        weatherContainer.innerHTML = '<span class="weather-unavailable">Non disponible</span>';
+      }
+    } catch (error) {
+      console.warn('Bivouac weather update failed:', error);
+      weatherContainer.innerHTML = '<span class="weather-unavailable">Erreur</span>';
+    }
+  }
+
+  /**
+   * Get coordinate [lon, lat] at a given distance along the route
+   */
+  getCoordinateAtDistance(distanceKm) {
+    const coords = this.routeGeojson?.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) {
+      return null;
+    }
+
+    let accumulatedKm = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const prev = coords[i - 1];
+      const curr = coords[i];
+      if (!Array.isArray(prev) || !Array.isArray(curr)) continue;
+
+      const segmentLengthKm = this.haversineDistance(prev[1], prev[0], curr[1], curr[0]);
+
+      if (accumulatedKm + segmentLengthKm >= distanceKm) {
+        // Interpolate position within this segment
+        const ratio = segmentLengthKm > 0
+          ? (distanceKm - accumulatedKm) / segmentLengthKm
+          : 0;
+        const lon = prev[0] + (curr[0] - prev[0]) * ratio;
+        const lat = prev[1] + (curr[1] - prev[1]) * ratio;
+        return [lon, lat];
+      }
+
+      accumulatedKm += segmentLengthKm;
+    }
+
+    // If distance exceeds route length, return last coordinate
+    return coords[coords.length - 1];
   }
 
   zoomElevationChartToDay(dayIndex) {
@@ -10498,15 +11295,24 @@ export class DirectionsManager {
         return;
       }
 
-      // When zoomed to a day, only show the bivouac at the END of that day
+      // When zoomed to a day, show bivouacs at boundaries of the selected day
       if (this.selectedDayIndex !== null && this.selectedDayIndex !== undefined) {
         const segment = this.cutSegments?.[this.selectedDayIndex];
-        if (segment) {
-          const endKm = Number(segment.endKm ?? segment.endDistanceKm ?? 0);
-          const isEndBivouac = Math.abs(distanceKm - endKm) <= tolerance;
+        const totalSegments = Array.isArray(this.cutSegments) ? this.cutSegments.length : 0;
+        const isLastDay = this.selectedDayIndex === totalSegments - 1;
+        const isFirstDay = this.selectedDayIndex === 0;
 
-          // Only show the bivouac that marks the END of the selected day
-          marker.style.display = isEndBivouac ? '' : 'none';
+        if (segment) {
+          const startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+          const endKm = Number(segment.endKm ?? segment.endDistanceKm ?? 0);
+
+          // Show bivouac at the END of the day (if not the last day)
+          const isEndBivouac = !isLastDay && Math.abs(distanceKm - endKm) <= tolerance;
+          // Show bivouac at the START of the day (if not the first day)
+          const isStartBivouac = !isFirstDay && Math.abs(distanceKm - startKm) <= tolerance;
+
+          // Show if it's either the start or end bivouac of this day segment
+          marker.style.display = (isEndBivouac || isStartBivouac) ? '' : 'none';
         } else {
           marker.style.display = 'none';
         }
@@ -10648,26 +11454,54 @@ export class DirectionsManager {
     const gradientStops = [];
 
     // Determine which segments to use for the gradient
-    // Profile segments take priority when profile mode is active (not 'none')
-    const useProfileSegments = this.profileMode !== 'none'
+    // Profile segments take priority when in a gradient profile mode (slope, surface, category)
+    const useProfileSegments = isProfileGradientMode(this.profileMode)
       && Array.isArray(this.profileSegments)
       && this.profileSegments.length > 0;
 
     if (useProfileSegments) {
-      // Use profile segments for gradient coloring (slope, difficulty, etc.)
-      this.profileSegments.forEach((segment) => {
-        if (!segment) return;
-        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
-        if (!segmentColor) return;
+      // Build segment info for gradient transitions
+      const segmentInfos = this.profileSegments
+        .map((segment) => {
+          if (!segment) return null;
+          const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
+          if (!segmentColor) return null;
+          let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
+          let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
+          return { startKm, endKm, color: segmentColor };
+        })
+        .filter(Boolean);
 
-        let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
-        let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
+      // Define transition zone size as a fraction of total distance (15% for very smooth gradient like map route)
+      const transitionSizeKm = Math.max(0.15, domainSpan * 0.15);
 
-        const startRatio = Math.max(0, Math.min(1, (startKm - domainMin) / domainSpan));
-        const endRatio = Math.max(0, Math.min(1, (endKm - domainMin) / domainSpan));
+      // Helper to add gradient stop
+      const addStop = (km, color) => {
+        const ratio = Math.max(0, Math.min(1, (km - domainMin) / domainSpan));
+        gradientStops.push({ offset: ratio, color });
+      };
 
-        gradientStops.push({ offset: startRatio, color: segmentColor });
-        gradientStops.push({ offset: endRatio, color: segmentColor });
+      segmentInfos.forEach((info, index) => {
+        const { startKm, endKm, color } = info;
+        const nextInfo = segmentInfos[index + 1];
+        const prevInfo = index > 0 ? segmentInfos[index - 1] : null;
+
+        // Start of segment
+        if (prevInfo && prevInfo.color !== color) {
+          // Transition from previous color to current
+          addStop(startKm, prevInfo.color);
+          addStop(startKm + transitionSizeKm, color);
+        } else {
+          addStop(startKm, color);
+        }
+
+        // End of segment
+        if (nextInfo && nextInfo.color !== color) {
+          // Prepare for transition to next color
+          addStop(endKm - transitionSizeKm, color);
+        } else {
+          addStop(endKm, color);
+        }
       });
     } else if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
       // Add gradient stops for cut segments (day colors) with SHARP transitions at boundaries
@@ -11259,36 +12093,53 @@ export class DirectionsManager {
         return [];
       })();
 
-      gradientSegments.forEach((segment) => {
-        if (!segment) {
-          return;
+      // Build segment info for gradient transitions
+      const segmentInfos = gradientSegments
+        .map((segment) => {
+          if (!segment) return null;
+          const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
+          if (!segmentColor) return null;
+          let startKm = Number(segment.startKm);
+          if (!Number.isFinite(startKm)) startKm = Number(segment.startDistanceKm);
+          if (!Number.isFinite(startKm)) startKm = 0;
+          let endKm = Number(segment.endKm);
+          if (!Number.isFinite(endKm)) endKm = Number(segment.endDistanceKm);
+          if (!Number.isFinite(endKm)) endKm = startKm;
+          return { startKm, endKm, color: segmentColor };
+        })
+        .filter(Boolean);
+
+      // Define transition zone size as a fraction of total distance (15% for very smooth gradient like map route)
+      const transitionSizeKm = Math.max(0.15, (xMax - xMin) * 0.15); // 15% of total or min 150m
+
+      segmentInfos.forEach((info, index) => {
+        const { startKm, endKm, color } = info;
+        const nextInfo = segmentInfos[index + 1];
+        const prevInfo = index > 0 ? segmentInfos[index - 1] : null;
+
+        // Start of segment
+        if (prevInfo && prevInfo.color !== color) {
+          // Transition from previous color to current
+          addGradientStop(startKm, prevInfo.color);
+          addGradientStop(startKm + transitionSizeKm, color);
+        } else {
+          addGradientStop(startKm, color);
         }
-        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
-        if (!segmentColor) {
-          return;
+
+        // End of segment
+        if (nextInfo && nextInfo.color !== color) {
+          // Prepare for transition to next color
+          addGradientStop(endKm - transitionSizeKm, color);
+        } else {
+          addGradientStop(endKm, color);
         }
-        let startKm = Number(segment.startKm);
-        if (!Number.isFinite(startKm)) {
-          startKm = Number(segment.startDistanceKm);
-        }
-        if (!Number.isFinite(startKm)) {
-          startKm = 0;
-        }
-        let endKm = Number(segment.endKm);
-        if (!Number.isFinite(endKm)) {
-          endKm = Number(segment.endDistanceKm);
-        }
-        if (!Number.isFinite(endKm)) {
-          endKm = startKm;
-        }
-        addGradientStop(startKm, segmentColor);
-        addGradientStop(endKm, segmentColor);
       });
     }
 
     // Add sharp transitions at cutSegment boundaries (for bivouac day splits)
     // This ensures day segments have crisp color changes, not gradients
-    if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
+    // Only apply day colors when NOT in a profile gradient mode (slope/surface/category)
+    if (!gradientEnabled && Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
       const cutSegs = this.cutSegments;
       for (let i = 0; i < cutSegs.length; i += 1) {
         const segment = cutSegs[i];
@@ -11835,11 +12686,26 @@ export class DirectionsManager {
           } else {
             marker.style.bottom = `${elevationPercent}%`;
           }
+          // Calculate and set the dashed line height for bivouac markers
+          // The line should extend from the marker bottom to the chart bottom (0%)
+          if (isBivouacMarker) {
+            const containerHeight = this.elevationChartContainer?.clientHeight || 0;
+            // The marker's bottom is at elevationPercent% from the container bottom
+            // So the line height is simply that percentage of the container height
+            const lineHeightPx = Math.max(0, clampedElevation * containerHeight);
+            marker.style.setProperty('--bivouac-line-height', `${lineHeightPx.toFixed(1)}px`);
+          }
         } else {
           marker.style.bottom = `${offsetPx}px`;
+          if (isBivouacMarker) {
+            marker.style.setProperty('--bivouac-line-height', '0px');
+          }
         }
       } else if (isPoiMarker || isBivouacMarker) {
         marker.style.bottom = `${offsetPx}px`;
+        if (isBivouacMarker) {
+          marker.style.setProperty('--bivouac-line-height', '0px');
+        }
       }
 
       const clusterShift = clusterShiftMap.get(marker);

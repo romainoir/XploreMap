@@ -184,6 +184,7 @@ const IMAGERY_LAYER_IDS = new Set(
 
 const ROUTE_LAYER_IDS = new Set([
   'route-line',
+  'route-line-casing',
   'route-segment-hover',
   'distance-markers',
   'waypoints',
@@ -201,7 +202,8 @@ const ROUTE_LAYER_ORDER_TOP_TO_BOTTOM = Object.freeze([
   'waypoints-hit-area',
   'distance-markers',
   'route-segment-hover',
-  'route-line'
+  'route-line',
+  'route-line-casing'
 ]);
 
 const CONTOUR_LINE_BASE_OPACITY = Object.freeze([
@@ -1467,11 +1469,7 @@ async function init() {
   };
 
   const switchRoutingMode = (targetKey, { reroute = true } = {}) => {
-    console.log(`Switching routing mode to: ${targetKey} (current: ${activeRouterKey})`);
     return setActiveRouter(targetKey, { reroute })
-      .then(() => {
-        console.log(`Routing mode switched to: ${activeRouterKey}`);
-      })
       .catch((error) => {
         console.error('Failed to switch routing mode', error);
       });
@@ -1702,21 +1700,12 @@ async function init() {
     });
   }
 
-  console.log('[RoutingToggle] routingModeToggle element:', routingModeToggle);
-  console.log('[RoutingToggle] activeRouterKey initial:', activeRouterKey);
-  console.log('[RoutingToggle] routers available:', Object.keys(routers));
 
   if (routingModeToggle) {
-    console.log('[RoutingToggle] Attaching click handler to routingModeToggle');
     routingModeToggle.addEventListener('click', (event) => {
-      console.log('[RoutingToggle] Button clicked!');
-      console.log('[RoutingToggle] Current activeRouterKey:', activeRouterKey);
       const targetKey = activeRouterKey === 'offline' ? 'online' : 'offline';
-      console.log('[RoutingToggle] Target key:', targetKey);
       switchRoutingMode(targetKey);
     });
-  } else {
-    console.warn('[RoutingToggle] routingModeToggle element NOT FOUND!');
   }
 
   if (routingModeIcon) {
