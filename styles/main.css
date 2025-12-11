@@ -1875,6 +1875,32 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* POI info section in tooltip */
+.elevation-chart-tooltip__poi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.elevation-chart-tooltip__poi strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.elevation-chart-tooltip__poi-category {
+  font-size: 10px;
+  opacity: 0.75;
+  color: inherit;
+}
+
+.elevation-chart-tooltip__poi-elev {
+  display: none;
+}
+
 .elevation-bar {
   position: relative;
   flex-grow: var(--bar-flex-grow, 1);
@@ -1938,6 +1964,7 @@ body {
   min-width: 26px;
   min-height: 26px;
   color: var(--bivouac-marker-color, #2d7bd6);
+  z-index: 3;
 }
 
 .elevation-marker.bivouac .elevation-marker__icon {
@@ -1969,18 +1996,25 @@ body {
 }
 
 .elevation-marker.poi {
-  min-width: 12px;
-  min-height: 12px;
+  min-width: 16px;
+  min-height: 16px;
   color: var(--poi-marker-color, #2d7bd6);
+  z-index: 2;
+  cursor: pointer;
 }
 
+/* POI icons have a subtle glow for visibility */
+.elevation-marker.poi .elevation-marker__icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+/* Generic label base styles (for bivouacs if needed) */
 .elevation-marker__label {
   font-size: 10px;
   font-weight: 600;
   color: currentColor;
   white-space: nowrap;
   line-height: 1.2;
-  transform: translateY(calc(-1 * var(--elevation-marker-label-shift, 0px)));
 }
 
 .elevation-marker__icon--fallback {
@@ -1991,8 +2025,8 @@ body {
 }
 
 .elevation-marker.poi .elevation-marker__icon--fallback {
-  --elevation-marker-icon-width: 8px;
-  --elevation-marker-icon-height: 8px;
+  --elevation-marker-icon-width: 10px;
+  --elevation-marker-icon-height: 10px;
 }
 
 .elevation-x-axis {
