@@ -54,45 +54,6 @@
       <!-- Elevation chart (top - expandable) -->
       <div id="elevationCard" class="elevation-section elevation-section--collapsed chart-card--collapsed" role="group"
         aria-label="Route elevation overview">
-        <div class="elevation-section__header">
-          <div class="profile-mode-controls">
-            <div class="profile-mode-menu" aria-live="polite">
-              <button id="profileModeToggle" class="profile-mode-button profile-mode-button--compact" type="button"
-                aria-haspopup="true" aria-expanded="false" aria-controls="profileModeMenuList">
-                <span class="profile-mode-button__icon" aria-hidden="true">
-                  <img src="./data/style.png" alt="" loading="lazy" decoding="async" />
-                </span>
-                <span class="profile-mode-button__label">Aucun</span>
-                <span class="sr-only">Toggle overlay mode</span>
-              </button>
-              <div id="profileModeMenuList" class="profile-mode-menu__list" role="menu" tabindex="-1"
-                aria-hidden="true">
-                <button type="button" class="profile-mode-menu__item active" data-profile-mode="none"
-                  role="menuitemradio" aria-checked="true">
-                  <span class="profile-mode-menu__text">Aucun</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="slope" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">Pente</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="surface" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">Surface</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="category" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">Difficulté</span>
-                </button>
-                <button type="button" class="profile-mode-menu__item" data-profile-mode="poi" role="menuitemradio"
-                  aria-checked="false">
-                  <span class="profile-mode-menu__text">POI</span>
-                </button>
-              </div>
-            </div>
-            <div id="profileLegend" class="profile-legend" role="group" aria-label="Route overlay legend"
-              aria-hidden="true" data-ready="false"></div>
-          </div>
-        </div>
         <div id="elevationChartBody" class="elevation-section__body" hidden aria-hidden="true">
           <div class="elevation-section__chart-wrapper">
             <div class="elevation-section__y-axis" id="elevationYAxisLabels">
@@ -100,6 +61,32 @@
               <span class="chart-card__y-min"></span>
             </div>
             <div id="elevationChart" class="elevation-chart" aria-hidden="true"></div>
+            <!-- Profile mode controls - positioned on the right side of the chart -->
+            <div class="profile-mode-sidebar" role="radiogroup" aria-label="Profile display mode">
+              <!-- Legend popup (appears on hover when hovering over a mode icon) -->
+              <div id="profileLegend" class="profile-legend" role="group" aria-label="Route overlay legend"
+                aria-hidden="true" data-ready="false"></div>
+              <button type="button" class="profile-mode-sidebar__item" data-profile-mode="slope" role="radio"
+                aria-checked="false" title="Pente">
+                <img src="./data/icons_Xmap/pente.png" alt="" aria-hidden="true" />
+                <span class="sr-only">Pente</span>
+              </button>
+              <button type="button" class="profile-mode-sidebar__item" data-profile-mode="surface" role="radio"
+                aria-checked="false" title="Surface">
+                <img src="./data/icons_Xmap/surface.png" alt="" aria-hidden="true" />
+                <span class="sr-only">Surface</span>
+              </button>
+              <button type="button" class="profile-mode-sidebar__item" data-profile-mode="category" role="radio"
+                aria-checked="false" title="Difficulté">
+                <img src="./data/icons_Xmap/difficulty.png" alt="" aria-hidden="true" />
+                <span class="sr-only">Difficulté</span>
+              </button>
+              <button type="button" class="profile-mode-sidebar__item" data-profile-mode="poi" role="radio"
+                aria-checked="false" title="POI">
+                <img src="./data/icons_Xmap/POI.png" alt="" aria-hidden="true" />
+                <span class="sr-only">POI</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

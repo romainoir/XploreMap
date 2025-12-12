@@ -2311,9 +2311,16 @@ export class DirectionsManager {
       : null;
     this.profileModeToggle = profileModeToggle ?? null;
     this.profileModeMenu = profileModeMenu ?? null;
-    this.profileModeOptions = this.profileModeMenu
-      ? Array.from(this.profileModeMenu.querySelectorAll('[data-profile-mode]'))
-      : [];
+    // Profile mode options can come from either the old dropdown menu or the new sidebar
+    // First, try the new sidebar (in the chart wrapper)
+    this.profileModeSidebar = this.elevationChartBody
+      ? this.elevationChartBody.querySelector('.profile-mode-sidebar')
+      : null;
+    this.profileModeOptions = this.profileModeSidebar
+      ? Array.from(this.profileModeSidebar.querySelectorAll('[data-profile-mode]'))
+      : this.profileModeMenu
+        ? Array.from(this.profileModeMenu.querySelectorAll('[data-profile-mode]'))
+        : [];
     this.profileModeLabel = this.profileModeToggle
       ? this.profileModeToggle.querySelector('.profile-mode-button__label')
       : null;
@@ -2996,13 +3003,40 @@ export class DirectionsManager {
       document.addEventListener('click', this.handleDocumentClickForProfileMenu);
     }
 
+
     if (this.profileModeOptions.length) {
       this.profileModeOptions.forEach((button) => {
+        // Click handler with toggle behavior
         button.addEventListener('click', (event) => {
           event.preventDefault();
           const mode = button.dataset.profileMode;
-          this.setProfileMode(mode);
+          // Toggle: if clicking on already active mode, go back to 'none'
+          const newMode = this.profileMode === mode ? 'none' : mode;
+          this.setProfileMode(newMode);
           this.closeProfileMenu();
+        });
+
+        // Long-hover to show legend (similar to profile toggle button)
+        let legendHoverTimeout = null;
+        button.addEventListener('pointerenter', () => {
+          const mode = button.dataset.profileMode;
+          if (mode && mode !== 'none' && mode !== 'poi') {
+            legendHoverTimeout = setTimeout(() => {
+              // Temporarily set profile mode for legend display
+              const originalMode = this.profileMode;
+              this.profileMode = mode;
+              this.updateProfileLegend(true);
+              this.showProfileLegend();
+              this.profileMode = originalMode;
+            }, PROFILE_LEGEND_SHOW_DELAY_MS);
+          }
+        });
+        button.addEventListener('pointerleave', () => {
+          if (legendHoverTimeout) {
+            clearTimeout(legendHoverTimeout);
+            legendHoverTimeout = null;
+          }
+          this.hideProfileLegend();
         });
       });
     }
