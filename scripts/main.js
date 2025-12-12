@@ -792,61 +792,73 @@ async function init() {
       ['get', 'ref'],
       ''
     ],
-    'rawCategoryCandidate',
     [
-      'coalesce',
-      ['get', 'subclass'],
-      ['get', 'class'],
-      ''
-    ],
-    'labelName',
-    [
-      'case',
-      ['==', ['typeof', ['var', 'rawNameCandidate']], 'string'],
-      ['var', 'rawNameCandidate'],
-      ['==', ['typeof', ['var', 'rawNameCandidate']], 'number'],
-      ['to-string', ['var', 'rawNameCandidate']],
-      ''
-    ],
-    'labelCategory',
-    [
-      'case',
-      ['==', ['typeof', ['var', 'rawCategoryCandidate']], 'string'],
-      ['var', 'rawCategoryCandidate'],
-      ['==', ['typeof', ['var', 'rawCategoryCandidate']], 'number'],
-      ['to-string', ['var', 'rawCategoryCandidate']],
-      ''
-    ],
-    [
-      'case',
-      ['!=', ['var', 'labelName'], ''],
-      ['var', 'labelName'],
+      'let',
+      'rawCategoryCandidate',
       [
-        'match',
-        ['var', 'labelCategory'],
-        'peak', 'Sommet',
-        'volcano', 'Volcan',
-        'mountain_pass', 'Col',
-        'saddle', 'Col',
-        'viewpoint', 'Point de vue',
-        'restaurant', 'Restaurant',
-        'fast_food', 'Restauration rapide',
-        'cafe', 'Café',
-        'bar', 'Bar',
-        'pub', 'Pub',
-        'parking', 'Parking',
-        'parking_underground', 'Parking',
-        'parking_multi-storey', 'Parking',
-        'parking_multistorey', 'Parking',
-        'parking_multi_storey', 'Parking',
-        'alpine_hut', 'Refuge',
-        'wilderness_hut', 'Cabane',
-        'cabin', 'Cabane',
-        'shelter', 'Abri',
-        'hostel', 'Auberge',
-        'guest_house', 'Maison d’hôtes',
-        'hotel', 'Hôtel',
+        'coalesce',
+        ['get', 'subclass'],
+        ['get', 'class'],
         ''
+      ],
+      [
+        'let',
+        'labelName',
+        [
+          'case',
+          ['==', ['typeof', ['var', 'rawNameCandidate']], 'string'],
+          ['var', 'rawNameCandidate'],
+          ['==', ['typeof', ['var', 'rawNameCandidate']], 'number'],
+          ['to-string', ['var', 'rawNameCandidate']],
+          ''
+        ],
+        [
+          'let',
+          'labelCategory',
+          [
+            'case',
+            ['==', ['typeof', ['var', 'rawCategoryCandidate']], 'string'],
+            ['var', 'rawCategoryCandidate'],
+            ['==', ['typeof', ['var', 'rawCategoryCandidate']], 'number'],
+            ['to-string', ['var', 'rawCategoryCandidate']],
+            ''
+          ],
+          [
+            'case',
+            ['!=', ['var', 'labelName'], ''],
+            ['var', 'labelName'],
+            [
+              'match',
+              ['var', 'labelCategory'],
+              'peak', 'Sommet',
+              'volcano', 'Volcan',
+              'mountain_pass', 'Col',
+              'saddle', 'Col',
+              'viewpoint', 'Point de vue',
+              'restaurant', 'Restaurant',
+              'fast_food', 'Restauration rapide',
+              'cafe', 'Café',
+              'bar', 'Bar',
+              'pub', 'Pub',
+              'parking', 'Parking',
+              'parking_underground', 'Parking',
+              'parking_multi-storey', 'Parking',
+              'parking_multistorey', 'Parking',
+              'parking_multi_storey', 'Parking',
+              'alpine_hut', 'Refuge',
+              'wilderness_hut', 'Cabane',
+              'cabin', 'Cabane',
+              'shelter', 'Abri',
+              'hostel', 'Auberge',
+              'guest_house', "Maison d'hôtes",
+              'hotel', 'Hôtel',
+              'spring', 'Source',
+              'water', 'Eau',
+              'drinking_water', 'Eau potable',
+              ''
+            ]
+          ]
+        ]
       ]
     ]
   ]);
@@ -1603,6 +1615,12 @@ async function init() {
             };
           })
           .filter(Boolean);
+      });
+
+      // Clear the imported GPX layer when directions are cleared
+      directionsManager.setClearDirectionsListener(() => {
+        currentGpxData = EMPTY_COLLECTION;
+        ensureGpxLayers(map, currentGpxData);
       });
 
       directionsManager.setNetworkPreparationCallback(async ({ waypoints }) => {

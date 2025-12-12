@@ -1,14 +1,15 @@
+// Utility module for XploreMap POI icons management
 const ICON_BASE_PATH = './data/icons_Xmap/';
 const ICON_SPECS = Object.freeze({
-  cabin: { path: `${ICON_BASE_PATH}cabin.png`, pixelRatio: 2 },
-  camera: { path: `${ICON_BASE_PATH}camera.png`, pixelRatio: 2 },
-  parking: { path: `${ICON_BASE_PATH}parking.png`, pixelRatio: 2 },
-  peak_minor: { path: `${ICON_BASE_PATH}peak_minor.png`, pixelRatio: 2 },
-  peak_principal: { path: `${ICON_BASE_PATH}peak_principal.png`, pixelRatio: 2 },
-  saddle: { path: `${ICON_BASE_PATH}saddle.png`, pixelRatio: 2 },
-  signpost: { path: `${ICON_BASE_PATH}signpost.png`, pixelRatio: 2 },
-  viewpoint: { path: `${ICON_BASE_PATH}viewpoint.png`, pixelRatio: 2 },
-  water: { path: `${ICON_BASE_PATH}water.png`, pixelRatio: 2 }
+  cabin: { path: `${ICON_BASE_PATH}cabin.svg`, pixelRatio: 1 },
+  camera: { path: `${ICON_BASE_PATH}camera.svg`, pixelRatio: 1 },
+  parking: { path: `${ICON_BASE_PATH}parking.svg`, pixelRatio: 1 },
+  peak_minor: { path: `${ICON_BASE_PATH}peak_minor.svg`, pixelRatio: 1 },
+  peak_principal: { path: `${ICON_BASE_PATH}peak_principal.svg`, pixelRatio: 1 },
+  saddle: { path: `${ICON_BASE_PATH}saddle.svg`, pixelRatio: 1 },
+  signpost: { path: `${ICON_BASE_PATH}signpost.svg`, pixelRatio: 1 },
+  viewpoint: { path: `${ICON_BASE_PATH}viewpoint.svg`, pixelRatio: 1 },
+  water: { path: `${ICON_BASE_PATH}water.svg`, pixelRatio: 1 }
 });
 
 const metadataCache = new Map();
@@ -90,6 +91,45 @@ export async function getPoiIconMetadata(iconKey) {
     image.src = url;
   });
   metadataPromises.set(normalized, promise);
+  return promise;
+}
+
+const svgContentCache = new Map();
+const svgContentPromises = new Map();
+
+export async function getPoiIconSvgContent(iconKey) {
+  const normalized = normalizePoiIconKey(iconKey);
+  if (!normalized) return null;
+
+  if (svgContentCache.has(normalized)) return svgContentCache.get(normalized);
+  if (svgContentPromises.has(normalized)) return svgContentPromises.get(normalized);
+
+  const spec = ICON_SPECS[normalized];
+  if (!spec || !spec.path.endsWith('.svg')) return null;
+
+  const url = resolveIconUrl(spec.path);
+  // Add cache buster to ensure we get the latest SVG content (user updates)
+  const fetchUrl = `${url}?t=${Date.now()}`;
+  const promise = fetch(fetchUrl)
+    .then(response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    })
+    .then(svgText => {
+      // Basic cleanup to ensure it's a valid SVG string
+      if (!svgText.includes('<svg')) return null;
+      svgContentCache.set(normalized, svgText);
+      svgContentPromises.delete(normalized);
+      return svgText;
+    })
+    .catch(err => {
+      console.warn('Failed to fetch SVG content', iconKey, err);
+      svgContentCache.set(normalized, null);
+      svgContentPromises.delete(normalized);
+      return null;
+    });
+
+  svgContentPromises.set(normalized, promise);
   return promise;
 }
 
