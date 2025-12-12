@@ -1,4 +1,4 @@
-import { ensurePoiIconImages, getPoiIconImageId, getPoiIconMetadata } from './scripts/xmap-poi-icons.js';
+import { ensurePoiIconImages, getPoiIconImageId, getPoiIconMetadata, getPoiIconSvgContent } from './scripts/xmap-poi-icons.js';
 import { OVERPASS_ENDPOINT as OVERPASS_INTERPRETER_ENDPOINT } from './scripts/overpass-network.js';
 
 const EMPTY_COLLECTION = {
@@ -27,49 +27,71 @@ const OVERLAP_DETECTION_TOLERANCE_METERS = 15;
 const OVERLAP_LINE_OFFSET_PX = 1;
 const turfApi = typeof turf !== 'undefined' ? turf : null;
 
-const POI_SEARCH_RADIUS_METERS = 100;
+const POI_SEARCH_RADIUS_METERS = 200;
 const POI_CATEGORY_DISTANCE_OVERRIDES = Object.freeze({
   peak: 100,
   volcano: 200,
   mountain_pass: 100,
   saddle: 100,
-  alpine_hut: 100,
-  wilderness_hut: 100,
-  hut: 100,
-  cabin: 100,
-  shelter: 100
+  alpine_hut: 200,
+  wilderness_hut: 200,
+  hut: 200,
+  cabin: 200,
+  shelter: 200,
+  water: 200,
+  spring: 200,
+  drinking_water: 200
 });
 const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
   POI_SEARCH_RADIUS_METERS,
   ...Object.values(POI_CATEGORY_DISTANCE_OVERRIDES)
 );
 const DEFAULT_POI_COLOR = '#2d7bd6';
-const ELEVATION_PROFILE_POI_MARKER_OFFSET_PX = -12;
-// Offset for bivouac markers - positioned above the profile line
-const ELEVATION_PROFILE_BIVOUAC_MARKER_OFFSET_PX = 8;
-// Vertical spacing between stacked POI icons (in pixels)
-const POI_VERTICAL_STACK_SPACING_PX = 18;
-// POI category priority order (0 = lowest/bottom, higher = top/closer to profile line)
+// Vertical spacing between stacked floating icons (peaks, bivouacs)
+const POI_FLOATING_STACK_SPACING_PX = 12;
+// Vertical spacing between stacked internal icons (parking, water)
+const POI_INTERNAL_STACK_SPACING_PX = 18;
+// POI category priority order (Higher value = Higher priority/Importance)
+// Used to determine which POI stays on the elevation line when stacked
 const POI_CATEGORY_PRIORITY = Object.freeze({
-  'parking': 0,
-  'cabin': 1,
-  'shelter': 1,
-  'alpine_hut': 1,
-  'camera': 2,
-  'viewpoint': 3,
-  'information': 4,
-  'guidepost': 4,
-  'signpost': 4,
-  'water': 5,
-  'spring': 5,
-  'drinking_water': 5,
-  'saddle': 6,
-  'pass': 6,
-  'peak_minor': 7,
-  'peak': 8,
-  'peak_principal': 9
+  'bivouac': 1000, // Special handling, always top
+  'peak_principal': 100,
+  'peak': 90,
+  'volcano': 90,
+  'peak_minor': 80,
+  'saddle': 70,
+  'pass': 70,
+  'mountain_pass': 70,
+  'water': 60,
+  'spring': 60,
+  'drinking_water': 60,
+  'guidepost': 50,
+  'information': 50,
+  'signpost': 50,
+  'viewpoint': 40,
+  'camera': 30,
+  'cabin': 75,
+  'shelter': 75,
+  'alpine_hut': 75,
+  'wilderness_hut': 75,
+  'parking': 10
 });
 const POI_CATEGORY_DEFAULT_PRIORITY = 5;
+
+// Water source categories that can be merged with nearby host POIs
+const WATER_CATEGORY_KEYS = Object.freeze(['spring', 'water', 'drinking_water']);
+const WATER_CATEGORY_SET = new Set(WATER_CATEGORY_KEYS);
+
+// POI categories that can host a water indicator when water is nearby
+const WATER_HOST_CATEGORIES = Object.freeze([
+  'alpine_hut', 'wilderness_hut', 'hut', 'cabin', 'shelter',
+  'parking', 'parking_underground', 'parking_multi-storey', 'parking_multistorey', 'parking_multi_storey',
+  'viewpoint'
+]);
+const WATER_HOST_CATEGORY_SET = new Set(WATER_HOST_CATEGORIES);
+
+// Maximum distance (in km along the route) to merge water with a host POI
+const WATER_MERGE_PROXIMITY_KM = 0.5;
 const ELEVATION_MARKER_LABEL_VERTICAL_GAP_PX = 4;
 const ELEVATION_MARKER_LABEL_HORIZONTAL_PADDING_PX = 6;
 const ELEVATION_MARKER_LABEL_TOP_PADDING_PX = 4;
@@ -102,6 +124,9 @@ const POI_ICON_DEFINITIONS = Object.freeze({
   hut: { icon: 'cabin', label: 'Cabane', color: '#c26d2d' },
   cabin: { icon: 'cabin', label: 'Cabane', color: '#c26d2d' },
   shelter: { icon: 'cabin', label: 'Abri', color: '#c26d2d' },
+  spring: { icon: 'water', label: 'Source', color: '#3b82f6' },
+  water: { icon: 'water', label: 'Eau', color: '#3b82f6' },
+  drinking_water: { icon: 'water', label: 'Eau potable', color: '#3b82f6' },
   parking: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   parking_underground: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   'parking_multi-storey': { icon: 'parking', label: 'Parking', color: '#4b5563' },
@@ -130,6 +155,9 @@ const ELEVATION_PROFILE_POI_CATEGORY_KEYS = Object.freeze([
   'hut',
   'cabin',
   'shelter',
+  'spring',
+  'water',
+  'drinking_water',
   'parking',
   'parking_underground',
   'parking_multi-storey',
@@ -779,7 +807,8 @@ function resolvePoiDefinition(properties = {}) {
   const amenity = normalizePoiValue(properties.amenity);
   const tourism = normalizePoiValue(properties.tourism);
   const manMade = normalizePoiValue(properties.man_made);
-  [subclass, className, amenity, tourism, manMade]
+  const natural = normalizePoiValue(properties.natural);
+  [subclass, className, amenity, tourism, manMade, natural]
     .filter((value, index, array) => value && array.indexOf(value) === index)
     .forEach((value) => {
       candidates.push(value);
@@ -913,6 +942,22 @@ function buildOverpassPoiQuery(bounds, { timeoutSeconds = POI_FALLBACK_TIMEOUT_S
     'node["tourism"="viewpoint"]',
     'way["tourism"="viewpoint"]',
     'relation["tourism"="viewpoint"]',
+    'node["tourism"="alpine_hut"]',
+    'way["tourism"="alpine_hut"]',
+    'relation["tourism"="alpine_hut"]',
+    'node["tourism"="wilderness_hut"]',
+    'way["tourism"="wilderness_hut"]',
+    'relation["tourism"="wilderness_hut"]',
+    'node["amenity"="shelter"]',
+    'way["amenity"="shelter"]',
+    'relation["amenity"="shelter"]',
+    'node["building"="cabin"]',
+    'way["building"="cabin"]',
+    'relation["building"="cabin"]',
+    'node["natural"="spring"]',
+    'way["natural"="spring"]',
+    'node["amenity"="drinking_water"]',
+    'way["amenity"="drinking_water"]',
     'node["amenity"="parking"]',
     'way["amenity"="parking"]',
     'relation["amenity"="parking"]'
@@ -956,6 +1001,20 @@ function classifyOverpassPoi(tags = {}) {
   if (tourism === 'viewpoint') {
     return buildResult('viewpoint');
   }
+  // Alpine huts and shelters
+  if (tourism === 'alpine_hut') {
+    return buildResult('alpine_hut');
+  }
+  if (tourism === 'wilderness_hut') {
+    return buildResult('wilderness_hut');
+  }
+  if (amenity === 'shelter') {
+    return buildResult('shelter');
+  }
+  const building = normalizeOverpassValue(tags.building);
+  if (building === 'cabin') {
+    return buildResult('cabin');
+  }
   if (amenity === 'parking') {
     if (parkingType === 'underground') {
       return buildResult('parking_underground', { class: 'parking' });
@@ -964,6 +1023,16 @@ function classifyOverpassPoi(tags = {}) {
       return buildResult('parking_multi-storey', { class: 'parking' });
     }
     return buildResult('parking', { class: 'parking' });
+  }
+  // Water sources
+  if (natural === 'spring') {
+    return buildResult('spring');
+  }
+  if (natural === 'water') {
+    return buildResult('water');
+  }
+  if (amenity === 'drinking_water') {
+    return buildResult('drinking_water');
   }
   return null;
 }
@@ -4502,6 +4571,10 @@ export class DirectionsManager {
   setRouteSegmentsListener(callback) {
     this.routeSegmentsListener = typeof callback === 'function' ? callback : null;
     this.notifyRouteSegmentsUpdated();
+  }
+
+  setClearDirectionsListener(callback) {
+    this.clearDirectionsListener = typeof callback === 'function' ? callback : null;
   }
 
   notifyRouteSegmentsUpdated() {
@@ -9151,6 +9224,14 @@ export class DirectionsManager {
     this.updateUndoAvailability();
     // Collapse the elevation chart when clearing the route
     this.setElevationCollapsed(true);
+    // Notify listener that directions were cleared (e.g., to clear imported GPX layer)
+    if (typeof this.clearDirectionsListener === 'function') {
+      try {
+        this.clearDirectionsListener();
+      } catch (error) {
+        console.error('Clear directions listener failed', error);
+      }
+    }
   }
 
   normalizeImportedCoordinate(coord) {
@@ -11898,10 +11979,32 @@ export class DirectionsManager {
         return;
       }
       const geometry = feature.geometry;
-      if (!geometry || geometry.type !== 'Point' || !Array.isArray(geometry.coordinates)) {
+      if (!geometry || !Array.isArray(geometry.coordinates)) {
         return;
       }
-      const [lng, lat] = geometry.coordinates;
+
+      // Extract coordinates based on geometry type
+      let lng, lat;
+      if (geometry.type === 'Point') {
+        [lng, lat] = geometry.coordinates;
+      } else if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates[0])) {
+        // Calculate centroid of first ring (outer boundary)
+        const ring = geometry.coordinates[0];
+        if (ring.length < 3) return;
+        let sumLng = 0, sumLat = 0;
+        ring.forEach(coord => {
+          if (Array.isArray(coord) && coord.length >= 2) {
+            sumLng += coord[0];
+            sumLat += coord[1];
+          }
+        });
+        lng = sumLng / ring.length;
+        lat = sumLat / ring.length;
+      } else {
+        // Unsupported geometry type
+        return;
+      }
+
       if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
         return;
       }
@@ -11986,24 +12089,81 @@ export class DirectionsManager {
 
     const clustered = clusterRoutePointsOfInterest(collected, totalDistanceKm);
 
+    // Merge water sources with nearby host POIs (cabins, parking, etc.)
+    const mergedPois = (() => {
+      if (!clustered.length) return [];
+
+      // Separate water sources from others
+      const waterSources = [];
+      const potentialHosts = [];
+      const others = [];
+
+      clustered.forEach(poi => {
+        if (WATER_CATEGORY_SET.has(poi.categoryKey)) {
+          waterSources.push(poi);
+        } else if (WATER_HOST_CATEGORY_SET.has(poi.categoryKey)) {
+          potentialHosts.push(poi);
+        } else {
+          others.push(poi);
+        }
+      });
+
+      const usedWaterIndices = new Set();
+
+      const enrichedHosts = potentialHosts.map(host => {
+        // Find closest unused water source within range
+        let bestWaterIdx = -1;
+        let minDist = Infinity;
+
+        waterSources.forEach((water, idx) => {
+          if (usedWaterIndices.has(idx)) return;
+
+          const dist = Math.abs(host.distanceKm - water.distanceKm);
+          if (dist <= WATER_MERGE_PROXIMITY_KM && dist < minDist) {
+            minDist = dist;
+            bestWaterIdx = idx;
+          }
+        });
+
+        if (bestWaterIdx !== -1) {
+          usedWaterIndices.add(bestWaterIdx);
+          return { ...host, hasWater: true };
+        }
+        return host;
+      });
+
+      const remainingWater = waterSources.filter((_, idx) => !usedWaterIndices.has(idx));
+
+      const result = [...others, ...enrichedHosts, ...remainingWater];
+      result.sort((a, b) => a.distanceKm - b.distanceKm);
+      return result;
+    })();
+
     const resolved = [];
-    for (const entry of clustered) {
+    for (const entry of mergedPois) {
       if (!entry) {
         continue;
       }
       let iconMetadata = null;
+      let iconSvgContent = null;
       const iconKey = typeof entry.iconKey === 'string' ? entry.iconKey.trim() : '';
       if (iconKey) {
         try {
-          iconMetadata = await getPoiIconMetadata(iconKey);
+          [iconMetadata, iconSvgContent] = await Promise.all([
+            getPoiIconMetadata(iconKey),
+            getPoiIconSvgContent(iconKey)
+          ]);
         } catch (error) {
-          console.warn('Failed to load POI icon metadata', iconKey, error);
+          console.warn('Failed to load POI icon data', iconKey, error);
         }
         if (this.pendingPoiRequest !== requestToken) {
           return;
         }
       }
       const decorated = { ...entry };
+      if (iconSvgContent) {
+        decorated.iconSvgContent = iconSvgContent;
+      }
       if (iconMetadata) {
         const metrics = computePoiIconDisplayMetrics(iconMetadata);
         decorated.icon = {
@@ -12424,79 +12584,57 @@ export class DirectionsManager {
         return '';
       }
       const markerElements = [];
-      const markers = this.computeSegmentMarkers();
-      const poiMarkers = Array.isArray(this.routePointsOfInterest) ? this.routePointsOfInterest : [];
 
-      // Bivouac markers - positioned above the profile with fixed offset
-      if (Array.isArray(markers) && markers.length) {
-        const bivouacElements = markers
-          .filter((marker) => marker?.type === 'bivouac')
-          .map((marker) => {
-            const distanceKm = this.getMarkerDistance(marker);
-            if (
-              !Number.isFinite(distanceKm)
-              || distanceKm < xMin - xBoundaryTolerance
-              || distanceKm > xMax + xBoundaryTolerance
-            ) {
-              return null;
-            }
+      // 1. Gather all markers (Bivouacs + POIs)
+      const allMarkers = [];
 
-            const rawTitle = marker?.name ?? marker?.title ?? 'Bivouac';
-            const safeTitle = escapeHtml(rawTitle);
-            const colorValue = typeof marker?.labelColor === 'string' ? marker.labelColor.trim() : '';
-            const styleParts = [
-              '--elevation-marker-icon-width:26px',
-              '--elevation-marker-icon-height:26px'
-            ];
-            if (colorValue) {
-              styleParts.push(`--bivouac-marker-color:${colorValue}`);
+      // Add Bivouacs
+      const bivouacMarkers = this.computeSegmentMarkers();
+      if (Array.isArray(bivouacMarkers)) {
+        bivouacMarkers
+          .filter(m => m?.type === 'bivouac')
+          .forEach(m => {
+            const dist = this.getMarkerDistance(m);
+            if (Number.isFinite(dist) && dist >= xMin - xBoundaryTolerance && dist <= xMax + xBoundaryTolerance) {
+              allMarkers.push({
+                type: 'bivouac',
+                categoryKey: 'bivouac',
+                distanceKm: dist,
+                data: m,
+                name: m.name || m.title || 'Bivouac'
+              });
             }
-            const styleAttribute = styleParts.length ? ` style="${styleParts.join(';')}"` : '';
-            return `
-              <div
-                class="elevation-marker bivouac"
-                data-distance-km="${distanceKm.toFixed(6)}"
-                data-bottom-offset="${ELEVATION_PROFILE_BIVOUAC_MARKER_OFFSET_PX}"${styleAttribute}
-                title="${safeTitle}"
-                aria-label="${safeTitle}"
-              >
-                ${BIVOUAC_ELEVATION_ICON}
-              </div>
-            `;
-          })
-          .filter(Boolean);
-        markerElements.push(...bivouacElements);
+          });
       }
 
-      // poiMarkers is already defined above for overlap detection
-      if (this.profileMode === 'poi' && poiMarkers.length) {
-        // Sort POIs by distance for overlap calculation
-        const sortedPois = poiMarkers
-          .map((poi, originalIndex) => ({
-            poi,
-            distanceKm: Number(poi?.distanceKm),
-            originalIndex,
-            // Get category key for vertical ordering
-            categoryKey: poi?.category || poi?.categoryKey || ''
-          }))
-          .filter(({ distanceKm }) =>
-            Number.isFinite(distanceKm) &&
-            distanceKm >= xMin - xBoundaryTolerance &&
-            distanceKm <= xMax + xBoundaryTolerance
-          )
-          .sort((a, b) => a.distanceKm - b.distanceKm);
+      // Add POIs
+      const poiMarkers = Array.isArray(this.routePointsOfInterest) ? this.routePointsOfInterest : [];
+      if (this.profileMode === 'poi') {
+        poiMarkers.forEach(poi => {
+          const dist = Number(poi?.distanceKm);
+          if (Number.isFinite(dist) && dist >= xMin - xBoundaryTolerance && dist <= xMax + xBoundaryTolerance) {
+            allMarkers.push({
+              type: 'poi',
+              categoryKey: poi.category || poi.categoryKey || '',
+              distanceKm: dist,
+              data: poi,
+              name: poi.name || poi.title || DEFAULT_POI_TITLE
+            });
+          }
+        });
+      }
 
-        // Group nearby POIs and calculate vertical offsets
-        // POIs within 0.5km of each other are considered "stacked"
+      // 2. Sort all markers by distance
+      allMarkers.sort((a, b) => a.distanceKm - b.distanceKm);
+
+      if (allMarkers.length > 0) {
+        // 3. Group nearby markers
         const STACK_PROXIMITY_KM = 0.5;
-
-        // First pass: identify groups of nearby POIs
         const groups = [];
         let currentGroup = [];
 
-        for (let i = 0; i < sortedPois.length; i++) {
-          const current = sortedPois[i];
-
+        for (let i = 0; i < allMarkers.length; i++) {
+          const current = allMarkers[i];
           if (currentGroup.length === 0) {
             currentGroup.push(current);
           } else {
@@ -12513,145 +12651,192 @@ export class DirectionsManager {
           groups.push(currentGroup);
         }
 
-        // Second pass: calculate stacking metadata for each group
-        const poiWithOffsets = [];
-        const FLOATING_CATEGORIES = new Set(['peak', 'peak_principal', 'peak_minor', 'saddle', 'pass']);
+        // 4. Calculate stacking metadata
+        const markersWithMeta = [];
+        const FLOATING_CATEGORIES = new Set(['bivouac', 'peak', 'peak_principal', 'peak_minor', 'saddle', 'pass']);
 
         for (const group of groups) {
-          // Sort group by priority (highest first: Peak -> ... -> Parking)
-          const sortedByPriority = [...group].sort((a, b) => {
-            const priorityA = POI_CATEGORY_PRIORITY[a.categoryKey] ?? POI_CATEGORY_DEFAULT_PRIORITY;
-            const priorityB = POI_CATEGORY_PRIORITY[b.categoryKey] ?? POI_CATEGORY_DEFAULT_PRIORITY;
-            return priorityB - priorityA;
-          });
+          // Sort by priority (Bivouac -> Peak -> ... -> Parking)
+          // Separate Bivouacs (always top) from Standard POIs
+          const bivouacs = [];
+          const standardPois = [];
 
-          // Separate floating items (peaks) from internal items (parkings, etc.)
-          const floatingItems = [];
-          const internalItems = [];
-
-          sortedByPriority.forEach(item => {
-            if (FLOATING_CATEGORIES.has(item.categoryKey)) {
-              floatingItems.push(item);
+          group.forEach(item => {
+            if (item.type === 'bivouac' || item.categoryKey === 'bivouac') {
+              bivouacs.push(item);
             } else {
-              internalItems.push(item);
+              standardPois.push(item);
             }
           });
 
-          // Process floating items (stacked upwards from the line)
-          floatingItems.forEach((item, index) => {
-            // Floating items are positioned relative to the line (offset 0 or positive)
-            // We'll use a small fixed offset for stacking multiple floating items
-            const verticalOffset = index * 12;
-            poiWithOffsets.push({
-              ...item,
-              stackType: 'floating',
-              verticalOffset
-            });
+          // Sort Standard POIs by priority descending (Highest priority = On Line)
+          standardPois.sort((a, b) => {
+            const pA = POI_CATEGORY_PRIORITY[a.categoryKey] ?? 0;
+            const pB = POI_CATEGORY_PRIORITY[b.categoryKey] ?? 0;
+            return pB - pA;
           });
 
-          // Process internal items (distributed within the chart height)
-          const totalInternal = internalItems.length;
-          internalItems.forEach((item, index) => {
-            // Index 0 is highest priority (top of stack), Index N is lowest (bottom)
-            poiWithOffsets.push({
+          // 1. Place Standard POIs
+          // The highest priority item stays on the line.
+          // Others are distributed internally below (in the chart area).
+          if (standardPois.length > 0) {
+            // Top priority item -> On the line
+            markersWithMeta.push({
+              ...standardPois[0],
+              stackType: 'standard',
+              verticalOffset: 0
+            });
+
+            // Remaining items -> Distributed internally
+            const remaining = standardPois.slice(1);
+            const totalRemaining = remaining.length;
+            remaining.forEach((item, index) => {
+              markersWithMeta.push({
+                ...item,
+                stackType: 'internal',
+                stackIndex: index,
+                stackTotal: totalRemaining
+              });
+            });
+          }
+
+          // 2. Place Bivouacs
+          // Always ABOVE the line.
+          // Base offset to clear the "on-line" icon (approx 24px).
+          // Then stack upwards if multiple bivouacs.
+          const BIVOUAC_BASE_OFFSET = 24;
+          bivouacs.forEach((item, index) => {
+            markersWithMeta.push({
               ...item,
-              stackType: 'internal',
-              stackIndex: index,
-              stackTotal: totalInternal
+              stackType: 'bivouac',
+              verticalOffset: BIVOUAC_BASE_OFFSET + (index * 12)
             });
           });
         }
 
-        // Generate POI markers
-        const poiElements = poiWithOffsets
-          .map(({ poi, distanceKm, stackType, stackIndex, stackTotal, verticalOffset }) => {
-            const title = poi?.title ?? poi?.name ?? poi?.categoryLabel ?? DEFAULT_POI_TITLE;
-            const safeTitle = escapeHtml(title);
-            const poiName = typeof poi?.name === 'string' ? poi.name.trim() : '';
-            const poiCategory = typeof poi?.categoryLabel === 'string' ? poi.categoryLabel.trim() : '';
-            const colorValue = typeof poi?.color === 'string' && poi.color.trim()
-              ? poi.color.trim()
-              : DEFAULT_POI_COLOR;
-            const icon = poi?.icon ?? null;
-            const iconWidth = (() => {
-              if (Number.isFinite(poi?.iconDisplayWidth)) {
-                return Number(poi.iconDisplayWidth);
-              }
-              if (Number.isFinite(icon?.displayWidth)) {
-                return Number(icon.displayWidth);
-              }
-              if (Number.isFinite(icon?.width)) {
-                const pixelRatio = Number(icon?.pixelRatio) || 1;
-                return Number(icon.width) / pixelRatio;
-              }
-              return 16; // Default icon width
-            })();
-            const iconHeight = (() => {
-              if (Number.isFinite(poi?.iconDisplayHeight)) {
-                return Number(poi.iconDisplayHeight);
-              }
-              if (Number.isFinite(icon?.displayHeight)) {
-                return Number(icon.displayHeight);
-              }
-              if (Number.isFinite(icon?.height)) {
-                const pixelRatio = Number(icon?.pixelRatio) || 1;
-                return Number(icon.height) / pixelRatio;
-              }
-              return 16; // Default icon height
-            })();
+        // 5. Generate HTML
+        const segments = Array.isArray(this.profileSegments) && this.profileSegments.length
+          ? this.profileSegments
+          : (this.cutSegments || []);
 
-            // Position icons with vertical offset based on category
-            const styleParts = [];
+        const getRouteColorAtDistance = (dist) => {
+          const defaultColor = this.modeColors[this.currentMode] || '#f8b40b';
+          if (!segments.length) return defaultColor;
+
+          const segment = segments.find(seg => {
+            const start = Number(seg.startKm ?? seg.startDistanceKm ?? 0);
+            const end = Number(seg.endKm ?? seg.endDistanceKm ?? start);
+            return dist >= start && dist <= end;
+          });
+          return segment?.color || defaultColor;
+        };
+
+        const elements = markersWithMeta.map(item => {
+          // Filter out items that are outside the current view range to prevent agglomeration on edges
+          // Use domainStart/domainEnd (actual segment bounds) instead of xMin/xMax (axis bounds with padding)
+          if (item.distanceKm < domainStart || item.distanceKm > domainEnd) {
+            return null;
+          }
+
+          const isBivouac = item.type === 'bivouac';
+          const poi = item.data;
+          const safeTitle = escapeHtml(item.name);
+
+          let iconMarkup = '';
+          let styleParts = [];
+          let datasetAttributes = [
+            `data-distance-km="${item.distanceKm.toFixed(6)}"`,
+            `data-stack-type="${item.stackType}"`
+          ];
+
+          if (item.stackType === 'internal') {
+            datasetAttributes.push(`data-stack-index="${item.stackIndex}"`);
+            datasetAttributes.push(`data-stack-total="${item.stackTotal}"`);
+          } else {
+            datasetAttributes.push(`data-bottom-offset="${item.verticalOffset}"`);
+          }
+
+          if (isBivouac) {
+            // Bivouac specific rendering
+            const colorValue = typeof poi?.labelColor === 'string' ? poi.labelColor.trim() : '';
+            styleParts.push('--elevation-marker-icon-width:26px');
+            styleParts.push('--elevation-marker-icon-height:26px');
+            if (colorValue) styleParts.push(`--bivouac-marker-color:${colorValue}`);
+
+            iconMarkup = BIVOUAC_ELEVATION_ICON;
+            datasetAttributes.push(`data-poi-category="Bivouac"`);
+          } else {
+            // POI specific rendering
+            const poiCategory = typeof poi?.categoryLabel === 'string' ? poi.categoryLabel.trim() : '';
+            const colorValue = typeof poi?.color === 'string' && poi.color.trim() ? poi.color.trim() : DEFAULT_POI_COLOR;
+
+            // Icon sizing logic
+            const icon = poi?.icon ?? null;
+            let w = 16, h = 16;
+            if (Number.isFinite(poi?.iconDisplayWidth)) w = Number(poi.iconDisplayWidth);
+            else if (Number.isFinite(icon?.displayWidth)) w = Number(icon.displayWidth);
+            else if (Number.isFinite(icon?.width)) w = Number(icon.width) / (Number(icon?.pixelRatio) || 1);
+
+            if (Number.isFinite(poi?.iconDisplayHeight)) h = Number(poi.iconDisplayHeight);
+            else if (Number.isFinite(icon?.displayHeight)) h = Number(icon.displayHeight);
+            else if (Number.isFinite(icon?.height)) h = Number(icon.height) / (Number(icon?.pixelRatio) || 1);
+
             styleParts.push(`color:${colorValue}`);
             styleParts.push(`--poi-marker-color:${colorValue}`);
-            styleParts.push(`--elevation-marker-icon-width:${iconWidth.toFixed(2)}px`);
-            styleParts.push(`--elevation-marker-icon-height:${iconHeight.toFixed(2)}px`);
+            styleParts.push(`--elevation-marker-icon-width:${w.toFixed(2)}px`);
+            styleParts.push(`--elevation-marker-icon-height:${h.toFixed(2)}px`);
 
             const hasIconImage = icon && typeof icon.url === 'string' && icon.url;
-            const iconMarkup = hasIconImage
-              ? `
-                <img
-                  class="elevation-marker__icon"
-                  src="${icon.url}"
-                  alt=""
-                  aria-hidden="true"
-                  loading="lazy"
-                  decoding="async"
-                />
-              `
-              : '<span class="elevation-marker__icon elevation-marker__icon--fallback" aria-hidden="true"></span>';
+            const iconSvgContent = poi?.iconSvgContent;
 
-            const datasetAttributes = [
-              `data-distance-km="${distanceKm.toFixed(6)}"`,
-              `data-poi-name="${escapeHtml(poiName)}"`,
-              `data-poi-category="${escapeHtml(poiCategory)}"`,
-              `data-stack-type="${stackType}"`
-            ];
+            if (iconSvgContent) {
+              // Inline SVG for dynamic filling
+              const fillColor = getRouteColorAtDistance(item.distanceKm);
+              // Remove style attribute from the SVG tag to prevent overriding our CSS variables
+              // This is necessary because some SVGs have inline styles setting --icon-fill to a fixed color
+              const cleanSvgContent = iconSvgContent.replace(/(<svg[^>]*?)\s*style="[^"]*"/i, '$1');
 
-            if (stackType === 'internal') {
-              datasetAttributes.push(`data-stack-index="${stackIndex}"`);
-              datasetAttributes.push(`data-stack-total="${stackTotal}"`);
+              iconMarkup = `<div class="elevation-marker__icon elevation-marker__icon--svg" style="--icon-fill: ${fillColor}; --icon-stroke: #000000;" aria-hidden="true">${cleanSvgContent}</div>`;
+            } else if (hasIconImage) {
+              iconMarkup = `<div class="elevation-marker__icon elevation-marker__icon--mask" style="-webkit-mask-image: url('${icon.url}'); mask-image: url('${icon.url}');" aria-hidden="true"></div>`;
             } else {
-              datasetAttributes.push(`data-bottom-offset="${verticalOffset}"`);
+              iconMarkup = '<span class="elevation-marker__icon elevation-marker__icon--fallback" aria-hidden="true"></span>';
             }
 
-            const poiElevation = Number(poi?.elevation);
-            if (Number.isFinite(poiElevation)) {
-              datasetAttributes.push(`data-elevation="${poiElevation.toFixed(2)}"`);
-            }
-            return `
-              <div
-                class="elevation-marker poi"
-                ${datasetAttributes.join(' ')}
-                style="${styleParts.join(';')}"
-                title="${safeTitle}"
-                aria-label="${safeTitle}"
-              >
-                ${iconMarkup}
-              </div>
-            `;
-          });
-        markerElements.push(...poiElements);
+            datasetAttributes.push(`data-poi-name="${escapeHtml(item.name)}"`);
+            datasetAttributes.push(`data-poi-category="${escapeHtml(poiCategory)}"`);
+
+            const elev = Number(poi?.elevation);
+            if (Number.isFinite(elev)) datasetAttributes.push(`data-elevation="${elev.toFixed(2)}"`);
+          }
+
+          // Water indicator for POIs with nearby water source
+          const hasWater = poi?.hasWater === true;
+          const waterIndicator = hasWater
+            ? `<span class="elevation-marker__water-indicator" title="Eau à proximité" aria-label="Eau à proximité">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2c0-3.32-2.67-7.25-8-11.8zm0 18c-3.35 0-6-2.57-6-6.2 0-2.34 1.95-5.44 6-9.14 4.05 3.7 6 6.79 6 9.14 0 3.63-2.65 6.2-6 6.2z"/>
+                </svg>
+              </span>`
+            : '';
+
+          const className = isBivouac ? 'elevation-marker bivouac' : `elevation-marker poi${hasWater ? ' has-water' : ''}`;
+
+          return `
+            <div
+              class="${className}"
+              ${datasetAttributes.join(' ')}
+              style="${styleParts.join(';')}"
+              title="${safeTitle}"
+              aria-label="${safeTitle}"
+            >
+              ${iconMarkup}
+              ${waterIndicator}
+            </div>
+          `;
+        });
+
+        markerElements.push(...elements);
       }
 
       if (!markerElements.length) {
@@ -12821,6 +13006,15 @@ export class DirectionsManager {
 
     markerEntries.forEach((entry) => {
       const { marker, isPoiMarker, isBivouacMarker, clampedRatio, percent, hasLabel } = entry;
+
+      // Hide markers outside the current visible domain range
+      const distanceKm = Number(marker.dataset.distanceKm);
+      if (Number.isFinite(distanceKm) && (distanceKm < domainLow || distanceKm > domainHigh)) {
+        marker.style.display = 'none';
+        return;
+      }
+      marker.style.display = '';
+
       const labelElement = hasLabel ? marker.querySelector('.elevation-marker__label') : null;
       marker.style.left = `${percent.toFixed(6)}%`;
 
@@ -12844,29 +13038,29 @@ export class DirectionsManager {
 
             if (Number.isFinite(stackIndex) && Number.isFinite(stackTotal)) {
               // Distribute internally within the chart height
-              // We want to distribute items between roughly 10% and 90% of the current elevation height
+              // We divide the available height into 'stackTotal' slots and center each item in its slot
               // stackIndex 0 is top (highest priority), stackIndex N is bottom
 
-              // Factor goes from high (near 1) to low (near 0)
-              // Example with 2 items: Index 0 -> 2/3, Index 1 -> 1/3
-              const factor = (stackTotal - stackIndex) / (stackTotal + 1);
+              // Formula: (Total - Index - 0.5) / Total
+              // Example 1 item: (1 - 0 - 0.5)/1 = 0.5 (50%) -> Center of chart
+              const ratio = (stackTotal - stackIndex - 0.5) / stackTotal;
 
-              // Apply factor to the elevation percent
-              // We add a small base offset (5%) to avoid being stuck at the very bottom
-              const distributedPercent = (elevationPercent * factor * 0.95) + 2;
+              // Apply ratio to the elevation percent
+              const distributedPercent = elevationPercent * ratio;
 
-              marker.style.bottom = `${distributedPercent.toFixed(6)}%`;
+              // Ensure marker doesn't go below chart (15px safety margin)
+              marker.style.bottom = `max(15px, ${distributedPercent.toFixed(6)}%)`;
             } else {
               // Fallback if data is missing
-              marker.style.bottom = `${elevationPercent.toFixed(6)}%`;
+              marker.style.bottom = `max(15px, ${elevationPercent.toFixed(6)}%)`;
             }
           } else {
             // Standard positioning (floating or bivouac) with pixel offset
             const offsetSuffix = offsetPx !== 0 ? ` + ${offsetPx}px` : '';
             if (offsetSuffix) {
-              marker.style.bottom = `calc(${elevationPercent.toFixed(6)}%${offsetSuffix})`;
+              marker.style.bottom = `max(15px, calc(${elevationPercent.toFixed(6)}%${offsetSuffix}))`;
             } else {
-              marker.style.bottom = `${elevationPercent.toFixed(6)}%`;
+              marker.style.bottom = `max(15px, ${elevationPercent.toFixed(6)}%)`;
             }
           }
           // Calculate and set the dashed line height for bivouac markers

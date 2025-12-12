@@ -610,9 +610,13 @@ body {
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
-  pointer-events: auto;
+  /* Let map interactions pass through empty areas of the dock */
+  pointer-events: none;
   width: 100%;
   box-sizing: border-box;
+  /* Prevent accidental text/image selection during drag operations */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .directions-dock[aria-hidden="true"] {
@@ -818,6 +822,9 @@ body {
   align-items: stretch;
   gap: 8px;
   width: 100%;
+  /* Add right padding matching Y-axis width for symmetry */
+  padding-right: 48px;
+  box-sizing: border-box;
 }
 
 .elevation-section__y-axis {
@@ -1892,9 +1899,7 @@ body {
 }
 
 .elevation-chart-tooltip__poi-category {
-  font-size: 10px;
-  opacity: 0.75;
-  color: inherit;
+  display: none;
 }
 
 .elevation-chart-tooltip__poi-elev {
@@ -1942,7 +1947,7 @@ body {
   min-width: 22px;
   min-height: 22px;
   color: #2d7bd6;
-  transform: translate(-50%, 0);
+  transform: translate(-50%, 50%);
   filter: drop-shadow(0 1px 2px rgba(17, 34, 48, 0.35));
 }
 
@@ -2008,6 +2013,48 @@ body {
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
+.elevation-marker__icon--mask {
+  width: var(--elevation-marker-icon-width, 16px);
+  height: var(--elevation-marker-icon-height, 16px);
+  background-color: currentColor;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
+.elevation-marker__icon--svg {
+  width: var(--elevation-marker-icon-width, 16px);
+  height: var(--elevation-marker-icon-height, 16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.elevation-marker__icon--svg svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Force variable application on SVG elements */
+.elevation-marker__icon--svg svg path,
+.elevation-marker__icon--svg svg circle,
+.elevation-marker__icon--svg svg rect,
+.elevation-marker__icon--svg svg polygon,
+.elevation-marker__icon--svg svg polyline,
+.elevation-marker__icon--svg svg ellipse,
+.elevation-marker__icon--svg svg line,
+.elevation-marker__icon--svg svg text,
+.elevation-marker__icon--svg svg use,
+.elevation-marker__icon--svg svg *,
+.elevation-marker__icon--svg .icon {
+  fill: var(--icon-fill) !important;
+  stroke: var(--icon-stroke) !important;
+}
+
 /* Generic label base styles (for bivouacs if needed) */
 .elevation-marker__label {
   font-size: 10px;
@@ -2028,6 +2075,26 @@ body {
   --elevation-marker-icon-width: 10px;
   --elevation-marker-icon-height: 10px;
 }
+
+/* Water indicator for POIs with nearby water source */
+.elevation-marker__water-indicator {
+  position: absolute;
+  bottom: -2px;
+  right: -6px;
+  width: 12px;
+  height: 12px;
+  color: #3b82f6;
+  filter: drop-shadow(0 1px 1px rgba(17, 34, 48, 0.4));
+  z-index: 1;
+}
+
+.elevation-marker__water-indicator svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+
 
 .elevation-x-axis {
   position: relative;
