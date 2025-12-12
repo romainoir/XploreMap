@@ -127,6 +127,7 @@ const POI_ICON_DEFINITIONS = Object.freeze({
   spring: { icon: 'water', label: 'Source', color: '#3b82f6' },
   water: { icon: 'water', label: 'Eau', color: '#3b82f6' },
   drinking_water: { icon: 'water', label: 'Eau potable', color: '#3b82f6' },
+  guidepost: { icon: 'signpost', label: 'Panneau', color: '#6b7280' },
   parking: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   parking_underground: { icon: 'parking', label: 'Parking', color: '#4b5563' },
   'parking_multi-storey': { icon: 'parking', label: 'Parking', color: '#4b5563' },
@@ -158,6 +159,7 @@ const ELEVATION_PROFILE_POI_CATEGORY_KEYS = Object.freeze([
   'spring',
   'water',
   'drinking_water',
+  'guidepost',
   'parking',
   'parking_underground',
   'parking_multi-storey',
@@ -958,6 +960,8 @@ function buildOverpassPoiQuery(bounds, { timeoutSeconds = POI_FALLBACK_TIMEOUT_S
     'way["natural"="spring"]',
     'node["amenity"="drinking_water"]',
     'way["amenity"="drinking_water"]',
+    // Guideposts (hiking trail signs)
+    'node["tourism"="information"]["information"="guidepost"]',
     'node["amenity"="parking"]',
     'way["amenity"="parking"]',
     'relation["amenity"="parking"]'
@@ -1033,6 +1037,11 @@ function classifyOverpassPoi(tags = {}) {
   }
   if (amenity === 'drinking_water') {
     return buildResult('drinking_water');
+  }
+  // Guideposts (hiking trail signs)
+  const information = normalizeOverpassValue(tags.information);
+  if (tourism === 'information' && information === 'guidepost') {
+    return buildResult('guidepost');
   }
   return null;
 }
@@ -2666,7 +2675,7 @@ export class DirectionsManager {
       type: 'circle',
       source: 'waypoints',
       paint: {
-        'circle-radius': 12,
+        'circle-radius': 8,
         'circle-color': 'transparent'
       },
       filter: ['==', '$type', 'Point']
@@ -2881,9 +2890,9 @@ export class DirectionsManager {
       type: 'circle',
       source: 'route-hover-point-source',
       paint: {
-        'circle-radius': 10,
+        'circle-radius': 6,
         'circle-color': '#fff',
-        'circle-stroke-width': 4,
+        'circle-stroke-width': 2,
         'circle-stroke-color': this.modeColors[this.currentMode],
         'circle-opacity': 0
       }
@@ -7401,9 +7410,9 @@ export class DirectionsManager {
         'interpolate',
         ['linear'],
         ['zoom'],
-        8, buildSizeExpression(0.55, 0.4, 0.55),
-        12, buildSizeExpression(0.85, 0.6, 0.75),
-        16, buildSizeExpression(1.1, 0.8, 0.95)
+        8, buildSizeExpression(0.7, 0.4, 0.55),
+        12, buildSizeExpression(1.0, 0.6, 0.75),
+        16, buildSizeExpression(1.25, 0.8, 0.95)
       ]);
     }
   }
@@ -7996,7 +8005,7 @@ export class DirectionsManager {
     // Check if we're near a marker (bivouac, start, end) - if so, don't show route hover
     // This makes it easier to click on these markers
     // Radius is ~1.5x the symbol size for comfortable interaction
-    const MARKER_EXCLUSION_RADIUS = 45; // pixels
+    const MARKER_EXCLUSION_RADIUS = 60; // pixels
     const markerFeatures = this.map.queryRenderedFeatures(event.point, {
       layers: [SEGMENT_MARKER_LAYER_ID]
     });
@@ -12564,10 +12573,66 @@ export class DirectionsManager {
       if (sorted.length < 2) {
         return '';
       }
-      const stopsMarkup = sorted
+
+      // Create centered gradient: place color stops at 25% and 75% of each segment
+      // This creates a "plateau" of pure color in the middle with short transitions at edges
+      const centeredStops = [];
+
+      // Group consecutive stops by color to find segment boundaries
+      const segments = [];
+      let currentSegment = { color: sorted[0].color, start: sorted[0].offset, end: sorted[0].offset };
+
+      for (let i = 1; i < sorted.length; i++) {
+        const stop = sorted[i];
+        if (stop.color === currentSegment.color) {
+          // Same color, extend the segment
+          currentSegment.end = stop.offset;
+        } else {
+          // Different color, close current segment and start new one
+          segments.push(currentSegment);
+          currentSegment = { color: stop.color, start: stop.offset, end: stop.offset };
+        }
+      }
+      segments.push(currentSegment);
+
+      // For each segment, place stops at 25% and 75% of the segment length
+      // This creates a pure color zone in the middle with shorter transitions at edges
+      const TRANSITION_RATIO = 0.25; // 25% transition zone on each side
+      for (const segment of segments) {
+        const segmentLength = segment.end - segment.start;
+        const transitionSize = segmentLength * TRANSITION_RATIO;
+
+        // For very short segments, just use the center
+        if (segmentLength < 0.01) {
+          const center = (segment.start + segment.end) / 2;
+          centeredStops.push({ offset: center, color: segment.color });
+        } else {
+          // Add stop at 25% after start
+          const stop1 = segment.start + transitionSize;
+          // Add stop at 25% before end  
+          const stop2 = segment.end - transitionSize;
+
+          centeredStops.push({ offset: stop1, color: segment.color });
+          // Only add second stop if it's different from first (segment is long enough)
+          if (stop2 > stop1 + 0.001) {
+            centeredStops.push({ offset: stop2, color: segment.color });
+          }
+        }
+      }
+
+      // Ensure we have stops at 0 and 1 for proper edge coverage
+      if (centeredStops.length > 0 && centeredStops[0].offset > 0) {
+        centeredStops.unshift({ offset: 0, color: centeredStops[0].color });
+      }
+      if (centeredStops.length > 0 && centeredStops[centeredStops.length - 1].offset < 1) {
+        centeredStops.push({ offset: 1, color: centeredStops[centeredStops.length - 1].color });
+      }
+
+      const stopsMarkup = centeredStops
         .map((stop) => `<stop offset="${(stop.offset * 100).toFixed(4)}%" stop-color="${stop.color}" />`)
         .join('');
-      return `<defs><linearGradient id="${gradientId}" gradientUnits="objectBoundingBox">${stopsMarkup}</linearGradient></defs>`;
+      // Force horizontal gradient with x1/y1/x2/y2 (left to right, no vertical component)
+      return `<defs><linearGradient id="${gradientId}" x1="0%" y1="50%" x2="100%" y2="50%" gradientUnits="objectBoundingBox">${stopsMarkup}</linearGradient></defs>`;
     })();
 
     const areaPaths = this.buildElevationAreaPaths(samples, yAxis, { min: xMin, max: xMax });
