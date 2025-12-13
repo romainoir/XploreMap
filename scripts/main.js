@@ -589,7 +589,7 @@ async function init() {
     bearing: DEFAULT_3D_ORIENTATION.bearing,
     style: versaStyle,
     maxZoom: 18,
-    maxPitch: 85,
+    maxPitch: 50,
     antialias: true,
     fadeDuration: TILE_FADE_DURATION
   });

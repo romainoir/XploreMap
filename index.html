@@ -3,7 +3,9 @@
 
 <head>
   <meta charset="utf-8" />
-  <title>Matterhorn — Base Switch + Base Opacity + S2 Cloudless + Relief + Hillshade + Contours</title>
+  <title>XploreMap</title>
+  <link rel="icon" type="image/png" href="./data/logos/Xplore.png" />
+  <link rel="apple-touch-icon" href="./data/logos/Xplore.png" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 
   <!-- MapLibre GL JS 5.9.0 -->
@@ -39,7 +41,7 @@
   <div class="ui">
     <div class="ui__row ui__row--directions">
       <button id="directionsToggle" class="btn directions-toggle" type="button" aria-controls="directionsControl">
-        <img class="directions-toggle__icon" src="./data/logos/BeWaK.png" alt="" aria-hidden="true" loading="lazy"
+        <img class="directions-toggle__icon" src="./data/icons_Xmap/route.svg" alt="" aria-hidden="true" loading="lazy"
           decoding="async" />
         <span class="sr-only">Plan your next adventure</span>
       </button>
@@ -49,6 +51,10 @@
   <div id="directionsDock" class="directions-dock" aria-hidden="true">
     <div class="directions-swipe-handle" aria-hidden="true">
       <span class="directions-swipe-handle__bar"></span>
+    </div>
+    <!-- Routing start tooltip - shown when dock opens with no waypoints -->
+    <div id="routingStartTooltip" class="routing-start-tooltip" aria-hidden="true">
+      <span class="routing-start-tooltip__text">Click on the map to begin routing</span>
     </div>
     <div id="directionsControl" class="directions-control" aria-live="polite" aria-hidden="true">
       <!-- Elevation chart (top - expandable) -->

@@ -14,8 +14,8 @@ body {
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', 'Monaco', monospace;
 
-  /* Glassmorphism - increased opacity for better contrast */
-  --glass-surface: linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.28));
+  /* Glassmorphism - very transparent for maximum map visibility */
+  --glass-surface: linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.05));
   --glass-surface-strong: linear-gradient(160deg, rgba(12, 24, 36, 0.85), rgba(12, 24, 36, 0.68));
   --glass-border: rgba(255, 255, 255, 0.28);
   --glass-border-strong: rgba(255, 255, 255, 0.38);
@@ -246,54 +246,44 @@ body {
 }
 
 .directions-toggle {
-  padding: 16px;
-  width: 92px;
-  height: 92px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
   border-radius: var(--glass-radius);
   gap: 0;
-  background: var(--glass-surface-strong);
-  border-color: var(--glass-border-strong);
-  box-shadow: var(--glass-shadow);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
   backdrop-filter: blur(var(--glass-blur));
-  transition: transform 0.2s ease, box-shadow 0.25s ease, background 0.25s ease, border-color 0.25s ease;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .directions-toggle:hover,
 .directions-toggle:focus-visible {
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.2), rgba(12, 24, 36, 0.78));
-  border-color: var(--glass-border-strong);
-  box-shadow: 0 28px 56px rgba(5, 10, 18, 0.54);
+  background: rgba(17, 34, 48, 0.08);
+  border-color: rgba(17, 34, 48, 0.28);
   outline: none;
 }
 
 .directions-toggle:focus-visible {
-  box-shadow: 0 0 0 4px rgba(114, 140, 108, 0.32), 0 28px 56px rgba(5, 12, 18, 0.5);
+  box-shadow: 0 0 0 3px rgba(58, 183, 198, 0.35), inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
 }
 
 .directions-toggle:active {
-  transform: translateY(2px) scale(0.98);
-  box-shadow: 0 16px 32px rgba(5, 12, 18, 0.42);
+  transform: translateY(1px) scale(0.98);
 }
 
 .directions-toggle__icon {
-  width: 60px;
-  height: auto;
+  width: 24px;
+  height: 24px;
   display: block;
-  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.45));
+  object-fit: contain;
 }
 
-@media (max-width: 600px) {
-  .directions-toggle {
-    width: 78px;
-    height: 78px;
-    padding: 12px;
-    border-radius: 18px;
-  }
-
-  .directions-toggle__icon {
-    width: 50px;
-  }
-}
 
 .ui .btn--icon img {
   filter: none;
@@ -632,13 +622,13 @@ body {
   width: 100%;
   max-width: min(1600px, calc(100vw - 24px));
   margin-inline: auto;
-  background: var(--glass-surface);
+  background: rgba(255, 255, 255, 0.05);
   border-radius: max(var(--glass-radius), 18px);
   padding: 14px 20px 18px;
-  border: 1px solid var(--glass-border);
-  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
   pointer-events: auto;
-  backdrop-filter: blur(calc(var(--glass-blur) * 0.85));
+  backdrop-filter: blur(6px);
   transform: scale(var(--ui-scale));
   transform-origin: bottom center;
   box-sizing: border-box;
@@ -672,6 +662,49 @@ body {
   border-radius: 999px;
   background: rgba(17, 34, 48, 0.16);
   box-shadow: inset 0 0 0 1px rgba(17, 34, 48, 0.08);
+}
+
+/* Routing start tooltip - shown when dock opens with no waypoints */
+.routing-start-tooltip {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.routing-start-tooltip[aria-hidden="false"] {
+  display: flex;
+}
+
+.routing-start-tooltip__text {
+  display: inline-block;
+  padding: 10px 20px;
+  background: linear-gradient(160deg, rgba(12, 24, 36, 0.85), rgba(12, 24, 36, 0.75));
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.95);
+  font: 500 13px/1.4 var(--font-ui);
+  letter-spacing: 0.02em;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  animation: routing-tooltip-pulse 2s ease-in-out infinite;
+}
+
+@keyframes routing-tooltip-pulse {
+
+  0%,
+  100% {
+    opacity: 0.95;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
 }
 
 .directions-header {
@@ -2129,7 +2162,8 @@ body {
 .elevation-marker__icon--svg svg *,
 .elevation-marker__icon--svg .icon {
   fill: var(--icon-fill) !important;
-  stroke: var(--icon-stroke) !important;
+  stroke: var(--icon-stroke, #ffffff) !important;
+  stroke-width: 6px;
 }
 
 /* Generic label base styles (for bivouacs if needed) */
@@ -2521,6 +2555,69 @@ body {
   width: 100%;
   height: 44px;
   font-size: 12px;
+}
+
+/* Waypoint right-click context menu */
+.waypoint-context-popup .maplibregl-popup-content {
+  background: rgba(12, 24, 36, 0.92);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.waypoint-context-popup .maplibregl-popup-close-button {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 18px;
+  padding: 4px 8px;
+}
+
+.waypoint-context-popup .maplibregl-popup-close-button:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.waypoint-context-popup .maplibregl-popup-tip {
+  border-top-color: rgba(12, 24, 36, 0.92);
+}
+
+.waypoint-context-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+}
+
+.waypoint-context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.95);
+  font: 500 13px/1.3 var(--font-ui);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-align: left;
+}
+
+.waypoint-context-menu__item:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.waypoint-context-menu__item svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.waypoint-context-menu__item--remove:hover {
+  background: rgba(214, 69, 69, 0.25);
+  color: #ff8a8a;
 }
 
 .imagery-panel__terrain {

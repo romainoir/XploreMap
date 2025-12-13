@@ -1,4 +1,4 @@
-import { ensurePoiIconImages, getPoiIconImageId, getPoiIconMetadata, getPoiIconSvgContent } from './scripts/xmap-poi-icons.js';
+import { ensurePoiIconImages, getPoiIconImageId, getPoiIconImageIdForDay, getPoiIconMetadata, getPoiIconSvgContent } from './scripts/xmap-poi-icons.js';
 import { OVERPASS_ENDPOINT as OVERPASS_INTERPRETER_ENDPOINT } from './scripts/overpass-network.js';
 
 const EMPTY_COLLECTION = {
@@ -40,7 +40,8 @@ const POI_CATEGORY_DISTANCE_OVERRIDES = Object.freeze({
   shelter: 200,
   water: 200,
   spring: 200,
-  drinking_water: 200
+  drinking_water: 200,
+  guidepost: 5  // Signposts should only show if very close to route
 });
 const POI_MAX_SEARCH_RADIUS_METERS = Math.max(
   POI_SEARCH_RADIUS_METERS,
@@ -2433,6 +2434,7 @@ export class DirectionsManager {
     };
     this.handleMapClick = (event) => this.onMapClick(event);
     this.handleWaypointDoubleClick = (event) => this.onWaypointDoubleClick(event);
+    this.handleWaypointContextMenu = (event) => this.onWaypointContextMenu(event);
     this.handleElevationPointerMove = (event) => this.onElevationPointerMove(event);
     this.handleElevationPointerLeave = () => this.onElevationPointerLeave();
     this.handleElevationContextMenu = (event) => this.onElevationContextMenu(event);
@@ -2615,13 +2617,15 @@ export class DirectionsManager {
     });
 
     // Add manual route line layer with dotted pattern on top
+    // Note: Using 'line-cap': 'butt' instead of 'round' to fix Safari rendering issue
+    // where dashed lines don't appear with 'round' cap
     this.map.addLayer({
       id: 'route-line-manual',
       type: 'line',
       source: 'route-manual-source',
       layout: {
         'line-join': 'round',
-        'line-cap': 'round'
+        'line-cap': 'butt'
       },
       paint: {
         // Use data-driven color from feature properties to match day/segment colors
@@ -2693,28 +2697,23 @@ export class DirectionsManager {
           'interpolate',
           ['linear'],
           ['zoom'],
-          8,
-          3,
-          12,
-          5,
-          16,
-          7
+          8, 6,
+          12, 9,
+          16, 12
         ],
         'circle-color': ['coalesce', ['get', 'color'], DEFAULT_POI_COLOR],
-        'circle-stroke-color': 'rgba(255, 255, 255, 0.9)',
+        'circle-stroke-color': 'rgba(255, 255, 255, 0.95)',
         'circle-stroke-width': [
           'interpolate',
           ['linear'],
           ['zoom'],
-          8,
-          ['case', ['boolean', ['get', 'hasIcon'], false], 0, 1],
-          12,
-          ['case', ['boolean', ['get', 'hasIcon'], false], 0, 1.2],
-          16,
-          ['case', ['boolean', ['get', 'hasIcon'], false], 0, 1.6]
+          8, 2,
+          12, 2.5,
+          16, 3
         ],
+        // Hide circles when icon is available
         'circle-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0, 0.95],
-        'circle-stroke-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0, 0.95]
+        'circle-stroke-opacity': ['case', ['boolean', ['get', 'hasIcon'], false], 0, 1]
       },
       filter: ['==', '$type', 'Point']
     });
@@ -2729,17 +2728,14 @@ export class DirectionsManager {
           'interpolate',
           ['linear'],
           ['zoom'],
-          8,
-          ['*', ['coalesce', ['get', 'iconDisplayScale'], 1], 0.35],
-          12,
-          ['*', ['coalesce', ['get', 'iconDisplayScale'], 1], 0.55],
-          16,
-          ['*', ['coalesce', ['get', 'iconDisplayScale'], 1], 0.75]
+          8, 0.56,
+          12, 0.84,
+          16, 1.12
         ],
         'icon-anchor': 'center',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
-        'icon-optional': true,
+        'icon-optional': false,
         visibility: 'none'
       },
       paint: {
@@ -2747,6 +2743,8 @@ export class DirectionsManager {
       },
       filter: ['==', '$type', 'Point']
     });
+
+
 
     this.map.addLayer({
       id: ROUTE_POI_LABEL_LAYER_ID,
@@ -2818,7 +2816,7 @@ export class DirectionsManager {
           'case',
           ['==', ['get', 'role'], 'start'], 0,
           ['==', ['get', 'role'], 'end'], 0,
-          4.5
+          3.6  // Via point size (0.6x of 6)
         ],
         'circle-color': [
           'case',
@@ -2835,17 +2833,13 @@ export class DirectionsManager {
         'circle-stroke-width': [
           'case',
           ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 0,
-          0
+          1.8  // White stroke for via points (0.6x of 3)
         ],
-        'circle-stroke-color': [
-          'case',
-          ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], '#ffffff',
-          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
-        ],
+        'circle-stroke-color': '#ffffff',  // White contour for all via points
         'circle-stroke-opacity': [
           'case',
           ['any', ['==', ['get', 'role'], 'start'], ['==', ['get', 'role'], 'end']], 0,
-          0.85
+          0.95
         ]
       },
       filter: ['==', '$type', 'Point']
@@ -2860,26 +2854,21 @@ export class DirectionsManager {
           'case',
           ['==', ['get', 'role'], 'start'], 0,
           ['==', ['get', 'role'], 'end'], 0,
-          10
+          7.8  // Hover size (1.3x of normal 6)
         ],
         'circle-color': [
           'case',
           ['==', ['get', 'role'], 'start'], '#2f8f3b',
           ['==', ['get', 'role'], 'end'], '#d64545',
-          '#fff'
+          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
         ],
         'circle-stroke-width': [
           'case',
           ['==', ['get', 'role'], 'start'], 0,
           ['==', ['get', 'role'], 'end'], 0,
-          4
+          2.4  // Hover stroke (0.6x of 4)
         ],
-        'circle-stroke-color': [
-          'case',
-          ['==', ['get', 'role'], 'start'], 'rgba(255, 255, 255, 0.95)',
-          ['==', ['get', 'role'], 'end'], 'rgba(255, 255, 255, 0.95)',
-          ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
-        ],
+        'circle-stroke-color': '#ffffff',  // White stroke for via points
         'circle-opacity': 0.95
       },
       filter: ['==', 'index', -1]
@@ -2899,10 +2888,15 @@ export class DirectionsManager {
     });
 
     // Layer for drag preview visualization (dashed lines)
+    // Note: Using 'line-cap': 'butt' instead of default 'round' to fix Safari rendering issue
+    // where dashed lines don't appear with 'round' cap
     this.map.addLayer({
       id: 'drag-preview-line',
       type: 'line',
       source: 'drag-preview-source',
+      layout: {
+        'line-cap': 'butt'
+      },
       paint: {
         'line-color': ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]],
         'line-width': 3,
@@ -3219,6 +3213,7 @@ export class DirectionsManager {
     this.map.on('mouseleave', this.handleMapMouseLeave);
     this.map.on('click', this.handleMapClick);
     this.map.on('dblclick', 'waypoints-hit-area', this.handleWaypointDoubleClick);
+    this.map.on('contextmenu', 'waypoints-hit-area', this.handleWaypointContextMenu);
     this.map.on('contextmenu', this.handleRouteContextMenu);
   }
 
@@ -4987,18 +4982,15 @@ export class DirectionsManager {
 
   setRoutePointsOfInterest(pois) {
     this.routePointsOfInterest = Array.isArray(pois) ? pois : [];
-    if (this.routePointsOfInterest.length) {
-      const iconKeys = Array.from(new Set(
-        this.routePointsOfInterest
-          .map((poi) => (typeof poi?.iconKey === 'string' ? poi.iconKey.trim() : ''))
-          .filter(Boolean)
-      ));
-      if (iconKeys.length) {
-        ensurePoiIconImages(this.map, iconKeys);
-      }
-    }
     this.updateRoutePoiData();
     this.updateRoutePoiLayerVisibility();
+    // Re-render route stats to show POIs in the "Points d'intérêt" section
+    // This is needed because POIs are loaded asynchronously after initial stats render
+    if (this.latestMetrics) {
+      // Clear the cache to force re-render with updated POI data
+      this._lastSummaryStatsKey = null;
+      this.renderRouteStatsSummary(this.latestMetrics);
+    }
   }
 
   updateRoutePoiData() {
@@ -5014,56 +5006,78 @@ export class DirectionsManager {
       source.setData(EMPTY_COLLECTION);
       return;
     }
+
+    // Collect all unique icon keys
     const iconKeys = new Set();
-    const features = pois
-      .map((poi) => {
-        if (!poi) {
-          return null;
-        }
-        const coords = Array.isArray(poi.coordinates) ? poi.coordinates : null;
-        if (!coords || coords.length < 2) {
-          return null;
-        }
-        const lng = Number(coords[0]);
-        const lat = Number(coords[1]);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-          return null;
-        }
-        const name = typeof poi.name === 'string' ? poi.name.trim() : '';
-        const title = typeof poi.title === 'string' ? poi.title : name;
-        const iconImageId = typeof poi.iconImageId === 'string' ? poi.iconImageId.trim() : '';
-        const iconDisplayScale = Number(poi.iconDisplayScale);
-        const hasIcon = Boolean(iconImageId);
-        const iconKey = typeof poi.iconKey === 'string' ? poi.iconKey.trim() : '';
-        if (hasIcon && iconKey) {
-          iconKeys.add(iconKey);
-        }
-        return {
-          type: 'Feature',
-          properties: {
-            id: poi.id ?? null,
-            title: title || '',
-            name,
-            categoryKey: poi.categoryKey ?? '',
-            color: typeof poi.color === 'string' && poi.color.trim() ? poi.color.trim() : DEFAULT_POI_COLOR,
-            showLabel: Boolean(poi.showLabel && name),
-            iconImageId: hasIcon ? iconImageId : '',
-            iconDisplayScale: hasIcon && Number.isFinite(iconDisplayScale) && iconDisplayScale > 0
-              ? iconDisplayScale
-              : 1,
-            hasIcon
-          },
-          geometry: {
-            type: 'Point',
-            coordinates: [lng, lat]
+    pois.forEach((poi) => {
+      const iconKey = typeof poi?.iconKey === 'string' ? poi.iconKey.trim() : '';
+      if (iconKey) {
+        iconKeys.add(iconKey);
+      }
+    });
+
+    // Build features - trust that icons are already loaded or will be soon
+    const buildFeatures = () => {
+      return pois
+        .map((poi) => {
+          if (!poi) {
+            return null;
           }
-        };
-      })
-      .filter(Boolean);
-    if (iconKeys.size) {
-      ensurePoiIconImages(this.map, Array.from(iconKeys));
-    }
+          const coords = Array.isArray(poi.coordinates) ? poi.coordinates : null;
+          if (!coords || coords.length < 2) {
+            return null;
+          }
+          const lng = Number(coords[0]);
+          const lat = Number(coords[1]);
+          if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+            return null;
+          }
+          const name = typeof poi.name === 'string' ? poi.name.trim() : '';
+          const title = typeof poi.title === 'string' ? poi.title : name;
+          const iconImageId = typeof poi.iconImageId === 'string' ? poi.iconImageId.trim() : '';
+          const iconDisplayScale = Number(poi.iconDisplayScale);
+
+          // Check if the image is registered
+          const hasIcon = Boolean(iconImageId && this.map.hasImage(iconImageId));
+
+          return {
+            type: 'Feature',
+            properties: {
+              id: poi.id ?? null,
+              title: title || '',
+              name,
+              categoryKey: poi.categoryKey ?? '',
+              color: typeof poi.color === 'string' && poi.color.trim() ? poi.color.trim() : DEFAULT_POI_COLOR,
+              showLabel: Boolean(poi.showLabel && name),
+              iconImageId: hasIcon ? iconImageId : '',
+              iconDisplayScale: hasIcon && Number.isFinite(iconDisplayScale) && iconDisplayScale > 0
+                ? iconDisplayScale
+                : 1,
+              hasIcon
+            },
+            geometry: {
+              type: 'Point',
+              coordinates: [lng, lat]
+            }
+          };
+        })
+        .filter(Boolean);
+    };
+
+    // Set data immediately (icons may show as circles if not yet loaded)
+    const features = buildFeatures();
     source.setData(features.length ? { type: 'FeatureCollection', features } : EMPTY_COLLECTION);
+
+    // If we have icon keys, load them in background and refresh when done
+    if (iconKeys.size) {
+      ensurePoiIconImages(this.map, Array.from(iconKeys)).then(() => {
+        // Re-build features now that icons are loaded
+        const updatedFeatures = buildFeatures();
+        source.setData(updatedFeatures.length ? { type: 'FeatureCollection', features: updatedFeatures } : EMPTY_COLLECTION);
+      }).catch((error) => {
+        console.warn('[POI Layer] Icon loading failed:', error);
+      });
+    }
   }
 
   updateRoutePoiLayerVisibility() {
@@ -5073,6 +5087,7 @@ export class DirectionsManager {
     const hasPois = Array.isArray(this.routePointsOfInterest) && this.routePointsOfInterest.length > 0;
     const shouldShow = this.profileMode === 'poi' && hasPois;
     const visibility = shouldShow ? 'visible' : 'none';
+
     [ROUTE_POI_LAYER_ID, ROUTE_POI_ICON_LAYER_ID, ROUTE_POI_LABEL_LAYER_ID].forEach((layerId) => {
       if (this.map.getLayer(layerId)) {
         try {
@@ -5082,6 +5097,48 @@ export class DirectionsManager {
         }
       }
     });
+  }
+
+  /**
+   * Update POI colors and icons to match current day segments.
+   * Called when bivouacs are added/removed/moved.
+   */
+  updatePoiDayColors() {
+    if (!Array.isArray(this.routePointsOfInterest) || !this.routePointsOfInterest.length) {
+      return;
+    }
+
+    const segments = Array.isArray(this.cutSegments) ? this.cutSegments : [];
+    const defaultColor = this.modeColors?.[this.currentMode] || '#f8b40b';
+
+    // Re-assign day colors and icon IDs
+    this.routePointsOfInterest.forEach((poi) => {
+      if (!poi || !Number.isFinite(poi.distanceKm)) return;
+
+      // Find which day segment this POI belongs to
+      let dayIndex = 0;
+      const segment = segments.find((seg, idx) => {
+        const start = Number(seg.startKm ?? seg.startDistanceKm ?? 0);
+        const end = Number(seg.endKm ?? seg.endDistanceKm ?? start);
+        if (poi.distanceKm >= start && poi.distanceKm <= end) {
+          dayIndex = idx; // Segment index directly maps to day color index
+          return true;
+        }
+        return false;
+      });
+
+      // Update color
+      poi.color = segment?.color || defaultColor;
+
+      // Update icon image ID
+      const iconKey = typeof poi.iconKey === 'string' ? poi.iconKey.trim() : '';
+      if (iconKey) {
+        poi.iconImageId = getPoiIconImageIdForDay(iconKey, dayIndex);
+      }
+    });
+
+    // Refresh the map layer data
+    this.updateRoutePoiData();
   }
 
   getCoordinateAtDistance(distanceKm) {
@@ -5923,6 +5980,9 @@ export class DirectionsManager {
     if (this.routeGeojson) {
       this.updateStats(this.routeGeojson);
     }
+
+    // Update POI icon colors to match new day segments
+    this.updatePoiDayColors();
   }
 
   getCutSegmentForDistance(distanceKm) {
@@ -6672,6 +6732,12 @@ export class DirectionsManager {
   }
 
   onRouteContextMenu(event) {
+    // Skip if waypoint context menu was already handled
+    if (this._waypointContextMenuHandled) {
+      this._waypointContextMenuHandled = false;
+      return;
+    }
+
     if (!event?.point || !Array.isArray(this.routeSegments) || !this.routeSegments.length) {
       return;
     }
@@ -6710,6 +6776,17 @@ export class DirectionsManager {
       this.directionsToggle.classList.toggle('active', visible);
     }
     this.updatePanelVisibilityState();
+
+    // Show/hide routing start tooltip based on visibility and waypoints
+    this.updateRoutingStartTooltip();
+  }
+
+  updateRoutingStartTooltip() {
+    const tooltip = document.getElementById('routingStartTooltip');
+    if (!tooltip) return;
+
+    const shouldShow = this.isPanelVisible() && (!Array.isArray(this.waypoints) || this.waypoints.length === 0);
+    tooltip.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
   }
 
   updatePanelVisibilityState() {
@@ -6888,15 +6965,30 @@ export class DirectionsManager {
     const feature = event.features?.[0];
     const type = feature?.properties?.type;
 
-    // Handle start/end markers (departure/arrival) - they should be draggable like waypoints
+    // Handle start/end markers (departure/arrival)
+    // Click on start marker creates a loop, drag moves the marker
     if (type === 'start' || type === 'end') {
       const waypointIndex = type === 'start' ? 0 : this.waypoints.length - 1;
       if (waypointIndex >= 0 && waypointIndex < this.waypoints.length) {
-        this.isDragging = true;
-        this.draggedWaypointIndex = waypointIndex;
-        this.setHoveredWaypointIndex(waypointIndex);
-        this.map.dragPan?.disable();
-        this.map.getCanvas().style.cursor = 'grabbing';
+        // Store pending info for click vs drag detection
+        this._pendingStartEndDrag = {
+          type,
+          waypointIndex,
+          startLngLat: event?.lngLat ? [event.lngLat.lng, event.lngLat.lat] : null,
+          startTime: Date.now()
+        };
+
+        // Set timeout to activate drag after short delay (200ms)
+        // If released before timeout, it's a click
+        this._startEndDragTimeout = setTimeout(() => {
+          if (this._pendingStartEndDrag) {
+            this.isDragging = true;
+            this.draggedWaypointIndex = this._pendingStartEndDrag.waypointIndex;
+            this.setHoveredWaypointIndex(this._pendingStartEndDrag.waypointIndex);
+            this.map.dragPan?.disable();
+            this.map.getCanvas().style.cursor = 'grabbing';
+          }
+        }, 200);
 
         event.preventDefault?.();
         event.originalEvent?.preventDefault?.();
@@ -6947,7 +7039,36 @@ export class DirectionsManager {
     event.originalEvent?.preventDefault?.();
   }
   onBivouacClick(event) {
-    // Cancel any pending drag - a click means we released before long press activated
+    // Cancel any pending start/end drag - a click means we released before drag activated
+    if (this._startEndDragTimeout) {
+      clearTimeout(this._startEndDragTimeout);
+      this._startEndDragTimeout = null;
+    }
+
+    // Handle click on start marker to create a loop
+    if (this._pendingStartEndDrag && !this.isDragging) {
+      const pendingInfo = this._pendingStartEndDrag;
+      this._pendingStartEndDrag = null;
+
+      // Click on start marker creates a loop (adds start point as destination)
+      if (pendingInfo.type === 'start' && this.waypoints.length >= 2) {
+        const startCoords = this.waypoints[0];
+        if (Array.isArray(startCoords) && startCoords.length >= 2) {
+          this.recordWaypointState();
+          // Add the start point coordinates as the new destination
+          const loopWaypoint = this.buildWaypointCoordinate([startCoords[0], startCoords[1]]) ?? [startCoords[0], startCoords[1]];
+          this.waypoints.push(loopWaypoint);
+          this.updateWaypoints();
+          this.getRoute();
+          return;
+        }
+      }
+      // Click on end marker doesn't do anything special (could be extended later)
+      return;
+    }
+    this._pendingStartEndDrag = null;
+
+    // Cancel any pending bivouac drag - a click means we released before long press activated
     if (this._bivouacDragTimeout) {
       clearTimeout(this._bivouacDragTimeout);
       this._bivouacDragTimeout = null;
@@ -7603,6 +7724,13 @@ export class DirectionsManager {
   }
 
   onMapMouseUp(event) {
+    // Clear any pending start/end drag that wasn't activated
+    if (this._startEndDragTimeout) {
+      clearTimeout(this._startEndDragTimeout);
+      this._startEndDragTimeout = null;
+    }
+    // Note: Don't clear _pendingStartEndDrag here - let onBivouacClick handle click detection
+
     if (!this.isDragging) return;
     const movedWaypoint = this.draggedWaypointIndex !== null;
     const movedWaypointIndex = this.draggedWaypointIndex;
@@ -7848,12 +7976,7 @@ export class DirectionsManager {
   resetDragWaypointColor() {
     if (!this.map.getLayer('waypoint-hover-drag')) return;
     try {
-      this.map.setPaintProperty('waypoint-hover-drag', 'circle-stroke-color', [
-        'case',
-        ['==', ['get', 'role'], 'start'], 'rgba(255, 255, 255, 0.95)',
-        ['==', ['get', 'role'], 'end'], 'rgba(255, 255, 255, 0.95)',
-        ['coalesce', ['get', 'color'], this.modeColors[this.currentMode]]
-      ]);
+      this.map.setPaintProperty('waypoint-hover-drag', 'circle-stroke-color', '#ffffff');
     } catch (error) {
       // Ignore errors
     }
@@ -7986,6 +8109,83 @@ export class DirectionsManager {
       this.updateStats(null);
       this.updateElevationProfile([]);
     }
+  }
+
+  /**
+   * Handle right-click on a via waypoint to show context menu with remove option
+   */
+  onWaypointContextMenu(event) {
+    if (!this.isPanelVisible()) return;
+
+    event.preventDefault();
+
+    const feature = event.features?.[0];
+    if (!feature) return;
+
+    const index = Number(feature.properties?.index);
+    const role = feature.properties?.role;
+
+    // Only show context menu for via points (not start or end)
+    if (!Number.isFinite(index) || role === 'start' || role === 'end') return;
+    if (index <= 0 || index >= this.waypoints.length - 1) return;
+
+    // Set flag to prevent route context menu from also showing
+    this._waypointContextMenuHandled = true;
+
+    // Close any existing waypoint popup
+    if (this.waypointContextPopup) {
+      this.waypointContextPopup.remove();
+      this.waypointContextPopup = null;
+    }
+
+    // Create popup content
+    const popupContent = document.createElement('div');
+    popupContent.className = 'waypoint-context-menu';
+    popupContent.innerHTML = `
+      <button type="button" class="waypoint-context-menu__item waypoint-context-menu__item--remove">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        <span>Remove waypoint</span>
+      </button>
+    `;
+
+    // Add click handler for remove button
+    const removeBtn = popupContent.querySelector('.waypoint-context-menu__item--remove');
+    removeBtn.addEventListener('click', () => {
+      this.waypointContextPopup?.remove();
+      this.waypointContextPopup = null;
+
+      // Remove the waypoint (same logic as double-click)
+      this.recordWaypointState();
+      const removalIndex = index;
+      const startLeg = Math.max(0, removalIndex - 1);
+      const endLeg = Math.min(this.waypoints.length - 2, removalIndex);
+      this.invalidateCachedLegSegments({ startIndex: startLeg, endIndex: endLeg });
+      this.waypoints.splice(removalIndex, 1);
+      this.shiftCachedLegSegments(removalIndex + 1, -1);
+      this.updateWaypoints();
+      if (this.waypoints.length >= 2) {
+        this.getRoute();
+      } else {
+        this.clearRoute();
+        this.updateStats(null);
+        this.updateElevationProfile([]);
+      }
+    });
+
+    // Create and show the popup
+    const coords = this.waypoints[index];
+    if (!coords || coords.length < 2) return;
+
+    this.waypointContextPopup = new maplibregl.Popup({
+      closeButton: true,
+      closeOnClick: true,
+      className: 'waypoint-context-popup',
+      anchor: 'bottom',
+      offset: [0, -10]
+    })
+      .setLngLat([coords[0], coords[1]])
+      .setDOMContent(popupContent)
+      .addTo(this.map);
   }
 
   setHoveredWaypointIndex(index) {
@@ -8170,6 +8370,9 @@ export class DirectionsManager {
     });
 
     this.updateSegmentMarkers();
+
+    // Hide the routing start tooltip once waypoints are placed
+    this.updateRoutingStartTooltip();
   }
 
   buildWaypointDisplayProperties(coords, index, total) {
@@ -10851,7 +11054,9 @@ export class DirectionsManager {
     const cutSegmentCount = hasMultipleDays ? this.cutSegments.length : 0;
 
     // Build a unique key from the display values to skip redundant re-renders
-    const summaryStatsKey = `summary|${distanceLabel}|${ascent}|${descent}|${timeLabel}|${cutSegmentCount}|${this.selectedDayIndex ?? 'all'}`;
+    // Include POI count to ensure re-render when POIs are loaded asynchronously
+    const poiCount = Array.isArray(this.routePointsOfInterest) ? this.routePointsOfInterest.length : 0;
+    const summaryStatsKey = `summary|${distanceLabel}|${ascent}|${descent}|${timeLabel}|${cutSegmentCount}|${this.selectedDayIndex ?? 'all'}|poi:${poiCount}`;
     if (this._lastSummaryStatsKey === summaryStatsKey && this.routeStats.getAttribute('data-mode') === 'summary') {
       // Skip re-render if already showing summary with same values
       return;
@@ -11605,18 +11810,21 @@ export class DirectionsManager {
     const fallbackColor = this.modeColors[this.currentMode];
     const gradientStops = [];
 
-    // Determine which segments to use for the gradient
-    // Profile segments take priority when in a gradient profile mode (slope, surface, category)
-    const useProfileSegments = isProfileGradientMode(this.profileMode)
+    // PRIORITY 1: Build BIDIRECTIONAL CENTERED gradients from profile segments
+    // Pure color is centered in each segment, with smooth transitions towards neighbors
+    const useProfileGradient = isProfileGradientMode(this.profileMode)
       && Array.isArray(this.profileSegments)
       && this.profileSegments.length > 0;
 
-    if (useProfileSegments) {
-      // Build segment info for gradient transitions
+    if (useProfileGradient) {
+      const totalDistanceKm = Number(this.routeProfile?.totalDistanceKm) || domainSpan;
+      const TRANSITION_RATIO = 0.25; // 25% transition zone on each side
+
+      // Build segment info with ratios relative to current domain
       const segmentInfos = this.profileSegments
         .map((segment) => {
           if (!segment) return null;
-          const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
+          const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : '';
           if (!segmentColor) return null;
           let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
           let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
@@ -11624,39 +11832,47 @@ export class DirectionsManager {
         })
         .filter(Boolean);
 
-      // Define transition zone size as a fraction of total distance (15% for very smooth gradient like map route)
-      const transitionSizeKm = Math.max(0.15, domainSpan * 0.15);
-
-      // Helper to add gradient stop
-      const addStop = (km, color) => {
-        const ratio = Math.max(0, Math.min(1, (km - domainMin) / domainSpan));
-        gradientStops.push({ offset: ratio, color });
-      };
+      // Helper to convert km to ratio within current domain
+      const kmToRatio = (km) => Math.max(0, Math.min(1, (km - domainMin) / domainSpan));
 
       segmentInfos.forEach((info, index) => {
         const { startKm, endKm, color } = info;
-        const nextInfo = segmentInfos[index + 1];
+        const segmentLength = endKm - startKm;
         const prevInfo = index > 0 ? segmentInfos[index - 1] : null;
+        const nextInfo = segmentInfos[index + 1];
 
-        // Start of segment
-        if (prevInfo && prevInfo.color !== color) {
-          // Transition from previous color to current
-          addStop(startKm, prevInfo.color);
-          addStop(startKm + transitionSizeKm, color);
-        } else {
-          addStop(startKm, color);
+        if (segmentLength <= 0) {
+          gradientStops.push({ offset: kmToRatio(startKm), color });
+          return;
         }
 
-        // End of segment
-        if (nextInfo && nextInfo.color !== color) {
-          // Prepare for transition to next color
-          addStop(endKm - transitionSizeKm, color);
+        const transitionSize = segmentLength * TRANSITION_RATIO;
+
+        // Calculate transition points
+        const transitionInEnd = startKm + transitionSize;
+        const transitionOutStart = endKm - transitionSize;
+
+        // Start of segment - blend from previous color
+        if (prevInfo && prevInfo.color !== color) {
+          gradientStops.push({ offset: kmToRatio(startKm), color: prevInfo.color });
+          if (transitionInEnd < transitionOutStart) {
+            gradientStops.push({ offset: kmToRatio(transitionInEnd), color });
+          }
         } else {
-          addStop(endKm, color);
+          gradientStops.push({ offset: kmToRatio(startKm), color });
+        }
+
+        // End of segment - blend towards next color
+        if (nextInfo && nextInfo.color !== color) {
+          if (transitionOutStart > transitionInEnd) {
+            gradientStops.push({ offset: kmToRatio(transitionOutStart), color });
+          }
+        } else {
+          gradientStops.push({ offset: kmToRatio(endKm), color });
         }
       });
     } else if (Array.isArray(this.cutSegments) && this.cutSegments.length > 1) {
-      // Add gradient stops for cut segments (day colors) with SHARP transitions at boundaries
+      // PRIORITY 2: Use day segment colors with SHARP transitions (for bivouac splits)
       const cutSegs = this.cutSegments;
       for (let i = 0; i < cutSegs.length; i += 1) {
         const segment = cutSegs[i];
@@ -11666,60 +11882,49 @@ export class DirectionsManager {
         let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
         let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
 
-        // Calculate ratios
+        // Calculate ratios relative to current domain
         const startRatio = Math.max(0, Math.min(1, (startKm - domainMin) / domainSpan));
         const endRatio = Math.max(0, Math.min(1, (endKm - domainMin) / domainSpan));
 
-        // Add start and end stops for this segment
+        // Add start stop
         gradientStops.push({ offset: startRatio, color: segmentColor });
 
-        // For sharp transition: add current color just before boundary, next color at boundary
+        // For sharp transition at boundary
         if (i < cutSegs.length - 1) {
           const nextSegment = cutSegs[i + 1];
           if (nextSegment) {
             const nextColor = typeof nextSegment.color === 'string' ? nextSegment.color.trim() : fallbackColor;
-            // Current segment color just before boundary (tiny offset before)
+            // Current color just before boundary
             gradientStops.push({ offset: Math.max(0, endRatio - 0.0001), color: segmentColor });
-            // Next segment color at boundary
+            // Next color at boundary
             gradientStops.push({ offset: endRatio, color: nextColor });
           }
         } else {
-          // Last segment - just add end stop
           gradientStops.push({ offset: endRatio, color: segmentColor });
         }
       }
     } else {
-      // Single segment - use its color or fallback
-      const gradientSegments = (() => {
-        if (Array.isArray(this.cutSegments) && this.cutSegments.length) {
-          return this.cutSegments;
-        }
-        return [];
-      })();
-
-      gradientSegments.forEach((segment) => {
-        if (!segment) return;
-        const segmentColor = typeof segment.color === 'string' ? segment.color.trim() : fallbackColor;
-        if (!segmentColor) return;
-
-        let startKm = Number(segment.startKm ?? segment.startDistanceKm ?? 0);
-        let endKm = Number(segment.endKm ?? segment.endDistanceKm ?? startKm);
-
-        const startRatio = Math.max(0, Math.min(1, (startKm - domainMin) / domainSpan));
-        const endRatio = Math.max(0, Math.min(1, (endKm - domainMin) / domainSpan));
-
-        gradientStops.push({ offset: startRatio, color: segmentColor });
-        gradientStops.push({ offset: endRatio, color: segmentColor });
-      });
+      // PRIORITY 3: Single segment - use base color
+      const baseColor = this.cutSegments?.[0]?.color ?? fallbackColor;
+      gradientStops.push({ offset: 0, color: baseColor });
+      gradientStops.push({ offset: 1, color: baseColor });
     }
 
     // Sort stops by offset
     gradientStops.sort((a, b) => a.offset - b.offset);
 
+    // Ensure we have stops at boundaries
+    if (gradientStops.length > 0 && gradientStops[0].offset > 0.001) {
+      gradientStops.unshift({ offset: 0, color: gradientStops[0].color });
+    }
+    if (gradientStops.length > 0 && gradientStops[gradientStops.length - 1].offset < 0.999) {
+      gradientStops.push({ offset: 1, color: gradientStops[gradientStops.length - 1].color });
+    }
+
     // Clear existing stops
     gradientEl.innerHTML = '';
 
-    // Add new stops
+    // Add new stops directly (no additional processing - use raw map gradient)
     if (gradientStops.length === 0) {
       const stopEl = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
       stopEl.setAttribute('offset', '0%');
@@ -12238,6 +12443,35 @@ export class DirectionsManager {
 
     markElevationProfileLabelLeaders(resolved, totalDistanceKm);
 
+    // Assign day segment colors and icon variants to POIs based on their distance
+    const segments = Array.isArray(this.cutSegments) ? this.cutSegments : [];
+    const defaultColor = this.modeColors?.[this.currentMode] || '#f8b40b';
+
+    resolved.forEach((poi) => {
+      if (!poi || !Number.isFinite(poi.distanceKm)) return;
+
+      // Find which day segment this POI belongs to
+      let dayIndex = 0; // Default to day 0 (single-day or first segment)
+      const segment = segments.find((seg, idx) => {
+        const start = Number(seg.startKm ?? seg.startDistanceKm ?? 0);
+        const end = Number(seg.endKm ?? seg.endDistanceKm ?? start);
+        if (poi.distanceKm >= start && poi.distanceKm <= end) {
+          dayIndex = idx; // Segment index directly maps to day color index
+          return true;
+        }
+        return false;
+      });
+
+      // Use segment color if found, otherwise use default route color
+      poi.color = segment?.color || defaultColor;
+
+      // Assign day-specific icon image ID for map rendering
+      const iconKey = typeof poi.iconKey === 'string' ? poi.iconKey.trim() : '';
+      if (iconKey) {
+        poi.iconImageId = getPoiIconImageIdForDay(iconKey, dayIndex);
+      }
+    });
+
     this.setRoutePointsOfInterest(resolved);
 
     if (Array.isArray(this.routeGeojson?.geometry?.coordinates)
@@ -12362,6 +12596,8 @@ export class DirectionsManager {
     };
 
     if (gradientEnabled) {
+      // Build BIDIRECTIONAL CENTERED gradients from profile segments
+      // Pure color is centered in each segment, with smooth transitions towards neighbors
       const gradientSegments = (() => {
         if (Array.isArray(this.profileSegments) && this.profileSegments.length) {
           return this.profileSegments;
@@ -12372,7 +12608,7 @@ export class DirectionsManager {
         return [];
       })();
 
-      // Build segment info for gradient transitions
+      // Build segment info with km ranges
       const segmentInfos = gradientSegments
         .map((segment) => {
           if (!segment) return null;
@@ -12388,28 +12624,51 @@ export class DirectionsManager {
         })
         .filter(Boolean);
 
-      // Define transition zone size as a fraction of total distance (15% for very smooth gradient like map route)
-      const transitionSizeKm = Math.max(0.15, (xMax - xMin) * 0.15); // 15% of total or min 150m
+      // Create BIDIRECTIONAL centered gradient:
+      // - Pure color is at the CENTER (50%) of each segment
+      // - Transition zone at the START (0-25%) blends from previous color
+      // - Transition zone at the END (75-100%) blends towards next color
+      const TRANSITION_RATIO = 0.25; // 25% transition zone on each side
 
       segmentInfos.forEach((info, index) => {
         const { startKm, endKm, color } = info;
-        const nextInfo = segmentInfos[index + 1];
+        const segmentLength = endKm - startKm;
         const prevInfo = index > 0 ? segmentInfos[index - 1] : null;
+        const nextInfo = segmentInfos[index + 1];
 
-        // Start of segment
+        if (segmentLength <= 0) {
+          addGradientStop(startKm, color);
+          return;
+        }
+
+        const transitionSize = segmentLength * TRANSITION_RATIO;
+
+        // Calculate transition points
+        const transitionInEnd = startKm + transitionSize; // End of transition from prev
+        const transitionOutStart = endKm - transitionSize; // Start of transition to next
+
+        // Start of segment - blend from previous color
         if (prevInfo && prevInfo.color !== color) {
-          // Transition from previous color to current
+          // Previous color ends at segment start
           addGradientStop(startKm, prevInfo.color);
-          addGradientStop(startKm + transitionSizeKm, color);
+          // Current color fully established after transition zone
+          if (transitionInEnd < transitionOutStart) {
+            addGradientStop(transitionInEnd, color);
+          }
         } else {
+          // No transition needed, start with current color
           addGradientStop(startKm, color);
         }
 
-        // End of segment
+        // End of segment - blend towards next color
         if (nextInfo && nextInfo.color !== color) {
-          // Prepare for transition to next color
-          addGradientStop(endKm - transitionSizeKm, color);
+          // Current color until transition zone starts
+          if (transitionOutStart > transitionInEnd) {
+            addGradientStop(transitionOutStart, color);
+          }
+          // Next color will be added at segment end by the next iteration
         } else {
+          // No transition needed, end with current color
           addGradientStop(endKm, color);
         }
       });
@@ -12574,61 +12833,16 @@ export class DirectionsManager {
         return '';
       }
 
-      // Create centered gradient: place color stops at 25% and 75% of each segment
-      // This creates a "plateau" of pure color in the middle with short transitions at edges
-      const centeredStops = [];
-
-      // Group consecutive stops by color to find segment boundaries
-      const segments = [];
-      let currentSegment = { color: sorted[0].color, start: sorted[0].offset, end: sorted[0].offset };
-
-      for (let i = 1; i < sorted.length; i++) {
-        const stop = sorted[i];
-        if (stop.color === currentSegment.color) {
-          // Same color, extend the segment
-          currentSegment.end = stop.offset;
-        } else {
-          // Different color, close current segment and start new one
-          segments.push(currentSegment);
-          currentSegment = { color: stop.color, start: stop.offset, end: stop.offset };
-        }
+      // Ensure we have stops at boundaries
+      if (sorted[0].offset > 0.001) {
+        sorted.unshift({ offset: 0, color: sorted[0].color });
       }
-      segments.push(currentSegment);
-
-      // For each segment, place stops at 25% and 75% of the segment length
-      // This creates a pure color zone in the middle with shorter transitions at edges
-      const TRANSITION_RATIO = 0.25; // 25% transition zone on each side
-      for (const segment of segments) {
-        const segmentLength = segment.end - segment.start;
-        const transitionSize = segmentLength * TRANSITION_RATIO;
-
-        // For very short segments, just use the center
-        if (segmentLength < 0.01) {
-          const center = (segment.start + segment.end) / 2;
-          centeredStops.push({ offset: center, color: segment.color });
-        } else {
-          // Add stop at 25% after start
-          const stop1 = segment.start + transitionSize;
-          // Add stop at 25% before end  
-          const stop2 = segment.end - transitionSize;
-
-          centeredStops.push({ offset: stop1, color: segment.color });
-          // Only add second stop if it's different from first (segment is long enough)
-          if (stop2 > stop1 + 0.001) {
-            centeredStops.push({ offset: stop2, color: segment.color });
-          }
-        }
+      if (sorted[sorted.length - 1].offset < 0.999) {
+        sorted.push({ offset: 1, color: sorted[sorted.length - 1].color });
       }
 
-      // Ensure we have stops at 0 and 1 for proper edge coverage
-      if (centeredStops.length > 0 && centeredStops[0].offset > 0) {
-        centeredStops.unshift({ offset: 0, color: centeredStops[0].color });
-      }
-      if (centeredStops.length > 0 && centeredStops[centeredStops.length - 1].offset < 1) {
-        centeredStops.push({ offset: 1, color: centeredStops[centeredStops.length - 1].color });
-      }
-
-      const stopsMarkup = centeredStops
+      // Use raw stops directly (no additional processing)
+      const stopsMarkup = sorted
         .map((stop) => `<stop offset="${(stop.offset * 100).toFixed(4)}%" stop-color="${stop.color}" />`)
         .join('');
       // Force horizontal gradient with x1/y1/x2/y2 (left to right, no vertical component)
@@ -12895,7 +13109,7 @@ export class DirectionsManager {
               // This is necessary because some SVGs have inline styles setting --icon-fill to a fixed color
               const cleanSvgContent = iconSvgContent.replace(/(<svg[^>]*?)\s*style="[^"]*"/i, '$1');
 
-              iconMarkup = `<div class="elevation-marker__icon elevation-marker__icon--svg" style="--icon-fill: ${fillColor}; --icon-stroke: #000000;" aria-hidden="true">${cleanSvgContent}</div>`;
+              iconMarkup = `<div class="elevation-marker__icon elevation-marker__icon--svg" style="--icon-fill: ${fillColor}; --icon-stroke: #ffffff;" aria-hidden="true">${cleanSvgContent}</div>`;
             } else if (hasIconImage) {
               iconMarkup = `<div class="elevation-marker__icon elevation-marker__icon--mask" style="-webkit-mask-image: url('${icon.url}'); mask-image: url('${icon.url}');" aria-hidden="true"></div>`;
             } else {
